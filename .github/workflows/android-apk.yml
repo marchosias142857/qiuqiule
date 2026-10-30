@@ -43,7 +43,7 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: Build release APK and check Android code
         working-directory: android
-        run: ./gradlew --no-daemon assembleRelease lintRelease assembleDebug assembleDebugAndroidTest
+        run: ./gradlew --no-daemon :app:assembleRelease :app:lintRelease :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Prepare unsigned APK for private local signing
         run: |
           mkdir -p build/apk

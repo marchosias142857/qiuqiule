@@ -26,6 +26,8 @@ async function verifyAssets(directory = 'dist', relative = '') {
   }
 }
 await verifyAssets();
+await mkdir(join(assets, 'licenses'), {recursive: true});
+await copyFile('node_modules/@capacitor/core/LICENSE', join(assets, 'licenses/Capacitor-MIT.txt'));
 
 const nativeConfigPath = join(root, 'assets/capacitor.config.json');
 const config = JSON.parse(await readFile(nativeConfigPath, 'utf8'));

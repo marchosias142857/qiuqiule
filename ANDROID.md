@@ -15,7 +15,7 @@ npm test
 npx cap add android
 node scripts/prepare-android.mjs
 cd android
-./gradlew assembleRelease lintRelease
+./gradlew :app:assembleRelease :app:lintRelease
 ```
 
 已存在 android 工程时，先 `npx cap sync android`，再执行准备脚本。
