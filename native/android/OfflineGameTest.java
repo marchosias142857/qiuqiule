@@ -1,14 +1,16 @@
 package com.qiuqiule.game;
 
 import static org.junit.Assert.*;
+import android.content.ContentValues;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
+import android.net.Uri;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import java.io.File;
-import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -40,8 +42,15 @@ public class OfflineGameTest {
     private void screenshot(String name) throws Exception {
         Bitmap bitmap = InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
         assertNotNull(bitmap);
-        File folder = InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null);
-        try (FileOutputStream output = new FileOutputStream(new File(folder, name + ".png"))) {
+        android.content.ContentResolver resolver = InstrumentationRegistry.getInstrumentation().getTargetContext().getContentResolver();
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Images.Media.DISPLAY_NAME, name + ".png");
+        values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/qiuqiule-qa");
+        Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+        assertNotNull(uri);
+        try (OutputStream output = resolver.openOutputStream(uri)) {
+            assertNotNull(output);
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output));
         }
         bitmap.recycle();

@@ -6,6 +6,6 @@ adb shell svc data disable
 test_status=0
 (cd android && ./gradlew --no-daemon :app:connectedDebugAndroidTest) || test_status=$?
 mkdir -p build/qa
-adb pull /sdcard/Android/data/com.qiuqiule.game/files/. build/qa/ || true
+adb pull /sdcard/Pictures/qiuqiule-qa/. build/qa/ || true
 adb logcat -d > build/qa/logcat.txt || true
 exit "$test_status"

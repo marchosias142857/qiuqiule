@@ -1,4 +1,4 @@
-import {readFile, writeFile, copyFile, mkdir, readdir} from 'node:fs/promises';
+import {readFile, writeFile, copyFile, mkdir, readdir, rm} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {join} from 'node:path';
 
@@ -47,6 +47,8 @@ gradle = gradle.replace(/versionCode (?:1|14001)\b/, 'versionCode 14001').replac
 await writeFile('android/app/build.gradle', gradle);
 
 await copyFile('native/android/MainActivity.java', join(root, 'java/com/qiuqiule/game/MainActivity.java'));
+// Capacitor's generated example asserts the template package ID, not this app's ID.
+await rm('android/app/src/androidTest/java/com/getcapacitor/myapp/ExampleInstrumentedTest.java', {force: true});
 await mkdir('android/app/src/androidTest/java/com/qiuqiule/game', {recursive: true});
 await copyFile('native/android/OfflineGameTest.java', 'android/app/src/androidTest/java/com/qiuqiule/game/OfflineGameTest.java');
 
