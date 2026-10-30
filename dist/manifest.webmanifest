@@ -1,0 +1,18 @@
+{
+  "id": "./",
+  "name": "球球了",
+  "short_name": "球球了",
+  "description": "拉出一点弹性，撞开所有可能。极简弹弓物理游戏。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f3eb",
+  "theme_color": "#f4f3eb",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {"src":"./icons/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"./icons/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}

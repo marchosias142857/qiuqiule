@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f3eb">
+  <meta name="description" content="球球了：按住、拉动、松手。一款有弹性的极简物理碰撞游戏。支持横竖屏与离线游玩。">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>球球了</title>
+  <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="preload" href="./fonts/fredoka-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="./vendor/phaser.min.js"></script>
+  <script type="module" src="./game.js"></script>
+  <script type="module" src="./offline.js"></script>
+</head>
+<body>
+  <div id="game" aria-label="球球了游戏场地"></div>
+  <div id="home" class="screen home">
+    <h1 class="home-title" aria-label="球球了">
+      <svg viewBox="0 0 296 100" aria-hidden="true">
+        <defs><g id="qiu-letter"><path d="M9 24H33M11 49H31M7 78L35 72M21 25V74M43 35H87M64 14V78Q64 90 51 82M44 49L51 56M41 78Q56 68 63 55M80 46L72 54M67 57Q75 71 88 78M80 17L84 21"/></g></defs>
+        <use href="#qiu-letter" transform="rotate(-4 48 50)"/>
+        <use href="#qiu-letter" transform="translate(103 0) rotate(3 48 50)"/>
+        <path d="M220 24H278Q274 37 251 48V77Q251 90 236 82"/>
+      </svg>
+    </h1>
+    <button id="home-sound" class="home-play" data-action="home-sound" aria-label="撞击红球静音"></button>
+    <button id="home-settings" class="home-play" data-action="home-settings" aria-label="撞击绿球打开设置"></button>
+    <button id="home-play" class="home-play" data-action="home-launch" aria-label="开始游戏：拖动屏幕，让黑球撞击播放球；也可按回车开始"></button>
+  </div>
+
+  <section id="hud" class="screen hud" hidden aria-label="游戏状态">
+    <div class="hud-top">
+      <strong id="score" aria-label="得分">0000</strong>
+      <button class="icon-button pause-button" data-action="pause" aria-label="暂停游戏"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg></button>
+    </div>
+    <div id="choice-labels"></div>
+  </section>
+
+  <div id="modal-layer" class="modal-layer" hidden>
+    <section id="pause-panel" class="panel pause-panel" hidden role="dialog" aria-modal="true" aria-label="暂停菜单">
+      <span id="pause-ball" class="ball-anchor" aria-hidden="true"></span>
+      <div class="pause-actions">
+        <button class="function-ball resume-ball" data-action="resume" data-icon="play" aria-label="继续游戏"></button>
+        <button class="function-ball settings-ball" data-action="settings" data-icon="settings" aria-label="调整设置"></button>
+        <button class="function-ball restart-ball" data-action="restart" data-icon="restart" aria-label="重新开始"></button>
+        <button class="function-ball home-ball" data-action="home" data-icon="home" aria-label="回到首页"></button>
+      </div>
+    </section>
+    <section id="settings-panel" class="panel settings-panel" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="panel-heading settings-heading"><span id="settings-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="settings-title">你的球，你的颜色。</h2><button class="close-button" data-action="close" aria-label="关闭设置">×</button></div>
+      <p>选一组喜欢的配色，或者自由搭配。</p>
+      <div class="palette-list" aria-label="配色方案">
+        <button class="palette active" data-palette="classic" aria-label="奶油汽水配色"><span><i style="background:#252720"></i><i style="background:#e88c72"></i><i style="background:#f4f3eb"></i></span><b>奶油汽水</b></button>
+        <button class="palette" data-palette="night" aria-label="夜间电台配色"><span><i style="background:#c9e88b"></i><i style="background:#b2a2dc"></i><i style="background:#22272b"></i></span><b>夜间电台</b></button>
+        <button class="palette" data-palette="pool" aria-label="泳池派对配色"><span><i style="background:#205c67"></i><i style="background:#eea752"></i><i style="background:#e7f2ee"></i></span><b>泳池派对</b></button>
+      </div>
+      <div class="color-row"><label for="player-color"><span class="color-dot player-dot"></span>我的小球</label><div><code id="player-hex">#252720</code><input id="player-color" type="color" value="#252720" aria-label="我方小球颜色"></div></div>
+      <div class="color-row"><label for="enemy-color"><span class="color-dot enemy-dot"></span>敌方小球</label><div><code id="enemy-hex">#E88C72</code><input id="enemy-color" type="color" value="#e88c72" aria-label="敌方小球颜色"></div></div>
+      <div class="color-row"><label for="bg-color"><span class="color-dot bg-dot"></span>屏幕背景</label><div><code id="bg-hex">#F4F3EB</code><input id="bg-color" type="color" value="#f4f3eb" aria-label="屏幕背景颜色"></div></div>
+      <div class="toggle-row"><span>游戏声音</span><button id="sound-toggle" class="toggle" data-action="sound" role="switch" aria-checked="true" aria-label="游戏声音"></button></div>
+      <div class="toggle-row"><span>轻触震动 <small>设备支持时生效</small></span><button id="haptic-toggle" class="toggle" data-action="haptic" role="switch" aria-checked="true" aria-label="轻触震动"></button></div>
+      <div class="volume-controls">
+        <div class="volume-row"><div><label for="bgm-volume">背景音乐</label><output id="bgm-value" for="bgm-volume">55%</output></div><input id="bgm-volume" type="range" min="0" max="100" step="1" value="55" aria-label="背景音乐音量"></div>
+        <div class="volume-row"><div><label for="sfx-volume">弹弹音效</label><output id="sfx-value" for="sfx-volume">75%</output></div><input id="sfx-volume" type="range" min="0" max="100" step="1" value="75" aria-label="音效音量"></div>
+      </div>
+      <button class="secondary-button gameplay-button" data-action="help">玩法与强化说明</button>
+      <button class="primary-button" data-action="close">就这样，好看！ <span>✓</span></button>
+    </section>
+    <section id="help-panel" class="panel help-panel" hidden role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <div class="panel-heading"><div><h2 id="help-title">三步，弹出点名堂。</h2></div><button class="close-button" data-action="close" aria-label="关闭玩法说明">×</button></div>
+      <p>首页向后拉、反向弹：撞播放球开始游戏；撞红色喇叭球切换静音并弹回；撞绿色齿轮球进入设置。未瞄准功能球或力度不足时，会留在原地回弹。暂停菜单的四颗球依次为继续、设置、重开和主页，点击即可。设置中可分别调节背景音乐和音效音量，拉到最左侧即可单独静音。</p>
+      <ol class="help-steps"><li><b>01</b><div><strong>慢下来，就能蓄力。</strong><p>小球速度降下来后，按住屏幕任意位置并拖动。拉得越长，力量越大，直到蓄满。速度过高时无法蓄力，稍等片刻即可。</p></div></li><li><b>02</b><div><strong>向后拉，向前弹。</strong><p>松手向拖动的反方向弹射。冲击越强，伤害越高；撞墙反弹，撞球互相弹开。</p></div></li><li><b>03</b><div><strong>清空全场，选个强化。</strong><p>得分与场上敌球分值之和达到目标后停止刷新。第一阶段目标为 140 分，之后逐步提高。全部击破后，小球自动就位；拉动并撞向两颗奖励球中的一颗，1 秒后进入新阶段。</p></div></li></ol>
+      <div class="buff-legend"><span><b>△</b> 密度</span><span><b>□</b> 能量</span><span><b>⬠</b> 特殊能力</span></div>
+      <div id="buff-guide" class="buff-guide"></div>
+      <p class="help-rule">场上敌球达到 <strong>18 颗</strong>，本局结束。开场 2 颗敌球，基础血量 19，血量和刷新速度随阶段与时间增长。</p>
+      <button class="primary-button" data-action="close">明白，开弹！</button>
+    </section>
+    <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-labelledby="over-title">
+      <span class="eyebrow">这一局，弹得不错</span><h2 id="over-title">有点挤了。</h2><p>场上挤满了 18 颗小球，下次再弹回来。</p>
+      <div class="result-score"><span>本次得分</span><strong id="final-score">0000</strong><small id="result-detail">到达第 1 阶段</small></div>
+      <button class="primary-button" data-action="restart">再弹一次 <span>↗</span></button><button class="secondary-button" data-action="home">回到首页</button>
+    </section>
+  </div>
+  <div id="ui-ball" hidden aria-hidden="true"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="50"/><g class="ui-eyes"><ellipse cx="41.5" cy="46.5" rx="2.625" ry="4.75"/><ellipse cx="58.5" cy="46.5" rx="2.625" ry="4.75"/></g></svg></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <noscript>请启用 JavaScript 来玩球球了。</noscript>
+</body>
+</html>
