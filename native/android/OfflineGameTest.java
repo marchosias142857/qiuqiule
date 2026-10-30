@@ -18,6 +18,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
+@androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+@android.annotation.TargetApi(29)
 public class OfflineGameTest {
     private String js(ActivityScenario<MainActivity> scenario, String expression) throws Exception {
         AtomicReference<String> result = new AtomicReference<>();
