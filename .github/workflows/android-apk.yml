@@ -37,7 +37,10 @@ jobs:
           node scripts/prepare-android.mjs
           git diff --exit-code -- dist
       - name: Install Android build tools
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        uses: android-actions/setup-android@v4.0.4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
       - name: Build release APK and check Android code
         working-directory: android
         run: ./gradlew --no-daemon assembleRelease lintRelease assembleDebug assembleDebugAndroidTest
