@@ -1,0 +1,84 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: ['codex/android-apk']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install and check web game
+        run: |
+          npm ci
+          npm run check
+          npm test
+      - name: Generate native Android project
+        run: |
+          npx cap add android
+          node scripts/prepare-android.mjs
+          git diff --exit-code -- dist
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build release APK and check Android code
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease lintRelease assembleDebug assembleDebugAndroidTest
+      - name: Prepare unsigned APK for private local signing
+        run: |
+          mkdir -p build/apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -P 16 -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk build/apk/qiuqiule-1.4.0-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 build/apk/qiuqiule-1.4.0-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" build/apk/apksigner.jar
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging build/apk/qiuqiule-1.4.0-unsigned.apk > build/apk/android-package-info.txt
+          sha256sum build/apk/* > build/apk/SHA256SUMS.txt
+      - name: Enable emulator hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test first launch offline, rotation, resources and menus
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash scripts/test-android-offline.sh
+      - name: Upload APK build
+        if: ${{ always() && hashFiles('build/apk/qiuqiule-1.4.0-unsigned.apk') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: qiuqiule-android-unsigned
+          path: build/apk/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qiuqiule-android-test-reports
+          path: |
+            android/app/build/reports/
+            android/app/build/outputs/androidTest-results/
+            build/qa/
+          retention-days: 14

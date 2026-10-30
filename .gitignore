@@ -1,0 +1,11 @@
+/node_modules
+/android/
+/ios/
+/build/
+/release/
+*.jks
+*.keystore
+*.p12
+*.apk
+*.idsig
+.DS_Store
