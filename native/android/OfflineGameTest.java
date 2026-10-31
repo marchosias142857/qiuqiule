@@ -66,7 +66,9 @@ public class OfflineGameTest {
             assertEquals("\"https://localhost\"", js(scenario, "location.origin"));
             assertTrue(js(scenario, "document.querySelector('.game-version').textContent").contains("2.2.5"));
             assertEquals("true", js(scenario, "document.getElementById('page-top-color') === null"));
-            assertEquals("true", js(scenario, "(() => { const r = document.getElementById('game').getBoundingClientRect(); return r.top === 0 && r.left === 0 && r.width === innerWidth && r.height === innerHeight; })()"));
+            // WebView reports integer innerWidth/Height but fractional DOMRects on non-integer densities.
+            awaitTrue(scenario, "(() => { const r = document.getElementById('game').getBoundingClientRect(); return r.top === 0 && r.left === 0 && Math.abs(r.width - innerWidth) < 1 && Math.abs(r.height - innerHeight) < 1; })()");
+            android.util.Log.i("QiuqiuleViewport", js(scenario, "JSON.stringify({width:innerWidth,height:innerHeight,game:document.getElementById('game').getBoundingClientRect(),canvas:document.querySelector('#game canvas').getBoundingClientRect()})"));
             js(scenario, "navigator.serviceWorker.getRegistrations().then(items => window.__nativeNoWebCache = items.length === 0)");
             awaitTrue(scenario, "window.__nativeNoWebCache === true");
             js(scenario, "Promise.all(['./fonts/fredoka-latin-500-normal.woff2','./audio/light-bounce.mp3','./vendor/phaser.min.js','./physics.js'].map(async url => { const response = await fetch(url); return response.ok && (await response.arrayBuffer()).byteLength > 100; })).then(results => window.__nativeAssetsOK = results.every(Boolean))");
