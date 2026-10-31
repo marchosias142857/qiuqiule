@@ -77,3 +77,25 @@
 @keyframes menu-fade{from{opacity:0}to{opacity:1}}
 @media(max-width:420px){#pause-panel{padding:28px 22px;gap:19px}.pause-actions{grid-template-columns:repeat(2,58px);gap:17px}.function-ball{width:58px;height:58px}#pause-ball{width:55px;height:55px}.settings-heading .ball-anchor{width:34px;height:34px}.settings-heading{gap:8px}}
 @media(max-height:520px) and (orientation:landscape){#pause-panel{padding:24px 34px}.pause-actions{gap:15px}.settings-heading h2{font-size:21px}}
+
+/* The three result balls share the same live transfer layer as other menus. */
+.modal-layer:has(#over-panel:not([hidden])){background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
+#over-panel{width:min(610px,calc(100vw - 40px));padding:35px 38px 38px;overflow:visible;background:transparent;border:0;box-shadow:none;animation:menu-fade .3s ease-out}
+#over-panel .result-score{text-align:center;gap:11px;padding:0 0 62px}
+#final-score{font-size:clamp(58px,12vw,86px)}
+.result-balls{display:grid;grid-template-columns:1fr auto;align-items:center;gap:42px;min-height:112px}
+#over-ball{width:72px;height:72px;justify-self:center;align-self:start;margin-top:10px}
+.result-actions{display:flex;gap:27px;align-items:flex-start}
+.result-actions>div{display:flex;flex-direction:column;align-items:center;gap:20px}
+.result-actions span{font-size:12px;color:var(--muted);letter-spacing:.04em;white-space:nowrap}
+.result-actions.arriving button{visibility:hidden}
+.result-actions.arriving span{opacity:0}
+.result-actions span{transition:opacity .3s}
+#result-shadow{position:fixed;top:0;left:0;z-index:30;background:var(--ink);border-radius:50%;pointer-events:none;will-change:transform,opacity,filter}
+#control-transfers{position:fixed;inset:0;z-index:39;pointer-events:none}
+.control-transfer{position:absolute;top:0;left:0;border-radius:50%;will-change:transform,width,height;display:grid;place-items:center}
+.control-transfer svg{width:100%;height:100%}
+.control-transfer svg+svg{position:absolute;inset:0}
+.game-version{text-align:center;font-size:10px!important;letter-spacing:.08em;margin:16px 0 0!important}
+@media(max-width:420px){#over-panel{padding:24px 6px}.result-balls{gap:17px}.result-actions{gap:18px}#over-ball{width:58px;height:58px;margin-top:4px}.result-actions span{font-size:11px}#over-panel .result-score{padding-bottom:60px}}
+@media(max-height:520px) and (orientation:landscape){#over-panel{padding:16px 35px 12px}#over-panel .result-score{padding-bottom:36px;gap:5px}#final-score{font-size:52px}.result-balls{min-height:96px}#over-ball{width:58px;height:58px;margin-top:10px}.result-actions>div{gap:12px}}

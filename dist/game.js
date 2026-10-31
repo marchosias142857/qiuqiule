@@ -2,7 +2,7 @@ import {World, BUFFS, clamp, ease} from './physics.js';
 import {displayMetrics, pointerPosition} from './display.js';
 import {HomeWorld} from './home.js';
 import {drawFunctionalBall,iconMarkup} from './icons.js';
-import {smooth,faceTarget,smoothFace,transferPose} from './motion.js';
+import {smooth,faceTarget,smoothFace,transferPose,resultBounce} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
 
 const $ = s => document.querySelector(s);
@@ -21,6 +21,7 @@ const sound = new GameAudio();
 let best = Number(storage.read('qiuqiule-best',0)) || 0;
 let scene, game, world, drag = null, screen = 'home', paused = false, modal = null;
 let transfer=null,uiAnchor=null,settingsOrigin='home',homeReveal=1,pauseOnArrival=false,releaseOverlay=0;
+let result=null,controlFlight=null;
 let viewport = displayMetrics(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
 let home = new HomeWorld(viewport.width, viewport.height);
 let lastScore = -1, lastPhase = '';
@@ -69,9 +70,10 @@ function unlockAudio(){sound.unlock();}
 function tone(...args){sound.tone(...args);}
 function vibrate(duration){if(settings.haptic&&navigator.vibrate)navigator.vibrate(duration);}
 function syncInputs(){
-  $('#modal-layer').inert=!!transfer;
-  $('#home').inert=!!modal||!!transfer||screen==='entering';
-  $('#hud').inert=!!modal||!!transfer||screen==='entering';
+  const moving=!!transfer||!!controlFlight;
+  $('#modal-layer').inert=moving;
+  $('#home').inert=!!modal||moving||screen==='entering';
+  $('#hud').inert=!!modal||moving||screen==='entering';
 }
 function showPanel(name){
   drag=null;modal=name;paused=screen==='play';
@@ -88,7 +90,7 @@ function anchorPose(anchor){
   const box=$('#'+anchor+'-ball').getBoundingClientRect();
   return {x:box.x+box.width/2,y:box.y+box.height/2,r:box.width/2};
 }
-function currentPlayerPose(){return uiAnchor?anchorPose(uiAnchor):screen==='home'?{...home.player}:{...world.player};}
+function currentPlayerPose(){return uiAnchor==='over'?resultBounce(anchorPose('over'),result?.bounceTime||0,reducedMotion):uiAnchor?anchorPose(uiAnchor):screen==='home'?{...home.player}:{...world.player};}
 function detached(){return !!transfer||!!uiAnchor||['pause','settings','help'].includes(modal);}
 function paintUiBall(p){
   const el=$('#ui-ball'),sq=p.squash||0;
@@ -101,6 +103,8 @@ function movePlayer(from,target,duration,done){
   paintUiBall(from);syncInputs();
 }
 function updateUiBall(dt){
+  $('#result-shadow').hidden=true;
+  if(result)result.clock+=dt;
   if(transfer){
     const move=transfer;move.elapsed+=dt;
     const progress=clamp(move.elapsed/move.duration,0,1),pose=transferPose(move.from,anchorPose(move.target),progress);
@@ -108,7 +112,7 @@ function updateUiBall(dt){
     paintUiBall(pose);$('#ui-ball').dataset.state='moving';
     if(move.revealHome)homeReveal=smooth(progress);
     if(progress===1){
-      transfer=null;uiAnchor=['pause','settings'].includes(move.target)?move.target:null;
+      transfer=null;uiAnchor=['pause','settings','over'].includes(move.target)?move.target:null;
       move.done?.();if(!uiAnchor&&!transfer)releaseOverlay=1;syncInputs();
       if(modal&&!transfer)$('#'+modal+'-panel').querySelector('button')?.focus({preventScroll:true});
     }
@@ -117,11 +121,66 @@ function updateUiBall(dt){
     $('#ui-ball').dataset.state=uiAnchor||'hidden';
     if(uiAnchor&&modal!=='help'){
       const pose=anchorPose(uiAnchor),panel=$('#'+uiAnchor+'-panel').getBoundingClientRect();
-      if(pose.y-pose.r>=panel.top&&pose.y+pose.r<=panel.bottom)paintUiBall(pose);else $('#ui-ball').hidden=true;
+      if(uiAnchor==='over'&&result){
+        result.bounceTime+=dt;
+        const bouncing=resultBounce(pose,result.bounceTime,reducedMotion);
+        paintUiBall(bouncing);
+        const shadow=$('#result-shadow');shadow.hidden=false;
+        shadow.style.width=pose.r*1.75+'px';shadow.style.height=pose.r*.25+'px';
+        shadow.style.transform=`translate3d(${pose.x-pose.r*.875}px,${bouncing.shadowY}px,0) scale(${bouncing.shadowScale},${bouncing.shadowScale})`;
+        shadow.style.opacity=bouncing.shadowOpacity;shadow.style.filter=`blur(${bouncing.shadowBlur}px)`;
+      }else if(pose.y-pose.r>=panel.top&&pose.y+pose.r<=panel.bottom)paintUiBall(pose);else $('#ui-ball').hidden=true;
     }
     else if(releaseOverlay>0)releaseOverlay--;
     else $('#ui-ball').hidden=true;
   }
+  updateControlFlight(dt);
+}
+
+function controlPose(id){
+  const box=$('#result-'+id).getBoundingClientRect();
+  return {x:box.x+box.width/2,y:box.y+box.height/2,r:box.width/2};
+}
+function mixColor(a,b,t){
+  const aa=hex(a),bb=hex(b),channel=shift=>Math.round(((aa>>shift)&255)*(1-t)+((bb>>shift)&255)*t);
+  return `rgb(${channel(16)},${channel(8)},${channel(0)})`;
+}
+function flyControls(items,duration,done){
+  $('#control-transfers').replaceChildren();
+  controlFlight={items:items.map(item=>{
+    const el=document.createElement('div');el.className='control-transfer';el.innerHTML=iconMarkup(item.icon)+(item.nextIcon?iconMarkup(item.nextIcon):'');
+    $('#control-transfers').append(el);return {...item,el};
+  }),elapsed:0,duration:reducedMotion?Math.min(.25,duration):duration,done};
+  updateControlFlight(0);syncInputs();
+}
+function updateControlFlight(dt){
+  if(!controlFlight)return;
+  const flight=controlFlight;flight.elapsed+=dt;
+  const progress=clamp(flight.elapsed/flight.duration,0,1),t=smooth(progress);
+  for(const item of flight.items){
+    const pose=transferPose(item.from,item.to(),progress),el=item.el;
+    el.style.width=el.style.height=pose.r*2+'px';
+    el.style.transform=`translate3d(${pose.x-pose.r}px,${pose.y-pose.r}px,0) scale(${1-pose.squash},${1+pose.squash*.7})`;
+    el.style.background=mixColor(item.fromColor,item.toColor,t);
+    el.firstElementChild.style.opacity=item.appear?t:1-t;
+    el.firstElementChild.style.transform=`rotate(${(1-t)*-.3}rad)`;
+    if(item.nextIcon)el.lastElementChild.style.opacity=t;
+  }
+  if(progress===1){controlFlight=null;flight.done?.();$('#control-transfers').replaceChildren();syncInputs();}
+}
+function openResult(){
+  const from={...world.player},sources=world.enemies.slice(0,2).map(b=>({...b,r:Math.max(1,b.r*ease(b.born))}));
+  result={clock:0,bounceTime:0,sourceIds:sources.map(b=>b.id)};
+  $('#hud').hidden=true;
+  showPanel('over');$('.result-actions').classList.add('arriving');
+  movePlayer(from,'over',.82);
+  flyControls(['restart','home'].map((id,i)=>({
+    from:sources[i]||from,to:()=>controlPose(id),icon:id,
+    fromColor:settings.enemy,toColor:i?'#91b8c7':'#e88c72',appear:true
+  })),.82,()=>$('.result-actions').classList.remove('arriving'));
+}
+function resultExitSources(){
+  return modal==='over'?['restart','home'].map((id,i)=>({from:controlPose(id),icon:id,fromColor:i?'#91b8c7':'#e88c72'})):null;
 }
 function openPause(){
   if(transfer||modal||screen!=='play'||!world||world.phase==='over')return;
@@ -155,6 +214,7 @@ function closePanel(){
   }
 }
 function prepareGame(){
+  result=null;
   world=new World(viewport.width,viewport.height);screen='play';drag=null;
   clearTimeout(toastTimer);$('#toast').classList.remove('show');
   scene.effects=[];scene.accumulator=0;lastScore=-1;lastPhase='';
@@ -165,17 +225,22 @@ function startGame(){
   hidePanel();uiAnchor=null;transfer=null;prepareGame();paused=false;syncInputs();tone(280,.12,'sine',.04,1.5);
 }
 function restartGame(){
-  if(transfer||!scene)return;
-  const from=currentPlayerPose();hidePanel();prepareGame();paused=true;
-  movePlayer(from,'arena',.48,finishArenaArrival);
+  if(transfer||controlFlight||!scene)return;
+  const from=currentPlayerPose(),controls=resultExitSources();hidePanel();prepareGame();paused=true;
+  movePlayer(from,'arena',.65,finishArenaArrival);
+  if(controls)flyControls(controls.map((c,i)=>({...c,to:()=>world.enemies[i],toColor:settings.enemy})),.65,()=>{
+    for(const b of world.enemies){b.born=1;b.solid=true;}
+  });
 }
 function showHome(){
-  if(transfer)return;
-  const from=currentPlayerPose();hidePanel();screen='home';drag=null;world=null;paused=false;
+  if(transfer||controlFlight)return;
+  const from=currentPlayerPose(),controls=resultExitSources();hidePanel();screen='home';drag=null;world=null;paused=false;result=null;
   home=new HomeWorld(viewport.width,viewport.height);homeReveal=0;
   $('#home').hidden=false;$('#home').style.opacity=0;$('#hud').hidden=true;$('#hud').style.opacity=1;
   layoutHomeControl();scene.effects=[];
-  movePlayer(from,'home',.55,()=>{homeReveal=1;});
+  movePlayer(from,'home',.65,()=>{homeReveal=1;});
+  if(controls)flyControls(controls.map((c,i)=>({...c,nextIcon:i?'settings':'play',to:()=>home.targets.find(t=>t.id===(i?'settings':'play')),
+    toColor:i?'#c4dc86':'#'+homePlayColor.toString(16).padStart(6,'0')})),.65);
 }
 function layoutHomeControl(){
   for(const c of home.targets){
@@ -259,7 +324,7 @@ function drawBall(g,b,color,alpha=1,pull=null){
 function bindInput(canvas){
   const position=e=>pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),viewport);
   canvas.addEventListener('pointerdown',e=>{
-    if(paused||modal||transfer||!e.isPrimary||e.button>0)return;
+    if(paused||modal||transfer||controlFlight||!e.isPrimary||e.button>0)return;
     const active=screen==='home'?home:screen==='play'?world:null;
     if(!active?.ready)return;
     unlockAudio();
@@ -294,6 +359,7 @@ function boot(){
         const next=displayMetrics(window.innerWidth,window.innerHeight,window.devicePixelRatio||1);
         const geometryChanged=next.width!==viewport.width||next.height!==viewport.height;
         if(transfer&&geometryChanged){transfer.from.x*=next.width/viewport.width;transfer.from.y*=next.height/viewport.height;transfer.from.r*=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);}
+        if(controlFlight&&geometryChanged)for(const item of controlFlight.items){item.from.x*=next.width/viewport.width;item.from.y*=next.height/viewport.height;item.from.r*=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);}
         viewport=next;
         this.scale.setZoom(1/viewport.scale);
         this.scale.resize(viewport.bufferWidth,viewport.bufferHeight);
@@ -331,6 +397,7 @@ function boot(){
           if(world.score>best){best=world.score;storage.write('qiuqiule-best',best);}
           tone(500+Math.random()*120,.13,'sine',.06,1.5);vibrate(15);
         }
+        if(e.type==='shatter')this.particles(e,hex(settings.enemy),5);
         if(e.type==='upgrade'){drag=null;tone(480,.25,'sine',.05,1.5);}
         if(e.type==='choiceReady')tone(660,.13,'sine',.035,1.2);
         if(e.type==='buff'){
@@ -340,7 +407,7 @@ function boot(){
         if(e.type==='over'){
           drag=null;best=Math.max(best,world.score);storage.write('qiuqiule-best',best);
           $('#final-score').textContent=pad(world.score);$('#result-detail').textContent=`到达第 ${world.stage} 阶段 · 个人最佳 ${best} 分`;
-          setPanel('over');tone(160,.4,'sine',.06,.4);vibrate([20,40,30]);
+          openResult();tone(160,.4,'sine',.06,.4);vibrate([20,40,30]);
         }
       }
     }
@@ -364,7 +431,10 @@ function boot(){
       const b=home.layout.others[2];
       drawBall(g,{...b,y:b.y+Math.sin(t*.85+b.seed)*base*.1,angle:t*.2,squash:Math.sin(t+b.seed)*.025},0xb4ced4,fade);
       const colors={play:homePlayColor,sound:hex(settings.enemy),settings:0xc4dc86};
-      for(const c of home.targets)drawFunctionalBall(g,c,colors[c.id],c.id,fade,c.id==='sound'&&!settings.sound);
+      for(const c of home.targets){
+        if(controlFlight&&['play','settings'].includes(c.id))continue;
+        drawFunctionalBall(g,c,colors[c.id],c.id,fade,c.id==='sound'&&!settings.sound);
+      }
       if(!detached())drawBall(g,home.player,hex(settings.player),1,drag||home.pull);
     }
     updateHome(dt){
@@ -396,7 +466,10 @@ function boot(){
       const g=this.g;this.drawBorder();
       const p=world.player;
       for(const b of world.enemies){
-        drawBall(g,b,hex(settings.enemy));
+        if(result?.sourceIds.includes(b.id)||(!result&&controlFlight))continue;
+        const alpha=result?1-smooth(result.clock/.65):1;
+        drawBall(g,b,hex(settings.enemy),alpha);
+        if(result)continue;
         if(b.hit>.01){g.fillStyle(isDark(settings.enemy)?0xffffff:0xf9f8f0,b.hit*.5);g.fillEllipse(b.x,b.y,b.r*1.7,b.r*1.7,128);}
       }
       for(const c of world.choices){
@@ -409,7 +482,7 @@ function boot(){
       if(!detached()){drawDragGuide(g,p);drawBall(g,p,hex(settings.player),1,drag);}
       for(const e of this.effects){
         const t=e.life/e.total;
-        polygon(g,e.x,e.y,e.r*(1-t*.3),e.sides,e.angle,e.color,1-t*t);
+        polygon(g,e.x,e.y,e.r*(1-t*.3),e.sides,e.angle,e.color,(1-t*t)*(result?1-smooth(result.clock/.65):1));
       }
     }
     update(_,delta){
@@ -431,7 +504,7 @@ function boot(){
 }
 
 document.addEventListener('click',e=>{
-  const button=e.target.closest('[data-action]');if(!button||transfer)return;
+  const button=e.target.closest('[data-action]');if(!button||transfer||controlFlight)return;
   unlockAudio();tone(680,.035,'sine',.02,1.15);
   const action=button.dataset.action;
   if(action.startsWith('home-')&&e.detail===0&&screen==='home'&&!modal)home.launchTo(action==='home-launch'?'play':action.slice(5));
@@ -456,7 +529,7 @@ for(const key of ['bgm','sfx']){
   if(key==='sfx')input.addEventListener('change',()=>tone(420,.12,'sine',.06,1.1));
 }
 document.addEventListener('keydown',e=>{
-  if(transfer){if(e.key==='Escape')e.preventDefault();return;}
+  if(transfer||controlFlight){if(e.key==='Escape')e.preventDefault();return;}
   if(e.key==='Escape'){
     if(modal&&modal!=='over')closePanel();else if(screen==='play'&&world.phase!=='over')setPanel('pause');
   }
