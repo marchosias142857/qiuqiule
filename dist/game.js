@@ -2,7 +2,7 @@ import {World, BUFFS, clamp, ease} from './physics.js';
 import {displayMetrics, pointerPosition} from './display.js';
 import {HomeWorld} from './home.js';
 import {drawFunctionalBall,iconMarkup} from './icons.js';
-import {smooth,faceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline} from './motion.js';
+import {smooth,faceTarget,smoothFace,transferPose,resultBounce} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
 
 const $ = s => document.querySelector(s);
@@ -22,7 +22,6 @@ let best = Number(storage.read('qiuqiule-best',0)) || 0;
 let scene, game, world, drag = null, screen = 'home', paused = false, modal = null;
 let transfer=null,uiAnchor=null,settingsOrigin='home',homeReveal=1,pauseOnArrival=false,releaseOverlay=0;
 let result=null,controlFlight=null,menuTransition=null;
-const strainedEyes=[-1,1].map(strainedEyeOutline);
 let viewport = displayMetrics(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
 let home = new HomeWorld(viewport.width, viewport.height);
 let lastScore = -1, lastPhase = '';
@@ -267,23 +266,24 @@ function closePanel(){
   }
 }
 function prepareGame(){
-  result=null;
-  world=new World(viewport.width,viewport.height);screen='play';cancelDrag();
+  // A new run owns no animation, particle, input or clock state from the old run.
+  cancelDrag();result=null;transfer=null;controlFlight=null;uiAnchor=null;
+  releaseOverlay=0;pauseOnArrival=false;
+  $('#control-transfers').replaceChildren();$('#ui-ball').hidden=true;$('#result-shadow').hidden=true;
+  $('.result-actions').classList.remove('arriving');
+  scene.g.clear();scene.effects=[];scene.accumulator=0;scene.clock=0;scene.hitSoundAt=0;
+  world=new World(viewport.width,viewport.height);screen='play';
   clearTimeout(toastTimer);$('#toast').classList.remove('show');
-  scene.effects=[];scene.accumulator=0;lastScore=-1;lastPhase='';
+  lastScore=-1;lastPhase='';
   $('#home').hidden=true;$('#home').style.opacity=1;$('#hud').hidden=false;$('#hud').style.opacity=1;
   $('.pause-button').disabled=false;updateHud();
 }
 function startGame(){
-  hidePanel();uiAnchor=null;transfer=null;prepareGame();paused=false;syncInputs();tone(280,.12,'sine',.04,1.5);
+  hidePanel();prepareGame();paused=false;syncInputs();tone(280,.12,'sine',.04,1.5);
 }
 function restartGame(){
   if(transfer||controlFlight||!scene)return;
-  const from=currentPlayerPose(),controls=resultExitSources();hidePanel();prepareGame();paused=true;
-  movePlayer(from,'arena',.65,finishArenaArrival);
-  if(controls)flyControls(controls.map((c,i)=>({...c,to:()=>world.enemies[i],toColor:settings.enemy})),.65,()=>{
-    for(const b of world.enemies){b.born=1;b.solid=true;}
-  });
+  startGame();finishArenaArrival();
 }
 function showHome(){
   if(transfer||controlFlight)return;
@@ -371,17 +371,9 @@ function drawBall(g,b,color,alpha=1,pull=null){
     g.fillStyle(face,alpha*.9);
     const roll=b.roll??(world?.phase==='transition'?Math.PI*2*ease(world.phaseTime/1.45):0);
     const rc=Math.cos(roll),rs=Math.sin(roll);
-    for(const [i,eye] of [-1,1].entries()){
+    for(const eye of [-1,1]){
       const ex=eye*r*.17+lookX,ey=-r*.07+lookY;
-      if(amount>.02){
-        g.beginPath();
-        strainedEyes[i].forEach((point,j)=>{
-          const x=ex+point.x*r,y=ey+point.y*r;
-          const px=b.x+x*rc-y*rs,py=b.y+x*rs+y*rc;
-          j?g.lineTo(px,py):g.moveTo(px,py);
-        });
-        g.closePath();g.fillPath();
-      }else g.fillEllipse(b.x+ex*rc-ey*rs,b.y+ex*rs+ey*rc,r*.105,r*.19,64);
+      g.fillEllipse(b.x+ex*rc-ey*rs,b.y+ex*rs+ey*rc,r*.105,r*.19,64);
     }
   }
 }
@@ -531,7 +523,7 @@ function boot(){
       const g=this.g;this.drawBorder();
       const p=world.player;
       for(const b of world.enemies){
-        if(result?.sourceIds.includes(b.id)||(!result&&controlFlight))continue;
+        if(result?.sourceIds.includes(b.id))continue;
         const alpha=result?1-smooth(result.clock/.65):1;
         drawBall(g,b,hex(settings.enemy),alpha);
         if(result)continue;

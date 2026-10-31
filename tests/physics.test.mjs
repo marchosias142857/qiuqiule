@@ -95,6 +95,23 @@ test('opening keeps the established initial density, population and launch feel'
   assert.equal(w.enemies[0].hp,19);near(w.spawnTimer,.45);near(w.baseSpeed,w.unit*40);
   advance(w,.46);assert.equal(w.enemies.length,3);assert.ok(w.spawnTimer>2.4&&w.spawnTimer<2.45);
 });
+test('fresh opening preserves the legacy spawn cadence and full birth protection',()=>{
+  const w=new World(390,844,()=>.5),initial=w.enemies.slice();
+  assert.ok(initial.every(b=>b.born===0&&!b.solid));
+  const spawnedAt=[0,0];w.events=[];
+  for(let frame=1;frame<=720;frame++){
+    w.step(1/120);
+    for(const e of w.events.splice(0))if(e.type==='spawn')spawnedAt.push(frame/120);
+    if(frame===48){assert.equal(w.enemies.length,2);assert.ok(initial.every(b=>!b.solid));}
+    if(frame===60){assert.equal(w.enemies.length,3);assert.ok(w.enemies.every(b=>!b.solid));}
+    if(frame===95)assert.ok(initial.every(b=>!b.solid));
+    if(frame===97){assert.ok(initial.every(b=>b.born===1&&b.solid));assert.equal(w.enemies[2].solid,false);}
+    if(frame===152)assert.ok(w.enemies.slice(0,3).every(b=>b.solid));
+  }
+  const legacy=[0,0,.45,2.90,5.35];
+  assert.equal(spawnedAt.length,legacy.length);
+  spawnedAt.forEach((t,i)=>near(t,legacy[i],1/120+.000001));
+});
 const growth=BUFFS.find(b=>b.id==='growth');
 function gainGrowth(w){w.phase='choose';w.choose(growth);w.phase='battle';}
 test('growth changes only collision/display radius, with absolute 1.2 and 1.4 scales',()=>{
