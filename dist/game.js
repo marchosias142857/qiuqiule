@@ -230,9 +230,6 @@ function openResult(){
   })),.82,()=>$('.result-actions').classList.remove('arriving'));
 }
 
-function resultExitSources(){
-  return modal==='over'?['restart','home'].map((id,i)=>({from:controlPose(id),icon:id,fromColor:i?'#91b8c7':'#e88c72'})):null;
-}
 function openPause(){
   if(transfer||modal||screen!=='play'||!world||world.phase==='over')return;
   const from={...world.player};paused=true;showPanel('pause');movePlayer(from,'pause',.42);
@@ -289,13 +286,12 @@ function restartGame(){
 }
 function showHome(){
   if(transfer||controlFlight)return;
-  const from=currentPlayerPose(),controls=resultExitSources();hidePanel();screen='home';cancelDrag();world=null;paused=false;result=null;
+  const from=currentPlayerPose();hidePanel();screen='home';cancelDrag();world=null;paused=false;result=null;
+  $('#control-transfers').replaceChildren();$('#result-shadow').hidden=true;
   home=new HomeWorld(viewport.width,viewport.height);homeReveal=0;
   $('#home').hidden=false;$('#home').style.opacity=0;$('#hud').hidden=true;$('#hud').style.opacity=1;
   layoutHomeControl();scene.effects=[];
   movePlayer(from,'home',.65,()=>{homeReveal=1;});
-  if(controls)flyControls(controls.map((c,i)=>({...c,nextIcon:i?'settings':'play',to:()=>home.targets.find(t=>t.id===(i?'settings':'play')),
-    toColor:i?'#c4dc86':'#'+homePlayColor.toString(16).padStart(6,'0')})),.65);
 }
 function layoutHomeControl(){
   for(const c of home.targets){

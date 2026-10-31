@@ -1,6 +1,6 @@
 const ROOT = new URL('./',self.location).href;
 const CACHE_PREFIX = 'qiuqiule-'+encodeURIComponent(new URL(ROOT).pathname)+'-';
-const CACHE = CACHE_PREFIX+'v2.2.3-github-offline-1';
+const CACHE = CACHE_PREFIX+'v2.2.4-github-offline-1';
 const urls = files => files.map(path => new URL(path,ROOT).href);
 const CORE = urls(['./','./index.html','./style.css','./game.js','./physics.js','./home.js','./icons.js','./motion.js','./audio.js','./offline.js','./display.js','./vendor/phaser.min.js']);
 const EXTRA = urls(['./fonts/fredoka-latin-500-normal.woff2','./manifest.webmanifest','./icon.svg','./icons/icon-192.png','./icons/icon-512.png','./audio/light-bounce.mp3']);
