@@ -25,3 +25,17 @@ test('result bounce preserves its ground anchor and changes squash and shadow wi
   assert.ok(landing.squash<0);near(resultBounce(anchor,1.45).y,ground.y);
   assert.deepEqual(resultBounce(anchor,4,true),resultBounce(anchor,0,true));
 });
+
+test('strained eyes mirror each other and stay within the normal eye footprint',async()=>{
+  const {strainedEyeOutline}=await import('../dist/motion.js');
+  const left=strainedEyeOutline(-1),right=strainedEyeOutline(1);
+  for(let i=0;i<left.length;i++){near(left[i].x,-right[i].x);near(left[i].y,right[i].y);}
+  const xs=left.map(p=>p.x),ys=left.map(p=>p.y);
+  const width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);
+  assert.ok(width>=.09&&width<=.125);assert.ok(height>=.15&&height<=.20);
+  assert.ok(Math.abs((Math.min(...xs)+Math.max(...xs))/2)<.01);
+  // Outer tips and all four tail corners are trimmed; the concave tip is rounded too.
+  for(const [x,y] of [[-.06,-.095],[.06,0],[-.06,.095],[-.06,.038],[.004,0],[-.06,-.038]]){
+    assert.ok(left.every(p=>Math.hypot(p.x-x,p.y-y)>1e-5));
+  }
+});

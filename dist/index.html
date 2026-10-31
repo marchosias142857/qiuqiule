@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f4f3eb">
   <meta name="description" content="球球了：按住、拉动、松手。一款有弹性的极简物理碰撞游戏。支持横竖屏与离线游玩。">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- Keep the installed iOS status bar opaque; do not opt into translucent chrome. -->
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>球球了</title>
   <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials">
@@ -53,7 +55,7 @@
     </section>
     <section id="settings-panel" class="panel settings-panel menu-panel" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="panel-heading settings-heading"><span id="settings-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="settings-title">你的球，你的颜色</h2><button class="close-button" data-action="close" aria-label="关闭设置">×</button></div>
-      <div class="menu-body">
+      <div class="menu-body"><div class="menu-content">
       <div class="palette-list" aria-label="配色方案">
         <button class="palette active" data-palette="classic" aria-label="奶油汽水配色"><span><i style="background:#252720"></i><i style="background:#e88c72"></i><i style="background:#f4f3eb"></i></span><b>奶油汽水</b></button>
         <button class="palette" data-palette="night" aria-label="夜间电台配色"><span><i style="background:#c9e88b"></i><i style="background:#b2a2dc"></i><i style="background:#22272b"></i></span><b>夜间电台</b></button>
@@ -69,17 +71,20 @@
         <div class="volume-row"><div><label for="sfx-volume">弹弹音效</label><output id="sfx-value" for="sfx-volume">75%</output></div><input id="sfx-volume" type="range" min="0" max="100" step="1" value="75" aria-label="音效音量"></div>
       </div>
       <button class="secondary-button gameplay-button" data-action="help">玩法介绍</button>
-      </div>
+      </div></div>
+    </section>
+    <section id="menu-transition-panel" class="panel menu-panel" hidden role="dialog" aria-modal="true" aria-label="切换菜单">
+      <div class="panel-heading settings-heading"><span id="menu-transition-ball" class="ball-anchor" aria-hidden="true"></span><span class="menu-title-space" aria-hidden="true"></span><button class="close-button" data-action="close" aria-label="返回设置">×</button></div>
     </section>
     <section id="help-panel" class="panel help-panel menu-panel" hidden role="dialog" aria-modal="true" aria-labelledby="help-title">
       <div class="panel-heading settings-heading"><span id="help-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="help-title">弹出点名堂</h2><button class="close-button" data-action="close" aria-label="关闭玩法介绍">×</button></div>
       <div class="menu-body">
       <p>首页向后拉、反向弹：撞播放球开始游戏；撞红色喇叭球切换静音并弹回；撞绿色齿轮球进入设置。未瞄准功能球或力度不足时，会留在原地回弹。暂停菜单的四颗球依次为继续、设置、重开和主页，点击即可。点击主页球会先结算本局，再从结算页返回主界面。设置中可分别调节背景音乐和音效音量，拉到最左侧即可单独静音。</p>
-      <ol class="help-steps"><li><b>01</b><div><strong>慢下来，就能蓄力。</strong><p>小球速度降下来后，按住屏幕任意位置并拖动。拉得越长，力量越大，直到蓄满。速度过高时无法蓄力，稍等片刻即可。</p></div></li><li><b>02</b><div><strong>向后拉，向前弹。</strong><p>松手向拖动的反方向弹射。冲击越强，伤害越高；撞墙反弹，撞球互相弹开。</p></div></li><li><b>03</b><div><strong>分数达标，选个强化。</strong><p>敌球持续刷新，实际得分达到阶段目标时，剩余敌球直接碎掉，不计额外分数。首阶段目标为 140 分，后续累计目标依次为 380、670、1010 分，逐阶段提高。小球自动就位后，拉动并撞向两颗奖励球中的一颗，1 秒后进入新阶段。</p></div></li></ol>
+      <ol class="help-steps"><li><b>01</b><div><strong>慢下来，就能蓄力。</strong><p>小球速度降下来后，按住屏幕任意位置并拖动。拉得越长，力量越大，直到蓄满。速度过高时无法蓄力，稍等片刻即可。第 6、11、16…阶段，可拖拽速度阈值各增加初始阈值的 50%。</p></div></li><li><b>02</b><div><strong>向后拉，向前弹。</strong><p>松手向拖动的反方向弹射，弹射速度会加上按下开始拖拽瞬间的速度；蓄力期间减速不会扣掉已记录的速度。冲击越强，伤害越高；撞墙反弹，撞球互相弹开。</p></div></li><li><b>03</b><div><strong>分数达标，选个强化。</strong><p>敌球持续刷新，实际得分达到阶段目标时，剩余敌球直接碎掉，不计额外分数。首阶段目标为 140 分，后续累计目标依次为 380、670、1010 分，逐阶段提高。小球自动就位后，拉动并撞向两颗奖励球中的一颗，1 秒后进入新阶段。</p></div></li></ol>
       <div class="buff-legend"><span><b>△</b> 密度</span><span><b>□</b> 能量</span><span><b>⬠</b> 特殊能力</span></div>
       <div id="buff-guide" class="buff-guide"></div>
       <p class="help-rule">场上敌球达到 <strong>18 颗</strong>，本局结束。开场 2 颗敌球，基础血量 19。敌球的血量、体型、密度和分值随阶段提高，刷新间隔逐渐缩短；局内经过的时间也会提高血量、密度和刷新速度，暂停时不计时。</p>
-      <p class="game-version">球球了 · 2.1.0</p>
+      <p class="game-version">球球了 · 2.2.0</p>
       </div>
     </section>
     <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-label="本局结算">

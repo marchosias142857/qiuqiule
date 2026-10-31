@@ -43,6 +43,7 @@ export class World {
     this.density = 1;
     this.energy = 1;
     this.bank = 0;
+    this.pullStartSpeed = null;
     this.player = this.makeBody(width * .5, height * .62, this.unit, PLAYER_BASE_DENSITY);
     this.player.isPlayer = true;
     this.player.hp = Infinity;
@@ -54,12 +55,21 @@ export class World {
     return {id: ++this.id, x, y, vx: 0, vy: 0, r, mass: density * (r / this.unit) ** 2,
       density, born: 0, solid: false, hp: 20, maxHp: 20, value: 10, hit: 0, squash: 0, angle: 0, spin: 0};
   }
-  get ready() { return this.phase === 'battle' || this.phase === 'choose' ? length(this.player) < this.unit * 8 : false; }
+  get readySpeed() { return this.unit * (8 + 4 * Math.floor(Math.max(0, this.stage - 1) / 5)); }
+  get maxPhysicsSpeed() { return this.unit * 60 + this.readySpeed; }
+  get ready() { return (this.phase === 'battle' || this.phase === 'choose') && (this.pullStartSpeed !== null || length(this.player) < this.readySpeed); }
+  beginPull() {
+    if (!this.ready || this.pullStartSpeed !== null) return false;
+    this.pullStartSpeed = length(this.player);
+    return true;
+  }
+  cancelPull() { this.pullStartSpeed = null; }
   get maxPull() { return clamp(Math.min(this.width, this.height) * .25, 90, 170); }
   get baseSpeed() { return this.unit * 40; }
   emit(type, data = {}) { this.events.push({type, ...data}); }
 
   resize(width, height) {
+    this.cancelPull();
     const rx = width / this.width, ry = height / this.height;
     this.width = width; this.height = height;
     const oldUnit = this.unit;
@@ -98,11 +108,14 @@ export class World {
   }
 
   shoot(dx, dy) {
-    if (!this.ready) return false;
+    const allowed = this.ready, carriedSpeed = this.pullStartSpeed ?? length(this.player);
+    this.cancelPull();
     const distance = Math.hypot(dx, dy);
-    if (distance < 6) return false;
+    if (!allowed || distance < 6) return false;
     const pull = clamp(distance / this.maxPull, 0, 1);
-    const speed = this.baseSpeed * pull * Math.sqrt(this.energy / this.density);
+    // The established launch cap applies before adding the captured speed.
+    const launchSpeed = Math.min(this.unit * 60, this.baseSpeed * pull * Math.sqrt(this.energy / this.density));
+    const speed = launchSpeed + carriedSpeed;
     this.player.vx = -dx / distance * speed;
     this.player.vy = -dy / distance * speed;
     this.player.angle = Math.atan2(dy, dx);
@@ -193,6 +206,7 @@ export class World {
 
   beginUpgrade() {
     if (this.phase !== 'battle') return;
+    this.cancelPull();
     this.phase = 'transition'; this.phaseTime = 0;
     for (const b of this.enemies) if (b.hp > 0) this.emit('shatter', {x:b.x, y:b.y, r:b.r * ease(b.born), vx:b.vx, vy:b.vy});
     this.enemies = [];
@@ -221,13 +235,26 @@ export class World {
     if (choice.id === 'growth') this.player.r = this.unit * (1 + this.buffs.growth * .2);
     if (choice.id === 'density') { this.density *= 1.35; this.player.density = PLAYER_BASE_DENSITY * this.density; this.player.mass = this.player.density; }
     if (choice.id === 'energy') this.energy *= 1.3;
+    this.cancelPull();
     this.phase = 'reward'; this.phaseTime = 0;
     this.emit('buff', {buff: choice, x: choice.x, y: choice.y, r: choice.r});
     this.choices = [];
   }
 
   step(dt, dragging = false) {
-    if (this.phase === 'over') return;
+    if (this.phase === 'over' || dt <= 0) return;
+    // Subdivide fast motion instead of throwing away the added speed.
+    // Each integration covers at most half a base radius at the sampled speed.
+    let remaining = dt;
+    while (remaining > 1e-10 && this.phase !== 'over') {
+      const speed = Math.min(this.maxPhysicsSpeed, Math.max(length(this.player), ...this.enemies.map(length)));
+      const h = Math.min(remaining, speed > 0 ? this.unit * .5 / speed : remaining);
+      this.advance(h, dragging);
+      remaining -= h;
+    }
+  }
+
+  advance(dt, dragging) {
     this.time += dt; this.phaseTime += dt;
     this.pulseCooldown -= dt;
     const p = this.player;
@@ -263,8 +290,8 @@ export class World {
       const drag = b.isPlayer ? (dragging ? 10 : .60) : 1.20;
       const friction = Math.exp(-drag * dt);
       b.vx *= friction; b.vy *= friction;
-      // A bounded speed keeps each 1/120 s step shorter than a ball radius.
-      const speed = length(b), cap = this.unit * 60;
+      // Include the full capture allowance; fast frames are subdivided by step().
+      const speed = length(b), cap = this.maxPhysicsSpeed;
       if (speed > cap) { b.vx *= cap / speed; b.vy *= cap / speed; }
       if (length(b) < 2) b.vx = b.vy = 0;
       b.x += b.vx * dt; b.y += b.vy * dt;
@@ -292,7 +319,7 @@ export class World {
       }
     }
     if (this.phase === 'battle' && this.enemies.length >= this.limit) {
-      this.phase = 'over'; this.emit('over');
+      this.cancelPull();this.phase = 'over'; this.emit('over');
     }
   }
 }

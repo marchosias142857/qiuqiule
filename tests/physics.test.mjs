@@ -203,3 +203,55 @@ test('bank restores 60 or 120 percent bonus after one or two walls',()=>{
   const hits=[0,1,2].map(bank=>{const w=world();w.bank=bank;Object.assign(w.player,{x:300,y:300,vx:900,vy:0});const b=enemy(w,350,300,{hp:10000});w.collide(w.player,b);return 10000-b.hp;});
   assert.ok(Math.abs(hits[1]-hits[0]*1.6)<=1.3);assert.ok(Math.abs(hits[2]-hits[0]*2.2)<=1.6);
 });
+
+test('capture threshold advances only at stages 6, 11, 16 and resets with a new run',()=>{
+  const w=world();
+  for(const [stage,multiple] of [[1,8],[5,8],[6,12],[10,12],[11,16],[15,16],[16,20]]){
+    w.stage=stage;near(w.readySpeed/w.unit,multiple);
+    w.player.vx=w.readySpeed-.001;assert.equal(w.ready,true);
+    w.player.vx=w.readySpeed;assert.equal(w.ready,false);
+  }
+  w.stage=5;w.phase='reward';w.phaseTime=.99;w.player.vx=0;w.step(.02);
+  assert.equal(w.stage,6);near(w.readySpeed/w.unit,12);
+  gainGrowth(w);near(w.readySpeed/w.unit,12);
+  near(world().readySpeed/world().unit,8);
+});
+test('release adds the captured scalar speed after drag braking and follows only the new aim',()=>{
+  const w=world();Object.assign(w.player,{vx:w.unit*3,vy:w.unit*4});
+  assert.equal(w.beginPull(),true);near(w.pullStartSpeed,w.unit*5);
+  for(let i=0;i<36;i++)w.step(1/120,true);
+  assert.ok(length(w.player)<w.unit*.3);
+  assert.equal(w.shoot(0,-w.maxPull),true);
+  near(w.player.vx,0);near(w.player.vy,w.baseSpeed+w.unit*5);assert.equal(w.pullStartSpeed,null);
+});
+test('cancel, tiny gestures, rotation and stage transitions cannot bank stale speed',()=>{
+  const w=world();w.player.vx=w.unit*5;assert.ok(w.beginPull());assert.equal(w.beginPull(),false);
+  w.cancelPull();w.player.vx=0;w.shoot(w.maxPull,0);near(length(w.player),w.baseSpeed);
+  w.player.vx=w.unit*4;w.beginPull();assert.equal(w.shoot(1,0),false);assert.equal(w.pullStartSpeed,null);
+  w.beginPull();w.resize(390,844);assert.equal(w.pullStartSpeed,null);
+  w.beginPull();w.beginUpgrade();assert.equal(w.pullStartSpeed,null);assert.equal(w.shoot(100,0),false);
+});
+test('an active pull keeps its original speed snapshot when a collision accelerates the ball',()=>{
+  const w=world();w.player.vx=w.unit*2;w.beginPull();w.player.vx=w.unit*20;
+  assert.equal(w.ready,true);w.shoot(-w.maxPull,0);near(length(w.player),w.baseSpeed+w.unit*2);
+});
+test('captured speed sits above the original launch cap and survives the next physics frame',()=>{
+  const w=new World(10000,10000,()=>.5);w.enemies=[];w.spawnTimer=999;w.stage=101;w.energy=100;
+  w.player.vx=w.unit*47;assert.ok(w.beginPull());w.player.vx=0;w.shoot(-w.maxPull,0);
+  const speed=w.unit*107;near(length(w.player),speed);w.step(1/120);
+  near(length(w.player),speed*Math.exp(-.6/120));assert.ok(length(w.player)>w.unit*60);
+});
+test('adaptive steps catch high-speed enemy and wall contacts on phone and desktop',()=>{
+  for(const [width,height] of [[390,844],[844,390],[1440,900]]){
+    const w=new World(width,height,()=>.5);w.enemies=[];w.spawnTimer=999;w.stage=101;w.energy=100;
+    Object.assign(w.player,{x:60,y:height/2,vx:w.unit*47,vy:0});w.beginPull();w.shoot(-w.maxPull,0);
+    const b=enemy(w,180,height/2,{hp:1e9,maxHp:1e9});w.step(.06);assert.ok(b.hp<1e9);
+    w.enemies=[];Object.assign(w.player,{x:width-w.inset-w.player.r-1,y:height/2,vx:w.unit*107,vy:0});w.step(.02);
+    assert.ok(w.player.vx<0);assert.ok(w.player.x<=width-w.inset-w.player.r);
+  }
+});
+test('subdivision preserves elapsed time and the partial breath slowdown',()=>{
+  const a=world(),b=world();a.stage=b.stage=101;a.breathTime=b.breathTime=.04;a.spawnTimer=b.spawnTimer=100;
+  b.player.vx=b.unit*107;a.step(.08);b.step(.08);
+  near(a.time,b.time);near(a.spawnTimer,99.94);near(a.spawnTimer,b.spawnTimer);near(b.breathTime,0);
+});

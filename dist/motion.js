@@ -26,3 +26,18 @@ export function resultBounce(anchor, seconds, reducedMotion = false) {
     shadowY:anchor.y+anchor.r*.94,shadowScale:1-.38*height,
     shadowOpacity:.19-.11*height,shadowBlur:2+4*height};
 }
+
+export function strainedEyeOutline(side) {
+  const vertices=[[-.06,-.095],[.06,0],[-.06,.095],[-.06,.038],[.004,0],[-.06,-.038]];
+  const points=[];
+  for(let i=0;i<vertices.length;i++){
+    const v=vertices[i],prev=vertices[(i+5)%6],next=vertices[(i+1)%6];
+    const a={x:lerp(v[0],prev[0],.24),y:lerp(v[1],prev[1],.24)};
+    const b={x:lerp(v[0],next[0],.24),y:lerp(v[1],next[1],.24)};
+    for(let j=0;j<=8;j++){
+      const t=j/8,u=1-t;
+      points.push({x:-side*(u*u*a.x+2*u*t*v[0]+t*t*b.x),y:u*u*a.y+2*u*t*v[1]+t*t*b.y});
+    }
+  }
+  return points;
+}
