@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
-// Run the real entry module with DOM/audio boundaries stubbed; Phaser never boots.
-const elements=new Map(),listeners=new Map();
+// Run the real entry module and scene with DOM/audio/Phaser boundaries stubbed.
+const elements=new Map(),listeners=new Map(),saved=new Map();
 function element(selector){
   if(elements.has(selector))return elements.get(selector);
   const classes=new Set();
   const e={hidden:false,inert:false,children:[],dataset:{},style:{setProperty(){},removeProperty(){}},
     classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle(x,on){on?classes.add(x):classes.delete(x);}},
-    setAttribute(){},addEventListener(){},focus(){},replaceChildren(...children){this.children=children;},
+    attributes:{},setAttribute(k,v){this.attributes[k]=v;},addEventListener(){},focus(){},replaceChildren(...children){this.children=children;},
     querySelector:child=>element(selector+' '+child),
     getBoundingClientRect(){
       const [x,y,width,height]=selector==='#over-ball'?[96,320,72,72]:selector==='#pause-ball'?[110,200,64,64]:[0,0,390,844];
@@ -18,6 +18,9 @@ function element(selector){
   elements.set(selector,e);return e;
 }
 globalThis.window={innerWidth:390,innerHeight:844,devicePixelRatio:2,addEventListener(){}};
+globalThis.localStorage={getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(k,v)};
+globalThis.Phaser={AUTO:0,Scale:{NONE:0},Scene:class{constructor(){this.cameras={main:{setBackgroundColor(){}}};}},Game:class{constructor(config){this.scene=new config.scene();}}};
+window.Phaser=globalThis.Phaser;
 globalThis.matchMedia=()=>({matches:false});
 globalThis.requestAnimationFrame=fn=>fn();
 globalThis.document={readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),
@@ -45,6 +48,20 @@ export function seedRestart(origin){
 export const advanceUi=updateUiBall;
 export const sourcePose=currentPlayerPose;
 export function readRestart(){return {world,scene,screen,modal,paused,result,transfer,controlFlight,uiAnchor,releaseOverlay,pauseOnArrival,drag};}
+export function seedRenderer(graphics,width=390,height=844,arena=false){
+  viewport=displayMetrics(width,height,1);home=new HomeWorld(width,height);
+  world=arena?new World(width,height):null;screen=arena?'play':'home';
+  modal=null;paused=false;transfer=null;controlFlight=null;uiAnchor=null;result=null;drag=null;releaseOverlay=0;pauseOnArrival=false;homeReveal=1;
+  settings.expressions=false;boot();scene=game.scene;scene.g=graphics;
+  return {home,world,scene};
+}
+export function enterFromHome(){
+  home.launchToPlay();while(home.phase==='flight')home.step(1/120);
+  screen='entering';home.phaseTime=1.4;home.player.lookX=.1;home.player.lookY=-.08;
+}
+export const bindCanvas=bindInput;
+export const readHome=()=>home;
+export const expressionEnabled=()=>settings.expressions;
 `;
 const app=await import('data:text/javascript;base64,'+Buffer.from(source+adapter).toString('base64'));
 
@@ -98,4 +115,78 @@ test('backgrounding during restart keeps the fresh world paused after arrival',(
     assert.equal(s.world.spawnTimer,.45);assert.ok(s.world.enemies.every(b=>b.born===0&&!b.solid));
     assert.equal(s.transfer.target,'pause');assert.equal(s.controlFlight,null);
   }finally{document.hidden=false;}
+});
+
+function graphicsRecorder(){
+  let points=[],color,alpha;
+  const g={shapes:[],clear(){this.shapes=[];},fillStyle(c,a=1){color=c;alpha=a;},beginPath(){points=[];},
+    moveTo(x,y){points.push({x,y});},lineTo(x,y){points.push({x,y});},
+    fillPath(){this.shapes.push({type:'path',color,alpha,points:[...points]});},
+    fillEllipse(x,y,width,height){this.shapes.push({type:'ellipse',color,alpha,x,y,width,height});}};
+  return new Proxy(g,{get:(target,key)=>key in target?target[key]:()=>{}});
+}
+const bodyShapes=g=>g.shapes.filter(s=>s.type==='path'&&s.color===0x252720&&s.alpha===1);
+const eyeShapes=g=>g.shapes.filter(s=>s.color===0xf4f3eb&&s.alpha===.9);
+function clickAction(action){for(const fn of listeners.get('click'))fn({target:{closest:()=>({dataset:{action}})},detail:1});}
+function inputCanvas(){
+  const handlers=new Map();
+  const canvas={addEventListener:(type,fn)=>handlers.set(type,fn),setPointerCapture(){},hasPointerCapture:()=>true,releasePointerCapture(){},
+    getBoundingClientRect:()=>({left:0,top:0,width:390,height:844})};
+  app.bindCanvas(canvas);
+  return (type,x=0,y=0)=>handlers.get(type)({pointerId:1,isPrimary:true,button:0,clientX:x,clientY:y,preventDefault(){}});
+}
+
+test('home arrival paints the arena player on the handoff frame without advancing spawns',()=>{
+  for(const [w,h] of [[390,844],[844,390],[1363,936]]){
+    const g=graphicsRecorder(),{scene}=app.seedRenderer(g,w,h);
+    app.enterFromHome();scene.update(0,10);
+    assert.equal(app.readRestart().screen,'entering');assert.equal(bodyShapes(g).length,1);
+    scene.update(0,50);
+    const s=app.readRestart(),p=s.world.player,body=bodyShapes(g);
+    assert.equal(s.screen,'play');assert.equal(body.length,1,'arrival must never leave an empty canvas frame');
+    near(Math.min(...body[0].points.map(v=>v.x)),p.x-p.r);
+    near(Math.max(...body[0].points.map(v=>v.x)),p.x+p.r);
+    assert.equal(eyeShapes(g).length,2);assert.ok(p.lookX>0&&p.lookY<0,'preserve the gaze across the handoff');
+    assert.equal(s.world.time,0);assert.equal(s.world.spawnTimer,.45);
+    assert.ok(s.world.enemies.every(b=>b.born===0&&!b.solid));
+    scene.update(0,1000/120);assert.equal(bodyShapes(g).length,1);
+    assert.ok(s.world.enemies.every(b=>b.born>0&&b.born<1&&!b.solid));
+  }
+});
+
+test('optional eyes persist through every home rebound frame and reset only at rest',()=>{
+  const g=graphicsRecorder(),{home,scene}=app.seedRenderer(g),pointer=inputCanvas();
+  pointer('pointerdown');pointer('pointermove',100,0);scene.update(0,1);
+  assert.ok(eyeShapes(g).every(e=>e.type==='ellipse'),'disabled by default');
+  clickAction('expressions');assert.equal(app.expressionEnabled(),true);
+  assert.equal(element('#expressions-toggle').attributes['aria-checked'],'true');
+  assert.equal(JSON.parse(saved.get('qiuqiule-settings')).expressions,true);
+  scene.update(0,1);assert.equal(eyeShapes(g).length,2);assert.ok(eyeShapes(g).every(e=>e.type==='path'));
+  pointer('pointerup',100,0);assert.equal(home.phase,'wobble');
+  scene.update(0,0);assert.ok(eyeShapes(g).every(e=>e.type==='path'),'keep expression at the first zero crossing');
+  for(let i=0;i<100;i++){
+    scene.update(0,1000/120);
+    assert.equal(eyeShapes(g).length,2);
+    assert.ok(eyeShapes(g).every(e=>e.type===(home.phase==='wobble'?'path':'ellipse')));
+  }
+  assert.equal(home.phase,'idle');
+  clickAction('expressions');assert.equal(JSON.parse(saved.get('qiuqiule-settings')).expressions,false);
+});
+
+test('successful home launches and arena shots restore normal eyes on release or cancellation',()=>{
+  for(const arena of [false,true])for(const release of ['pointerup','pointercancel','lostpointercapture']){
+    const g=graphicsRecorder(),{scene}=app.seedRenderer(g,390,844,arena),pointer=inputCanvas();
+    clickAction('expressions');pointer('pointerdown');pointer('pointermove',0,-150);scene.update(0,1);
+    assert.equal(eyeShapes(g).length,2);assert.ok(eyeShapes(g).every(e=>e.type==='path'));
+    pointer(release,0,-150);scene.update(0,0);
+    if(!arena&&release==='pointerup')assert.equal(app.readHome().phase,'flight');
+    assert.equal(eyeShapes(g).length,2);assert.ok(eyeShapes(g).every(e=>e.type==='ellipse'));
+  }
+});
+
+test('expression preference survives reloading the entry module',async()=>{
+  saved.set('qiuqiule-settings',JSON.stringify({expressions:true}));
+  const reloaded=await import('data:text/javascript;base64,'+Buffer.from(source+adapter+'\n// reload preference').toString('base64'));
+  assert.equal(reloaded.expressionEnabled(),true);
+  assert.equal(element('#expressions-toggle').attributes['aria-checked'],'true');
 });

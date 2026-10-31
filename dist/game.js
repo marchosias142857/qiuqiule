@@ -2,12 +2,12 @@ import {World, BUFFS, clamp, ease} from './physics.js';
 import {displayMetrics, pointerPosition} from './display.js';
 import {HomeWorld} from './home.js';
 import {drawFunctionalBall,iconMarkup} from './icons.js';
-import {smooth,faceTarget,smoothFace,transferPose,resultBounce} from './motion.js';
+import {smooth,faceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline,usesStrainedEyes} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const defaults = {player:'#252720', enemy:'#e88c72', bg:'#f4f3eb', sound:true, haptic:true, bgmVolume:.55, sfxVolume:.75};
+const defaults = {player:'#252720', enemy:'#e88c72', bg:'#f4f3eb', sound:true, haptic:true, expressions:false, bgmVolume:.55, sfxVolume:.75};
 const palettes = {classic:{player:'#252720',enemy:'#e88c72',bg:'#f4f3eb'},night:{player:'#c9e88b',enemy:'#b2a2dc',bg:'#22272b'},pool:{player:'#205c67',enemy:'#eea752',bg:'#e7f2ee'}};
 const hex = v => parseInt(v.slice(1), 16);
 const pad = v => String(Math.floor(v)).padStart(4,'0');
@@ -15,13 +15,14 @@ const storage = {read(key, fallback){try{return JSON.parse(localStorage.getItem(
 const saved = storage.read('qiuqiule-settings',{});
 const settings = {...defaults};
 for (const key of ['player','enemy','bg']) if (/^#[0-9a-f]{6}$/i.test(saved[key])) settings[key] = saved[key];
-for (const key of ['sound','haptic']) if (typeof saved[key] === 'boolean') settings[key] = saved[key];
+for (const key of ['sound','haptic','expressions']) if (typeof saved[key] === 'boolean') settings[key] = saved[key];
 for (const key of ['bgmVolume','sfxVolume']) settings[key] = audioLevel(saved[key],defaults[key]);
 const sound = new GameAudio();
 let best = Number(storage.read('qiuqiule-best',0)) || 0;
 let scene, game, world, drag = null, screen = 'home', paused = false, modal = null;
 let transfer=null,uiAnchor=null,settingsOrigin='home',homeReveal=1,pauseOnArrival=false,releaseOverlay=0;
 let result=null,controlFlight=null,menuTransition=null;
+const strainedEyes=[-1,1].map(strainedEyeOutline);
 let viewport = displayMetrics(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
 let home = new HomeWorld(viewport.width, viewport.height);
 let lastScore = -1, lastPhase = '';
@@ -47,6 +48,7 @@ function applyTheme() {
   $$('.palette').forEach(b=>b.classList.toggle('active',['player','enemy','bg'].every(k=>settings[k]===palettes[b.dataset.palette][k])));
   syncAudioSettings();
   $('#haptic-toggle').setAttribute('aria-checked',String(settings.haptic));
+  $('#expressions-toggle').setAttribute('aria-checked',String(settings.expressions));
   storage.write('qiuqiule-settings',settings);
   if (scene) scene.cameras.main.setBackgroundColor(settings.bg);
 }
@@ -369,9 +371,18 @@ function drawBall(g,b,color,alpha=1,pull=null){
     g.fillStyle(face,alpha*.9);
     const roll=b.roll??(world?.phase==='transition'?Math.PI*2*ease(world.phaseTime/1.45):0);
     const rc=Math.cos(roll),rs=Math.sin(roll);
-    for(const eye of [-1,1]){
+    const strained=usesStrainedEyes(settings.expressions,drag,screen==='home'?home.phase:null);
+    for(const [i,eye] of [-1,1].entries()){
       const ex=eye*r*.17+lookX,ey=-r*.07+lookY;
-      g.fillEllipse(b.x+ex*rc-ey*rs,b.y+ex*rs+ey*rc,r*.105,r*.19,64);
+      if(strained){
+        g.beginPath();
+        strainedEyes[i].forEach((point,j)=>{
+          const x=ex+point.x*r,y=ey+point.y*r;
+          const px=b.x+x*rc-y*rs,py=b.y+x*rs+y*rc;
+          j?g.lineTo(px,py):g.moveTo(px,py);
+        });
+        g.closePath();g.fillPath();
+      }else g.fillEllipse(b.x+ex*rc-ey*rs,b.y+ex*rs+ey*rc,r*.105,r*.19,64);
     }
   }
 }
@@ -511,11 +522,14 @@ function boot(){
         $('#home').style.opacity=home.fade;$('#hud').style.opacity=home.hudOpacity;
       }
       if(screen==='home')$('#home').style.opacity=homeReveal;
-      this.drawHome();
       if(home.phase==='done'){
+        const {lookX,lookY}=home.player;
         startGame();
+        Object.assign(world.player,{lookX,lookY});
         if(document.hidden||!document.hasFocus())setPanel('pause');
-      }
+        // prepareGame clears the graphics: paint the arena in this same frame.
+        this.drawArena();
+      }else this.drawHome();
     }
     drawArena(){
       const g=this.g;this.drawBorder();
@@ -578,6 +592,7 @@ document.addEventListener('click',e=>{
   if(action==='help')openHelp();
   if(action==='sound'){settings.sound=!settings.sound;applyTheme();}
   if(action==='haptic'){settings.haptic=!settings.haptic;applyTheme();vibrate(10);}
+  if(action==='expressions'){settings.expressions=!settings.expressions;applyTheme();}
 });
 $$('[data-palette]').forEach(button=>button.addEventListener('click',()=>{Object.assign(settings,palettes[button.dataset.palette]);applyTheme();}));
 for(const key of ['player','enemy','bg'])$('#'+key+'-color').addEventListener('input',e=>{settings[key]=e.target.value;applyTheme();});

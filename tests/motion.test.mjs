@@ -25,3 +25,37 @@ test('result bounce preserves its ground anchor and changes squash and shadow wi
   assert.ok(landing.squash<0);near(resultBounce(anchor,1.45).y,ground.y);
   assert.deepEqual(resultBounce(anchor,4,true),resultBounce(anchor,0,true));
 });
+
+test('strained eyes are moderately larger without shifting the eye centers',async()=>{
+  const {strainedEyeOutline}=await import('../dist/motion.js');
+  const left=strainedEyeOutline(-1),right=strainedEyeOutline(1);
+  assert.equal(left.length,right.length);
+  for(let i=0;i<left.length;i++){near(left[i].x,-right[i].x);near(left[i].y,right[i].y);}
+  const xs=left.map(p=>p.x),ys=left.map(p=>p.y);
+  const width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);
+  // Compare against the 2.2.0 footprint, rather than the spline's control points.
+  assert.ok(width/.1056>=1.2&&width/.1056<=1.35);
+  assert.ok(height/.17176>=1.2&&height/.17176<=1.35);
+  near((Math.min(...xs)+Math.max(...xs))/2,0);
+  near((Math.min(...ys)+Math.max(...ys))/2,0);
+});
+
+test('the entire strained-eye contour closes smoothly without cusps or crossings',async()=>{
+  const {strainedEyeOutline}=await import('../dist/motion.js');
+  const p=strainedEyeOutline(-1),n=p.length;
+  const cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+  for(let i=0;i<n;i++){
+    const a=p[(i+n-1)%n],b=p[i],c=p[(i+1)%n];
+    assert.ok(Number.isFinite(b.x)&&Number.isFinite(b.y));
+    const u={x:b.x-a.x,y:b.y-a.y},v={x:c.x-b.x,y:c.y-b.y};
+    assert.ok(Math.hypot(u.x,u.y)>1e-6);
+    // Includes the final-to-first join, every outer corner and the inner notch.
+    const turn=Math.abs(Math.atan2(u.x*v.y-u.y*v.x,u.x*v.x+u.y*v.y));
+    assert.ok(turn<Math.PI/36,`visible corner at sample ${i}: ${turn}`);
+    for(let j=i+2;j<n;j++){
+      if(i===0&&j===n-1)continue;
+      const d=p[j],e=p[(j+1)%n];
+      assert.ok(!(cross(b,c,d)*cross(b,c,e)<0&&cross(d,e,b)*cross(d,e,c)<0),`crossing at ${i},${j}`);
+    }
+  }
+});

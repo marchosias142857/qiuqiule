@@ -38,9 +38,9 @@
     <h1 class="home-title" aria-label="球球了">
       <svg viewBox="0 0 296 100" aria-hidden="true">
         <defs><g id="qiu-letter"><path d="M9 24H33M11 49H31M7 78L35 72M21 25V74M43 35H87M64 14V78Q64 90 51 82M44 49L51 56M41 78Q56 68 63 55M80 46L72 54M67 57Q75 71 88 78M80 17L84 21"/></g></defs>
-        <use href="#qiu-letter" transform="rotate(-4 48 50)"/>
-        <use href="#qiu-letter" transform="translate(103 0) rotate(3 48 50)"/>
-        <path d="M220 24H278Q274 37 251 48V77Q251 90 236 82"/>
+        <g class="title-letter"><use href="#qiu-letter" transform="rotate(-4 48 50)"/></g>
+        <g class="title-letter"><use href="#qiu-letter" transform="translate(103 0) rotate(3 48 50)"/></g>
+        <g class="title-letter"><path d="M220 24H278Q274 37 251 48V77Q251 90 236 82"/></g>
       </svg>
     </h1>
     <button id="home-sound" class="home-play" data-action="home-sound" aria-label="撞击红球静音"></button>
@@ -79,6 +79,7 @@
       <div class="color-row"><label for="bg-color"><span class="color-dot bg-dot"></span>屏幕背景</label><div><code id="bg-hex">#F4F3EB</code><input id="bg-color" type="color" value="#f4f3eb" aria-label="屏幕背景颜色"></div></div>
       <div class="toggle-row"><span>游戏声音</span><button id="sound-toggle" class="toggle" data-action="sound" role="switch" aria-checked="true" aria-label="游戏声音"></button></div>
       <div class="toggle-row"><span>轻触震动 <small>设备支持时生效</small></span><button id="haptic-toggle" class="toggle" data-action="haptic" role="switch" aria-checked="true" aria-label="轻触震动"></button></div>
+      <div class="toggle-row"><span>拖拽表情</span><button id="expressions-toggle" class="toggle" data-action="expressions" role="switch" aria-checked="false" aria-label="拖拽表情"></button></div>
       <div class="volume-controls">
         <div class="volume-row"><div><label for="bgm-volume">背景音乐</label><output id="bgm-value" for="bgm-volume">55%</output></div><input id="bgm-volume" type="range" min="0" max="100" step="1" value="55" aria-label="背景音乐音量"></div>
         <div class="volume-row"><div><label for="sfx-volume">弹弹音效</label><output id="sfx-value" for="sfx-volume">75%</output></div><input id="sfx-volume" type="range" min="0" max="100" step="1" value="75" aria-label="音效音量"></div>
@@ -92,12 +93,12 @@
     <section id="help-panel" class="panel help-panel menu-panel" hidden role="dialog" aria-modal="true" aria-labelledby="help-title">
       <div class="panel-heading settings-heading"><span id="help-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="help-title">弹出点名堂</h2><button class="close-button" data-action="close" aria-label="关闭玩法介绍">×</button></div>
       <div class="menu-body">
-      <p>首页向后拉、反向弹：撞播放球开始游戏；撞红色喇叭球切换静音并弹回；撞绿色齿轮球进入设置。未瞄准功能球或力度不足时，会留在原地回弹。暂停菜单的四颗球依次为继续、设置、重开和主页，点击即可。点击主页球会先结算本局，再从结算页返回主界面。设置中可分别调节背景音乐和音效音量，拉到最左侧即可单独静音。</p>
+      <p>首页向后拉、反向弹：撞播放球开始游戏；撞红色喇叭球切换静音并弹回；撞绿色齿轮球进入设置。未瞄准功能球或力度不足时，会留在原地回弹。暂停菜单的四颗球依次为继续、设置、重开和主页，点击即可。点击主页球会先结算本局，再从结算页返回主界面。设置中可分别调节背景音乐和音效音量，拉到最左侧即可单独静音。还可开启拖拽表情：主页原地回弹结束后恢复常态，其余情况松手立即恢复。</p>
       <ol class="help-steps"><li><b>01</b><div><strong>慢下来，就能蓄力。</strong><p>小球速度降下来后，按住屏幕任意位置并拖动。拉得越长，力量越大，直到蓄满。速度过高时无法蓄力，稍等片刻即可。第 6、11、16…阶段，可拖拽速度阈值各增加初始阈值的 50%。</p></div></li><li><b>02</b><div><strong>向后拉，向前弹。</strong><p>松手向拖动的反方向弹射，弹射速度会加上按下开始拖拽瞬间的速度；蓄力期间减速不会扣掉已记录的速度。冲击越强，伤害越高；撞墙反弹，撞球互相弹开。</p></div></li><li><b>03</b><div><strong>分数达标，选个强化。</strong><p>敌球持续刷新，实际得分达到阶段目标时，剩余敌球直接碎掉，不计额外分数。首阶段目标为 140 分，后续累计目标依次为 380、670、1010 分，逐阶段提高。小球自动就位后，拉动并撞向两颗奖励球中的一颗，1 秒后进入新阶段。</p></div></li></ol>
       <div class="buff-legend"><span><b>△</b> 密度</span><span><b>□</b> 能量</span><span><b>⬠</b> 特殊能力</span></div>
       <div id="buff-guide" class="buff-guide"></div>
       <p class="help-rule">场上敌球达到 <strong>18 颗</strong>，本局结束。开场 2 颗敌球，基础血量 19。敌球的血量、体型、密度和分值随阶段提高，刷新间隔逐渐缩短；局内经过的时间也会提高血量、密度和刷新速度，暂停时不计时。</p>
-      <p class="game-version">球球了 · 2.2.5</p>
+      <p class="game-version">球球了 · 2.2.6</p>
       </div>
     </section>
     <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-label="本局结算">

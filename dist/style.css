@@ -7,6 +7,11 @@
 .icon-button:hover{background:var(--accent)}
 .home-title{position:absolute;left:50%;top:22%;transform:translate(-50%,-50%);width:clamp(180px,52vw,310px);margin:0;pointer-events:none}
 .home-title svg{width:100%;height:auto;stroke:var(--ink);stroke-width:7.3;stroke-linecap:round;stroke-linejoin:round;fill:none;overflow:visible}
+.title-letter{transform-box:fill-box;transform-origin:center;animation:title-sway 4.8s ease-in-out infinite}
+.title-letter:nth-of-type(2){animation-delay:-1.6s}
+.title-letter:nth-of-type(3){animation-delay:-3.2s}
+@keyframes title-sway{0%,100%{transform:rotate(-6deg)}50%{transform:rotate(6deg)}}
+@media(prefers-reduced-motion:reduce){.title-letter{animation:none}}
 .home-play{position:absolute;pointer-events:none;border-radius:50%;padding:0;background:transparent}
 :root[data-input-mode=keyboard] .home-play:focus-visible{outline:2px dashed var(--ink);outline-offset:8px;transform:none}
 .eyebrow{font-size:11px;letter-spacing:2px;font-weight:600;display:flex;align-items:center;gap:9px;margin:0 0 25px}
@@ -101,7 +106,7 @@
 @media(max-height:520px) and (orientation:landscape){#over-panel{padding:16px 35px 12px}#over-panel .result-score{padding-bottom:36px;gap:5px}#final-score{font-size:52px}.result-balls{min-height:96px}#over-ball{width:58px;height:58px;margin-top:10px}.result-actions>div{gap:12px}}
 
 /* Both menus share a fixed banner; only the body scrolls. */
-#settings-panel,#help-panel,#menu-transition-panel{width:460px;max-width:calc(100vw - 40px);height:min(var(--menu-height,660px),calc(100dvh - 40px));display:flex;flex-direction:column;overflow:hidden;animation:none;opacity:1;background:var(--panel);padding-bottom:16px}
+#settings-panel,#help-panel,#menu-transition-panel{width:460px;max-width:calc(100vw - 40px);height:min(var(--menu-height,695px),calc(100dvh - 40px));display:flex;flex-direction:column;overflow:hidden;animation:none;opacity:1;background:var(--panel);padding-bottom:16px}
 .menu-panel .settings-heading{flex:0 0 auto;min-height:55px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--line)}
 .menu-panel .settings-heading h2{font-size:clamp(16px,4.5vw,22px);white-space:nowrap}
 .menu-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding:4px 6px 6px;margin:0 -6px}
