@@ -110,8 +110,11 @@
 .menu-content{display:flow-root}
 .menu-title-space{flex:1}
 #settings-panel.menu-measure{display:flex!important;position:fixed;top:0;left:20px;visibility:hidden;pointer-events:none}
-.menu-enter .menu-body,.menu-enter h2{animation:menu-content-in .16s ease-out}
-@keyframes menu-content-in{from{opacity:0}to{opacity:1}}
+/* The opaque blank panel stays underneath both fading content layers. */
+.modal-layer.menu-switching .menu-panel{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+.modal-layer.menu-switching .menu-panel:not(#menu-transition-panel){background:transparent;border-color:transparent;box-shadow:none;pointer-events:none;z-index:1}
+.menu-switching .menu-panel:not(#menu-transition-panel) .settings-heading{border-color:transparent}
+.menu-switching .menu-panel:not(#menu-transition-panel) .close-button{visibility:hidden}
 
 /* Give standalone WebKit an opaque page edge; the document itself never scrolls. */
 html{background:var(--bg)}

@@ -82,17 +82,32 @@ function fitMenuHeight(){
   $('#modal-layer').style.setProperty('--menu-height',Math.ceil(height)+'px');
   if(hidden)panel.classList.remove('menu-measure');
 }
+function resetMenuTransition(){
+  menuTransition=null;$('#modal-layer').classList.remove('menu-switching');
+  $$('.menu-panel').forEach(p=>{p.inert=false;p.style.removeProperty('opacity');});
+}
 function transitionMenu(target){
-  menuTransition={target,elapsed:0};
-  showPanel('menu-transition');uiAnchor='menu-transition';paintUiBall(anchorPose(uiAnchor));
+  const from=modal;
+  if(!['settings','help'].includes(from)||from===target)return;
+  if(reducedMotion){showPanel(target);uiAnchor=target;paintUiBall(anchorPose(target));return;}
+  showPanel('menu-transition');
+  menuTransition={from,target,elapsed:0};
+  $('#modal-layer').classList.add('menu-switching');
+  for(const name of [from,target]){
+    const panel=$('#'+name+'-panel');panel.inert=true;panel.style.opacity=name===from?'1':'0';
+  }
+  $('#'+from+'-panel').hidden=false;
+  uiAnchor='menu-transition';paintUiBall(anchorPose(uiAnchor));
 }
 function updateMenuTransition(dt){
   if(!menuTransition)return;
-  menuTransition.elapsed+=dt;
-  if(menuTransition.elapsed<.12)return;
-  const target=menuTransition.target;menuTransition=null;
-  showPanel(target);uiAnchor=target;paintUiBall(anchorPose(target));
-  $('#'+target+'-panel').classList.add('menu-enter');
+  const move=menuTransition;move.elapsed+=dt;
+  const duration=.12,oldPanel=$('#'+move.from+'-panel'),newPanel=$('#'+move.target+'-panel');
+  if(move.elapsed<duration){oldPanel.style.opacity=1-smooth(move.elapsed/duration);return;}
+  oldPanel.hidden=true;newPanel.hidden=false;
+  newPanel.style.opacity=smooth((move.elapsed-duration)/duration);
+  if(move.elapsed<duration*2)return;
+  const target=move.target;showPanel(target);uiAnchor=target;paintUiBall(anchorPose(target));
 }
 function syncInputs(){
   const moving=!!transfer||!!controlFlight;
@@ -101,14 +116,14 @@ function syncInputs(){
   $('#hud').inert=!!modal||moving||screen==='entering';
 }
 function showPanel(name){
-  cancelDrag();modal=name;paused=screen==='play';
+  resetMenuTransition();cancelDrag();modal=name;paused=screen==='play';
   $('#modal-layer').hidden=false;
-  $$('.panel').forEach(p=>{p.hidden=p.id!==name+'-panel';p.classList.remove('menu-enter');});
+  $$('.panel').forEach(p=>{p.hidden=p.id!==name+'-panel';});
   if(['settings','help','menu-transition'].includes(name))fitMenuHeight();
   syncInputs();
-  requestAnimationFrame(()=>{if(!transfer)$('#'+name+'-panel').querySelector('button')?.focus({preventScroll:true});});
+  requestAnimationFrame(()=>{if(modal===name&&!transfer)$('#'+name+'-panel').querySelector('button')?.focus({preventScroll:true});});
 }
-function hidePanel(){menuTransition=null;modal=null;$('#modal-layer').hidden=true;syncInputs();}
+function hidePanel(){resetMenuTransition();modal=null;$('#modal-layer').hidden=true;syncInputs();}
 function setPanel(name){if(name==='pause')openPause();else showPanel(name);}
 function anchorPose(anchor){
   if(anchor==='arena')return {...world.player};
