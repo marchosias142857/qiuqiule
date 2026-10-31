@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {World, BUFFS, length, stageTuning, BREATH_DURATION} from '../dist/physics.js';
+import {World, BUFFS, length, BREATH_DURATION} from '../dist/physics.js';
 
 function world(){const w=new World(900,700,()=>.5);w.enemies=[];w.spawnTimer=999;w.events=[];return w;}
 function enemy(w,x,y,options={}){const b=w.makeBody(x,y,w.unit,.8);Object.assign(b,{born:1,solid:true,hp:100,maxHp:100},options);w.enemies.push(b);return b;}
@@ -48,7 +48,7 @@ test('clear -> automated placement -> choice -> exactly one buff -> next stage',
   advance(w,1.9);assert.equal(w.phase,'choose');near(w.player.x,w.width*.5);near(w.player.y,w.height*.72);assert.ok(w.choices.every(c=>c.born===1));
   const choice=w.choices[0];Object.assign(w.player,{x:choice.x,y:choice.y,vx:100,vy:0});w.step(1/120);
   assert.equal(w.phase,'reward');assert.equal(w.buffs.density,1);assert.equal(w.choices.length,0);assert.ok(w.player.vx>95);
-  advance(w,.9);assert.equal(w.phase,'reward');advance(w,.12);assert.equal(w.phase,'battle');assert.equal(w.stage,2);assert.equal(w.target,290);
+  advance(w,.9);assert.equal(w.phase,'reward');advance(w,.12);assert.equal(w.phase,'battle');assert.equal(w.stage,2);assert.equal(w.target,380);
 });
 test('reaching the population threshold ends the game',()=>{
   const w=world();w.target=9999;for(let i=0;i<18;i++)enemy(w,80+i%6*120,150+Math.floor(i/6)*130);w.step(1/120);assert.equal(w.phase,'over');assert.ok(w.events.some(e=>e.type==='over'));
@@ -68,8 +68,8 @@ test('bank charges on walls and is consumed by the next collision',()=>{
 test('rotation keeps all bodies inside the resized playable bounds',()=>{
   const w=world();enemy(w,850,650);w.resize(390,844);for(const b of [w.player,...w.enemies]){assert.ok(b.x>=b.r+w.inset&&b.x<=390-b.r-w.inset);assert.ok(b.y>=b.r+w.inset&&b.y<=844-b.r-w.inset);}
 });
-test('later stages increase health, while density and size do not compound it',()=>{
-  const w=world();w.spawnEnemy();const a=w.enemies[0];w.enemies=[];w.stage=8;w.time=180;w.spawnEnemy();const b=w.enemies[0];assert.ok(b.hp>a.hp);near(b.density,a.density);near(b.r,a.r);
+test('later stages restore the original health, density, size and score progression',()=>{
+  const w=world();w.spawnEnemy();const a=w.enemies[0];w.enemies=[];w.stage=8;w.time=180;w.spawnEnemy();const b=w.enemies[0];assert.equal(b.hp,69);near(b.density,1.496);near(b.r/a.r,(.89+7*.014)/.89);assert.equal(b.value,20);assert.ok(b.hp>a.hp);
 });
 
 test('player can re-aim while moving at speeds previously locked out',()=>{
@@ -146,7 +146,7 @@ test('the winning hit takes priority over a full board, and pulse cannot score c
 test('overshooting the score target never leaks into a free next-stage upgrade',()=>{
   const w=world();w.score=135;const b=enemy(w,600,300,{hp:1,value:20});w.damage(b,2);assert.equal(w.score,155);
   advance(w,1.9);w.choose(w.choices[0]);advance(w,1.02);
-  assert.equal(w.stage,2);assert.equal(w.target,305);assert.equal(w.phase,'battle');
+  assert.equal(w.stage,2);assert.equal(w.target,380);assert.equal(w.phase,'battle');
 });
 test('breath halves timer progress, still allows spawns, and expires after exactly two battle seconds',()=>{
   const w=world();w.buffs.breath=1;const b=enemy(w,600,300,{hp:1});w.damage(b,2);w.spawnTimer=.25;
@@ -159,35 +159,30 @@ test('consecutive kills refresh breath to two seconds without stacking the reduc
   w.damage(enemy(w,600,300,{hp:1}),2);near(w.breathTime,2);w.spawnTimer=100;advance(w,1);near(w.spawnTimer,99.5);
   w.score=w.target-10;w.damage(enemy(w,600,300,{hp:1}),2);near(w.breathTime,0);
 });
-test('time spent playing or selecting upgrades does not secretly increase stage difficulty',()=>{
-  const a=world(),b=world();b.time=36000;a.stage=b.stage=12;
-  a.spawnEnemy();b.spawnEnemy();assert.deepEqual(a.enemies[0],b.enemies[0]);
-  a.spawnTimer=b.spawnTimer=0;a.step(1/120);b.step(1/120);near(a.spawnTimer,b.spawnTimer);
+test('elapsed active time restores the original health, density and spawn acceleration',()=>{
+  const a=world(),b=world();b.time=180;a.stage=b.stage=3;
+  a.spawnEnemy();b.spawnEnemy();
+  assert.equal(b.enemies[0].hp-a.enemies[0].hp,8);
+  near(b.enemies[0].density-a.enemies[0].density,.126);
+  a.spawnTimer=b.spawnTimer=0;a.step(1/120);b.step(1/120);
+  near(a.spawnTimer-b.spawnTimer,.36);
 });
-test('health per second grows linearly through 1000 stages, with bounded frequency and per-stage score',()=>{
-  const base=stageTuning(1);let prev=base.hp/base.interval;
-  for(let stage=2;stage<=1000;stage++){
-    const t=stageTuning(stage),rate=t.hp/t.interval;
-    near(rate-prev,19/2.45*.24,1e-9);prev=rate;
-    assert.ok(t.interval>=2.45/1.5);assert.ok(t.score>=140&&t.score<=200);near(t.density,.74);
+test('spawn cadence restores stage/time scaling and its original minimum interval',()=>{
+  for(const [stage,time] of [[1,0],[4,60],[8,180],[40,3600]]){
+    const w=world();w.stage=stage;w.time=time;w.spawnTimer=0;w.step(1/120);
+    near(w.spawnTimer,Math.max(.52,2.45-(stage-1)*.18-w.time*.002));
   }
 });
 function gain(w,id){w.phase='choose';w.choose(BUFFS.find(b=>b.id===id));w.phase='battle';}
-function measuredHit(energy,density){
-  const w=world();for(let i=0;i<energy;i++)gain(w,'energy');for(let i=0;i<density;i++)gain(w,'density');
+test('energy and density restore multiplicative stacks and physical impact damage',()=>{
+  const w=world();for(let i=0;i<3;i++){gain(w,'energy');gain(w,'density');}
+  near(w.energy,1.3**3);near(w.density,1.35**3);near(w.player.mass,1.5*1.35**3);
   Object.assign(w.player,{x:300,y:300,vx:0,vy:0});w.shoot(-w.maxPull,0);
-  const b=enemy(w,300+w.unit*1.9,300,{hp:1e9,maxHp:1e9});w.collide(w.player,b);
-  return {damage:1e9-b.hp,w};
-}
-test('repeated energy and density remain additive, with stronger and weaker gains around stage growth',()=>{
-  const base=measuredHit(0,0).damage;
-  for(const count of [1,3,10,30,100])for(const energy of [0,Math.floor(count/2),count]){
-    const density=count-energy,{damage,w}=measuredHit(energy,density),expected=1+.3*energy+.22*density;
-    near(w.energy,1+.3*energy);near(w.density,1+.35*density);
-    assert.ok(Math.abs(damage/base-expected)<.02+expected*.005);
-    const relative=expected/stageTuning(count+1).pressure;
-    assert.ok(relative>=.91&&relative<=1.25);
-  }
+  const speed=w.baseSpeed*Math.sqrt(w.energy/w.density);near(length(w.player),speed);
+  const b=enemy(w,300+w.unit*1.9,300,{hp:10000});
+  const reducedMass=1/(1/w.player.mass+1/b.mass);
+  const expected=Math.max(1,Math.round(.5*reducedMass*(speed/w.unit)**2*.31));
+  w.collide(w.player,b);assert.equal(10000-b.hp,expected);
 });
 test('battle remains capped and ends cleanly on both phone and desktop after a long idle run',()=>{
   for(const [width,height] of [[390,844],[844,390],[1440,900]]){
@@ -197,14 +192,14 @@ test('battle remains capped and ends cleanly on both phone and desktop after a l
   }
 });
 
-test('pulse has a shared damage budget, so a crowd cannot multiply its power',()=>{
+test('pulse restores 30 percent damage to every nearby target',()=>{
   const w=world();w.buffs.pulse=1;Object.assign(w.player,{x:300,y:300,vx:900,vy:0});
   const b=enemy(w,350,300,{hp:10000}),others=[];
   for(let i=0;i<8;i++)others.push(enemy(w,390+i*5,300,{hp:10000}));
   w.collide(w.player,b);const direct=10000-b.hp,total=others.reduce((sum,b)=>sum+10000-b.hp,0);
-  assert.equal(total,Math.round(direct*.32));assert.equal(others.filter(b=>b.hp<10000).length,3);
+  assert.equal(total,Math.round(direct*.3)*8);assert.ok(others.every(b=>10000-b.hp===Math.round(direct*.3)));
 });
-test('bank rewards one or two walls within a bounded 18 to 36 percent bonus',()=>{
+test('bank restores 60 or 120 percent bonus after one or two walls',()=>{
   const hits=[0,1,2].map(bank=>{const w=world();w.bank=bank;Object.assign(w.player,{x:300,y:300,vx:900,vy:0});const b=enemy(w,350,300,{hp:10000});w.collide(w.player,b);return 10000-b.hp;});
-  assert.ok(Math.abs(hits[1]-hits[0]*1.18)<=1.2);assert.ok(Math.abs(hits[2]-hits[0]*1.36)<=1.2);
+  assert.ok(Math.abs(hits[1]-hits[0]*1.6)<=1.3);assert.ok(Math.abs(hits[2]-hits[0]*2.2)<=1.6);
 });

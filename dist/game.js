@@ -119,7 +119,7 @@ function updateUiBall(dt){
   }
   if(!transfer){
     $('#ui-ball').dataset.state=uiAnchor||'hidden';
-    if(uiAnchor&&modal!=='help'){
+    if(uiAnchor){
       const pose=anchorPose(uiAnchor),panel=$('#'+uiAnchor+'-panel').getBoundingClientRect();
       if(uiAnchor==='over'&&result){
         result.bounceTime+=dt;
@@ -162,23 +162,33 @@ function updateControlFlight(dt){
     el.style.width=el.style.height=pose.r*2+'px';
     el.style.transform=`translate3d(${pose.x-pose.r}px,${pose.y-pose.r}px,0) scale(${1-pose.squash},${1+pose.squash*.7})`;
     el.style.background=mixColor(item.fromColor,item.toColor,t);
-    el.firstElementChild.style.opacity=item.appear?t:1-t;
+    el.firstElementChild.style.opacity=item.appear?t:item.persist?1:1-t;
     el.firstElementChild.style.transform=`rotate(${(1-t)*-.3}rad)`;
     if(item.nextIcon)el.lastElementChild.style.opacity=t;
   }
   if(progress===1){controlFlight=null;flight.done?.();$('#control-transfers').replaceChildren();syncInputs();}
 }
 function openResult(){
-  const from={...world.player},sources=world.enemies.slice(0,2).map(b=>({...b,r:Math.max(1,b.r*ease(b.born))}));
-  result={clock:0,bounceTime:0,sourceIds:sources.map(b=>b.id)};
+  if(!world||result)return;
+  const fromPause=modal==='pause',from=currentPlayerPose();
+  const sources=fromPause?['restart','home'].map(id=>{
+    const box=$('#pause-panel .'+id+'-ball').getBoundingClientRect();
+    return {x:box.x+box.width/2,y:box.y+box.height/2,r:box.width/2};
+  }):world.enemies.slice(0,2).map(b=>({...b,r:Math.max(1,b.r*ease(b.born))}));
+  drag=null;world.phase='over';world.choices=[];updateChoices();
+  best=Math.max(best,world.score);storage.write('qiuqiule-best',best);
+  $('#final-score').textContent=pad(world.score);
+  result={clock:0,bounceTime:0,sourceIds:fromPause?[]:sources.map(b=>b.id)};
   $('#hud').hidden=true;
   showPanel('over');$('.result-actions').classList.add('arriving');
   movePlayer(from,'over',.82);
   flyControls(['restart','home'].map((id,i)=>({
     from:sources[i]||from,to:()=>controlPose(id),icon:id,
-    fromColor:settings.enemy,toColor:i?'#91b8c7':'#e88c72',appear:true
+    fromColor:fromPause?(i?'#91b8c7':'#e88c72'):settings.enemy,
+    toColor:i?'#91b8c7':'#e88c72',appear:!fromPause,persist:fromPause
   })),.82,()=>$('.result-actions').classList.remove('arriving'));
 }
+
 function resultExitSources(){
   return modal==='over'?['restart','home'].map((id,i)=>({from:controlPose(id),icon:id,fromColor:i?'#91b8c7':'#e88c72'})):null;
 }
@@ -193,7 +203,7 @@ function openSettings(){
   if(settingsOrigin==='home')home.phase='external';
   showPanel('settings');movePlayer(from,'settings',.5);
 }
-function openHelp(){if(transfer)return;showPanel('help');$('#ui-ball').hidden=true;}
+function openHelp(){if(transfer)return;showPanel('help');uiAnchor='help';paintUiBall(anchorPose('help'));}
 function finishArenaArrival(){
   paused=false;
   if(pauseOnArrival||document.hidden){pauseOnArrival=false;openPause();}
@@ -405,8 +415,6 @@ function boot(){
           tone(700,.3,'sine',.06,1.5);vibrate([12,30,12]);
         }
         if(e.type==='over'){
-          drag=null;best=Math.max(best,world.score);storage.write('qiuqiule-best',best);
-          $('#final-score').textContent=pad(world.score);$('#result-detail').textContent=`到达第 ${world.stage} 阶段 · 个人最佳 ${best} 分`;
           openResult();tone(160,.4,'sine',.06,.4);vibrate([20,40,30]);
         }
       }
@@ -509,7 +517,7 @@ document.addEventListener('click',e=>{
   const action=button.dataset.action;
   if(action.startsWith('home-')&&e.detail===0&&screen==='home'&&!modal)home.launchTo(action==='home-launch'?'play':action.slice(5));
   if(action==='restart')restartGame();
-  if(action==='home')showHome();
+  if(action==='home'){if(modal==='pause')openResult();else showHome();}
   if(action==='pause')openPause();
   if(action==='resume')resumeGame();
   if(action==='close')closePanel();
