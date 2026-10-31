@@ -92,7 +92,7 @@ public class OfflineGameTest {
             assertTrue(js(scenario, "localStorage.getItem('qiuqiule-settings')").contains("0.37"));
             js(scenario, "document.querySelector('[data-palette=night]').click()");
             assertEquals("\"#22272b\"", js(scenario, "document.querySelector('meta[name=theme-color]').content"));
-            assertEquals("\"rgb(34, 39, 43)\"", js(scenario, "getComputedStyle(document.getElementById('page-top-color')).backgroundColor"));
+            awaitTrue(scenario, "getComputedStyle(document.getElementById('page-top-color')).backgroundColor === 'rgb(34, 39, 43)'");
             js(scenario, "document.querySelector('#settings-panel [data-action=help]').click()");
             awaitTrue(scenario, "!document.getElementById('help-panel').hidden && !document.getElementById('modal-layer').classList.contains('menu-switching')");
             js(scenario, "document.querySelector('#help-panel [data-action=close]').click()");
