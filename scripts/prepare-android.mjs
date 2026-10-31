@@ -13,7 +13,10 @@ await writeFile(join(assets, 'game.js'), originalGame.replace(swRegistration, '/
 const originalHtml = await readFile('dist/index.html', 'utf8');
 const offlineScript = /\s*<script\b[^>]*src=["']\.\/offline\.js["'][^>]*><\/script>/g;
 assert.equal([...originalHtml.matchAll(offlineScript)].length, 1, 'Expected one offline bootstrap');
-await writeFile(join(assets, 'index.html'), originalHtml.replace(offlineScript, ''));
+const pageTopColor = /\s*<div id="page-top-color" aria-hidden="true"><\/div>/g;
+assert.equal([...originalHtml.matchAll(pageTopColor)].length, 1, 'Expected one iOS edge-sampling strip');
+// Android is immersive fullscreen: let the canvas fill the entire screen without an iOS tint strip.
+await writeFile(join(assets, 'index.html'), originalHtml.replace(offlineScript, '').replace(pageTopColor, ''));
 
 // Preserve gameplay, artwork, typography and music byte for byte.
 async function verifyAssets(directory = 'dist', relative = '') {

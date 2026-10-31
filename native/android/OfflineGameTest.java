@@ -65,6 +65,8 @@ public class OfflineGameTest {
             awaitTrue(scenario, "document.querySelector('#game canvas')?.width > 0 && !document.getElementById('home').hidden");
             assertEquals("\"https://localhost\"", js(scenario, "location.origin"));
             assertTrue(js(scenario, "document.querySelector('.game-version').textContent").contains("2.2.5"));
+            assertEquals("true", js(scenario, "document.getElementById('page-top-color') === null"));
+            assertEquals("true", js(scenario, "(() => { const r = document.getElementById('game').getBoundingClientRect(); return r.top === 0 && r.left === 0 && r.width === innerWidth && r.height === innerHeight; })()"));
             js(scenario, "navigator.serviceWorker.getRegistrations().then(items => window.__nativeNoWebCache = items.length === 0)");
             awaitTrue(scenario, "window.__nativeNoWebCache === true");
             js(scenario, "Promise.all(['./fonts/fredoka-latin-500-normal.woff2','./audio/light-bounce.mp3','./vendor/phaser.min.js','./physics.js'].map(async url => { const response = await fetch(url); return response.ok && (await response.arrayBuffer()).byteLength > 100; })).then(results => window.__nativeAssetsOK = results.every(Boolean))");
@@ -92,7 +94,7 @@ public class OfflineGameTest {
             assertTrue(js(scenario, "localStorage.getItem('qiuqiule-settings')").contains("0.37"));
             js(scenario, "document.querySelector('[data-palette=night]').click()");
             assertEquals("\"#22272b\"", js(scenario, "document.querySelector('meta[name=theme-color]').content"));
-            awaitTrue(scenario, "getComputedStyle(document.getElementById('page-top-color')).backgroundColor === 'rgb(34, 39, 43)'");
+            awaitTrue(scenario, "getComputedStyle(document.body).backgroundColor === 'rgb(34, 39, 43)'");
             js(scenario, "document.querySelector('#settings-panel [data-action=help]').click()");
             awaitTrue(scenario, "!document.getElementById('help-panel').hidden && !document.getElementById('modal-layer').classList.contains('menu-switching')");
             js(scenario, "document.querySelector('#help-panel [data-action=close]').click()");
