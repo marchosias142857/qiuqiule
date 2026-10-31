@@ -1,0 +1,31 @@
+name: Render game trailer
+on:
+  push:
+    branches: [codex/video-trailer-v226]
+    paths: ['trailer/**', '.github/workflows/trailer.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Prepare renderer
+        run: |
+          npm install --no-save --package-lock=false playwright@1.62.1 qrcode@1.5.4
+          npx playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - name: Render real game frames
+        run: node trailer/render.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qiuqiule-intro-v226
+          path: trailer-output/
+          retention-days: 7

@@ -1,0 +1,44 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+@font-face{font-family:BallScore;src:url('/game/fonts/fredoka-latin-500-normal.woff2')}
+*{box-sizing:border-box}body{margin:0;width:540px;height:960px;overflow:hidden;background:#f4f3eb;color:#252720;font-family:'Noto Sans CJK SC',sans-serif;--paper:#f4f3eb;--ink:#252720;--muted:#818479}
+#stage{position:absolute;left:44px;top:34px;font-size:11px;letter-spacing:2px;font-weight:500;color:var(--muted)}#edition{position:absolute;right:44px;top:34px;font-size:11px;letter-spacing:1px;color:var(--muted)}
+#heading{position:absolute;left:44px;top:68px;margin:0;font-size:33px;line-height:1.35;font-weight:700;letter-spacing:-1.1px;white-space:pre-line;color:var(--ink)}
+#game-frame{position:absolute;left:36px;top:190px;width:468px;height:686px;border:0;border-radius:26px;overflow:hidden;background:var(--paper)}
+#caption{position:absolute;top:898px;left:0;right:0;text-align:center;font-size:14px;letter-spacing:.5px;color:var(--muted)}
+#progress{position:absolute;left:44px;right:44px;bottom:23px;height:2px;background:color-mix(in srgb,var(--ink) 10%,transparent)}#progress i{display:block;background:var(--ink);height:2px;width:0}
+#pointer{position:absolute;width:19px;height:19px;border-radius:50%;background:#ffffff88;box-shadow:0 0 0 2px #25272040;opacity:0;pointer-events:none}
+#end{position:absolute;inset:0;background:#f4f3eb;color:#252720;opacity:0;pointer-events:none;text-align:center}
+#end .kicker{position:absolute;top:127px;left:0;right:0;font-size:12px;letter-spacing:4px;color:#818479}
+#logo{position:absolute;top:188px;left:122px;width:296px;height:100px;fill:none;stroke:#252720;stroke-width:7.3;stroke-linecap:round;stroke-linejoin:round}
+#end h2{position:absolute;top:316px;left:0;right:0;font-size:29px;letter-spacing:1px;margin:0;font-weight:500}
+.end-ball{position:absolute;border-radius:50%}#hero{left:223px;top:414px;width:94px;height:94px;background:#252720;transform-origin:50% 100%}#hero i{position:absolute;top:39px;width:4px;height:9px;border-radius:50%;background:#f4f3eb}#hero i:first-child{left:37px}#hero i:last-child{left:53px}
+#shadow{position:absolute;left:229px;top:525px;width:82px;height:9px;background:#25272018;border-radius:50%}#coral{width:38px;height:38px;background:#e88c72;left:148px;top:467px}#mint{width:28px;height:28px;background:#c4dc86;right:143px;top:433px}
+#qr{position:absolute;left:176px;top:581px;width:188px;height:188px;border-radius:14px;background:#fbfbf6;padding:7px}#qr img{width:100%;height:100%;image-rendering:pixelated}#scan{position:absolute;left:0;right:0;top:790px;font-size:17px;margin:0}#url{position:absolute;left:0;right:0;top:831px;font:12px BallScore,sans-serif;letter-spacing:.3px;color:#818479}#end small{position:absolute;left:0;right:0;bottom:53px;font-size:11px;letter-spacing:1px;color:#818479}
+</style>
+<div id="stage">球球了 / 游戏介绍</div><div id="edition">v2.2.6</div><h1 id="heading"></h1>
+<iframe id="game-frame" src="/game/index.html" allow="autoplay"></iframe><div id="pointer"></div><div id="caption"></div><div id="progress"><i></i></div>
+<div id="end"><div class="kicker">一款有弹性的物理碰撞游戏</div><svg id="logo" viewBox="0 0 296 100"><defs><g id="q"><path d="M9 24H33M11 49H31M7 78L35 72M21 25V74M43 35H87M64 14V78Q64 90 51 82M44 49L51 56M41 78Q56 68 63 55M80 46L72 54M67 57Q75 71 88 78M80 17L84 21"/></g></defs><g><use href="#q" transform="rotate(-4 48 50)"/></g><g><use href="#q" transform="translate(103 0) rotate(3 48 50)"/></g><g><path d="M220 24H278Q274 37 251 48V77Q251 90 236 82"/></g></svg><h2>现在，开弹。</h2><div id="shadow"></div><div class="end-ball" id="hero"><i></i><i></i></div><div class="end-ball" id="coral"></div><div class="end-ball" id="mint"></div><div id="qr"><img src="/qr.svg"></div><p id="scan">扫码，即刻试玩</p><div id="url">marchosias142857.github.io/qiuqiule</div><small>支持横竖屏 · 可添加至主屏幕</small></div>
+<script>
+const segments=[
+  [0,'球球了 / 游戏介绍','一颗小球，\n弹出点名堂。','拖拽与碰撞，都有一点弹性。'],
+  [3,'01 / 拖拽开弹','按住，拉开。\n松手，开弹。','朝相反方向拉动，松手弹射。'],
+  [7,'02 / 碰撞得分','碰撞、击破，\n让分数跳起来。','击破敌方小球，积累分数。'],
+  [13,'03 / 选择强化','分数达标，\n再选一份强化。','撞向强化球，把能力带进下一阶段。'],
+  [19,'04 / 自由配色','你的球，\n你的颜色。','三组预设，也可以自由搭配。']
+];
+window.compose=(t,state)=>{
+  let s=segments[0];for(const seg of segments)if(t>=seg[0])s=seg;
+  document.querySelector('#stage').textContent=s[1];document.querySelector('#heading').textContent=s[2];document.querySelector('#caption').textContent=s[3];
+  const u=Math.min(1,(t-s[0])/.25);document.querySelector('#heading').style.opacity=.4+.6*u;document.querySelector('#heading').style.transform=`translateY(${(1-u)*7}px)`;
+  let colors=t>=21&&t<23?['#22272b','#f0f2e8','#a3ada4']:t>=23&&t<24.8?['#e7f2ee','#205c67','#688780']:['#f4f3eb','#252720','#818479'];
+  document.body.style.background=colors[0];['paper','ink','muted'].forEach((v,i)=>document.body.style.setProperty('--'+v,colors[i]));
+  document.querySelector('#progress i').style.width=Math.min(100,t/26*100)+'%';
+  const p=document.querySelector('#pointer');p.style.opacity=state?.pull&&t<19?'.8':'0';if(state?.pull){p.style.left=(36+state.pull.x-9.5)+'px';p.style.top=(190+state.pull.y-9.5)+'px';}
+  const end=document.querySelector('#end'),v=Math.max(0,Math.min(1,(t-26)/.35));end.style.opacity=v;
+  const phase=(t-26)*Math.PI*2/1.6,bounce=Math.abs(Math.sin(phase))*24,sq=Math.max(0,1-bounce/5)*.12;
+  document.querySelector('#hero').style.transform=`translateY(${-bounce}px) scale(${1+sq},${1-sq})`;
+  document.querySelector('#shadow').style.transform=`scale(${1-bounce/85})`;document.querySelector('#shadow').style.opacity=1-bounce/50;
+  document.querySelectorAll('#logo>g').forEach((g,i)=>{g.style.transformBox='fill-box';g.style.transformOrigin='center';g.style.transform=`rotate(${Math.sin(t*1.31+i*2.1)*6}deg)`});
+};
+</script></html>
