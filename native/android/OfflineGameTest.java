@@ -64,6 +64,9 @@ public class OfflineGameTest {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             awaitTrue(scenario, "document.querySelector('#game canvas')?.width > 0 && !document.getElementById('home').hidden");
             assertEquals("\"https://localhost\"", js(scenario, "location.origin"));
+            assertTrue(js(scenario, "document.querySelector('.game-version').textContent").contains("2.2.5"));
+            js(scenario, "navigator.serviceWorker.getRegistrations().then(items => window.__nativeNoWebCache = items.length === 0)");
+            awaitTrue(scenario, "window.__nativeNoWebCache === true");
             js(scenario, "Promise.all(['./fonts/fredoka-latin-500-normal.woff2','./audio/light-bounce.mp3','./vendor/phaser.min.js','./physics.js'].map(async url => { const response = await fetch(url); return response.ok && (await response.arrayBuffer()).byteLength > 100; })).then(results => window.__nativeAssetsOK = results.every(Boolean))");
             awaitTrue(scenario, "window.__nativeAssetsOK === true");
             js(scenario, "document.fonts.load('500 40px BallScore').then(fonts => window.__nativeFontOK = fonts.length > 0)");
@@ -87,6 +90,13 @@ public class OfflineGameTest {
             awaitTrue(scenario, "!document.getElementById('settings-panel').hidden");
             js(scenario, "document.getElementById('bgm-volume').value=37; document.getElementById('bgm-volume').dispatchEvent(new Event('input',{bubbles:true}))");
             assertTrue(js(scenario, "localStorage.getItem('qiuqiule-settings')").contains("0.37"));
+            js(scenario, "document.querySelector('[data-palette=night]').click()");
+            assertEquals("\"#22272b\"", js(scenario, "document.querySelector('meta[name=theme-color]').content"));
+            assertEquals("\"rgb(34, 39, 43)\"", js(scenario, "getComputedStyle(document.getElementById('page-top-color')).backgroundColor"));
+            js(scenario, "document.querySelector('#settings-panel [data-action=help]').click()");
+            awaitTrue(scenario, "!document.getElementById('help-panel').hidden && !document.getElementById('modal-layer').classList.contains('menu-switching')");
+            js(scenario, "document.querySelector('#help-panel [data-action=close]').click()");
+            awaitTrue(scenario, "!document.getElementById('settings-panel').hidden && !document.getElementById('modal-layer').classList.contains('menu-switching')");
             SystemClock.sleep(600);
             screenshot("05-settings");
             js(scenario, "document.querySelector('#settings-panel [data-action=close]').click()");
@@ -98,10 +108,21 @@ public class OfflineGameTest {
             awaitTrue(scenario, "innerWidth < innerHeight");
             SystemClock.sleep(700);
             screenshot("06-game-portrait");
+            js(scenario, "document.querySelector('[data-action=pause]').click()");
+            awaitTrue(scenario, "!document.getElementById('pause-panel').hidden");
+            SystemClock.sleep(700);
+            js(scenario, "document.querySelector('#pause-panel [data-action=home]').click()");
+            awaitTrue(scenario, "!document.getElementById('over-panel').hidden && !document.querySelector('.result-actions').classList.contains('arriving')");
+            screenshot("07-results");
+            js(scenario, "document.getElementById('result-restart').click()");
+            awaitTrue(scenario, "document.getElementById('modal-layer').hidden && document.getElementById('ui-ball').hidden");
+            assertEquals("\"0000\"", js(scenario, "document.getElementById('score').textContent"));
+            assertEquals("0", js(scenario, "document.getElementById('control-transfers').childElementCount"));
             js(scenario, "window.__nativeReloaded = true; location.reload()");
             awaitTrue(scenario, "document.querySelector('#game canvas')?.width > 0 && !window.__nativeReloaded");
             assertEquals("\"37\"", js(scenario, "document.getElementById('bgm-volume').value"));
-            screenshot("07-offline-reload");
+            assertEquals("\"#22272b\"", js(scenario, "document.getElementById('bg-color').value"));
+            screenshot("08-offline-reload");
         }
     }
 }

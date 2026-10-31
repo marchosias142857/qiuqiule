@@ -16,3 +16,12 @@ test('UI transfers preserve exact endpoints and ease position and size to rest',
   near(start.x,a.x);near(start.y,a.y);near(start.r,a.r);near(end.x,b.x);near(end.y,b.y);near(end.r,b.r);
   const almost=transferPose(a,b,.999);assert.ok(Math.hypot(end.x-almost.x,end.y-almost.y)<.0001);assert.ok(Math.abs(end.r-almost.r)<.00001);
 });
+
+test('result bounce preserves its ground anchor and changes squash and shadow with height',async()=>{
+  const {resultBounce}=await import('../dist/motion.js');const anchor={x:120,y:280,r:36};
+  const ground=resultBounce(anchor,0),apex=resultBounce(anchor,.57),landing=resultBounce(anchor,1.18);
+  near(ground.y,anchor.y);assert.ok(apex.y<ground.y-40);near(apex.shadowY,ground.shadowY);
+  assert.ok(apex.shadowScale<ground.shadowScale&&apex.shadowOpacity<ground.shadowOpacity&&apex.shadowBlur>ground.shadowBlur);
+  assert.ok(landing.squash<0);near(resultBounce(anchor,1.45).y,ground.y);
+  assert.deepEqual(resultBounce(anchor,4,true),resultBounce(anchor,0,true));
+});

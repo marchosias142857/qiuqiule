@@ -33,4 +33,4 @@
 官方部署说明：
 https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
 
-本配置未连接你的 GitHub 账户，也没有替你创建仓库或公开发布。
+本仓库已配置 GitHub Actions 部署；更新 main 后由既有 Pages 工作流发布。

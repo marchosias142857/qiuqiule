@@ -47,10 +47,10 @@ jobs:
       - name: Prepare unsigned APK for private local signing
         run: |
           mkdir -p build/apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -P 16 -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk build/apk/qiuqiule-1.4.0-unsigned.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 build/apk/qiuqiule-1.4.0-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -P 16 -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk build/apk/qiuqiule-2.2.5-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 build/apk/qiuqiule-2.2.5-unsigned.apk
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" build/apk/apksigner.jar
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging build/apk/qiuqiule-1.4.0-unsigned.apk > build/apk/android-package-info.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging build/apk/qiuqiule-2.2.5-unsigned.apk > build/apk/android-package-info.txt
           sha256sum build/apk/* > build/apk/SHA256SUMS.txt
       - name: Enable emulator hardware acceleration
         run: |
@@ -68,7 +68,7 @@ jobs:
           disable-animations: true
           script: bash scripts/test-android-offline.sh
       - name: Upload APK build
-        if: ${{ always() && hashFiles('build/apk/qiuqiule-1.4.0-unsigned.apk') != '' }}
+        if: ${{ always() && hashFiles('build/apk/qiuqiule-2.2.5-unsigned.apk') != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: qiuqiule-android-unsigned

@@ -42,8 +42,8 @@ if (!manifest.includes('android.permission.VIBRATE')) manifest = manifest.replac
 await writeFile(join(root, 'AndroidManifest.xml'), manifest);
 
 let gradle = await readFile('android/app/build.gradle', 'utf8');
-assert.match(gradle, /versionCode (?:1|14001)\b/);
-gradle = gradle.replace(/versionCode (?:1|14001)\b/, 'versionCode 14001').replace('versionName "1.0"', 'versionName "1.4.0"');
+assert.match(gradle, /versionCode (?:1|22501)\b/);
+gradle = gradle.replace(/versionCode (?:1|22501)\b/, 'versionCode 22501').replace('versionName "1.0"', 'versionName "2.2.5"');
 await writeFile('android/app/build.gradle', gradle);
 
 await copyFile('native/android/MainActivity.java', join(root, 'java/com/qiuqiule/game/MainActivity.java'));
@@ -91,4 +91,4 @@ await writeFile(join(root, 'res/values/styles.xml'), `<?xml version="1.0" encodi
   </style>
 </resources>
 `);
-console.log('Android 1.4.0 (14001): bundled assets verified; web sources unchanged.');
+console.log('Android 2.2.5 (22501): bundled assets verified; web sources unchanged.');
