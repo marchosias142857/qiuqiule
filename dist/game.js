@@ -283,7 +283,9 @@ function startGame(){
 }
 function restartGame(){
   if(transfer||controlFlight||!scene)return;
-  startGame();finishArenaArrival();
+  const from=currentPlayerPose();
+  hidePanel();prepareGame();paused=true;
+  movePlayer(from,'arena',.65,finishArenaArrival);
 }
 function showHome(){
   if(transfer||controlFlight)return;
