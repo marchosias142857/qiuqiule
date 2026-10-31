@@ -53,7 +53,13 @@ npm run check
 - iPhone 顶部页面边缘改为独立实色层，与屏幕背景共用颜色变量，切换预设配色或自定义背景时同步更新。
 - 首次绘制前恢复已保存的背景色和明暗模式，去除页面背景颜色的延迟过渡；保留不透明状态栏配置。
 
-2.2.5 实现与验收：真实固定元素 `#page-top-color` 位于画布和菜单之上，高度仅 1 CSS 像素、不参与布局、不接收指针事件，与 HTML/body 共用 `--bg`，不遮挡安全区域内的内容。启动脚本在 CSS/Phaser/game.js 前读取并校验已保存的背景，恢复 `--bg`、明暗模式和主题色；无有效设置时使用默认值，存储不可读时不阻断启动。保持 iOS `default` 状态栏，未启用半透明状态栏。67 项现有回归检查及脚本语法检查通过；浏览器检查三套预设、深浅自定义、重新加载、横竖屏与局内设置，确认颜色相同、菜单遮罩透明且无背景模糊。另在不加载游戏的预览中验证启动配色恢复。iPhone 系统 UI 尚未真机验证。
+2.2.5 补丁 2：用户真机反馈顶部颜色停留在上次退出时的背景。原来的 1px 色条没有覆盖 WebKit 的取色点；最上面的画布/全屏菜单可能进入保留既有边缘颜色的分支。对照 `LocalFrameView::fixedContainerEdges`：取色区域从边缘内缩 `PageColorSampler::fixedContainerSampleRectMargin`（4px），直接读取背景色还要求元素宽高均大于 `thinBorderWidth`（10px）。现将真实固定元素 `#page-top-color` 改为全宽、12px 高、不透明、z-index 100，与 HTML/body 和画布共用 `settings.bg`/`--bg`。保持 pointer-events:none；WebKit 首次固定容器取色明确忽略该属性。该色带不再是整屏容器，避免整屏容器优先沿用旧颜色；12px 小于现有场地边框的 15px 留白，不挪动或遮挡边框、菜单和 HUD。
+
+继续保留启动前恢复背景色和 `default` 状态栏，未启用半透明状态栏、未自动重新加载游戏。缓存标识更新为 `v2.2.5-github-offline-2`。67 项回归检查通过。浏览器连续切换夜间、泳池、自定义深浅背景并切换设置/玩法菜单；390×844 和 844×390 的顶部取色点在实色带内，宽高符合条件，颜色与页面背景和 theme-color 一致，遮罩仍透明且无模糊。未具备 iPhone 系统 UI 测试环境，不能将 DOM 几何和颜色检查等同于真机验证。
+
+实现依据（本次读取的 WebKit 源码）：
+- https://github.com/WebKit/WebKit/blob/main/Source/WebCore/page/LocalFrameView.cpp （`fixedContainerEdges`、`primaryBackgroundColorForRenderer`、`preferExistingColor`）
+- https://github.com/WebKit/WebKit/blob/main/Source/WebCore/page/PageColorSampler.h （`fixedContainerSampleRectMargin = 4`）
 
 ## 2.2.4 更新
 

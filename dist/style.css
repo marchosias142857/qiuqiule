@@ -119,5 +119,6 @@
 /* Give standalone WebKit an opaque page edge; the document itself never scrolls. */
 html{background:var(--bg)}
 body{position:fixed;inset:0;transition:color .3s}
-/* A real fixed element lets WebKit sample the selected color above the canvas and menus. */
-#page-top-color{position:fixed;top:0;left:0;right:0;height:1px;z-index:100;background:var(--bg);pointer-events:none}
+/* WebKit samples 4px inside the edge and reads solid backgrounds above 10px high.
+   Keep this strip above the canvas/menus, within the existing 15px field margin. */
+#page-top-color{position:fixed;top:0;left:0;right:0;height:12px;z-index:100;background:var(--bg);pointer-events:none}
