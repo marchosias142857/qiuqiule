@@ -4,7 +4,7 @@ import {LevelSelector,trackPath} from './levels.js';
 import {displayMetrics, pointerPosition} from './display.js';
 import {HomeWorld} from './home.js';
 import {drawFunctionalBall,iconMarkup} from './icons.js';
-import {smooth,faceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline,usesStrainedEyes} from './motion.js';
+import {smooth,pullBallPoint,faceTarget,pointerFaceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline,usesStrainedEyes,playerVisualState,relaxedEyeOutline} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
 
 const $ = s => document.querySelector(s);
@@ -28,10 +28,13 @@ let best = Number(storage.read('qiuqiule-best',0)) || 0;
 let scene, game, world, drag = null, screen = 'home', paused = false, modal = null;
 let transfer=null,uiAnchor=null,settingsOrigin='home',homeReveal=1,pauseOnArrival=false,releaseOverlay=0;
 let result=null,controlFlight=null,menuTransition=null,selector=null,trackPointer=null,levelsReveal=1;
+let levelPointer=null;
 let campaignProgress=normalizeProgress(storage.read('qiuqiule-campaign',null));
 let selectedMode=storage.read('qiuqiule-mode','campaign')==='endless'?'endless':'campaign';
 let currentLevel=1;
 const strainedEyes=[-1,1].map(strainedEyeOutline);
+const relaxedEyes=strainedEyes.map(relaxedEyeOutline);
+const playerVisuals=new WeakMap();
 let viewport = displayMetrics(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
 let home = new HomeWorld(viewport.width, viewport.height,selectedMode);
 let lastScore = -1, lastPhase = '';
@@ -83,7 +86,7 @@ function syncAudioSettings(){
 function unlockAudio(){sound.unlock();}
 function tone(...args){sound.tone(...args);}
 function vibrate(duration){if(settings.haptic&&navigator.vibrate)navigator.vibrate(duration);}
-function cancelDrag(){drag=null;world?.cancelPull();if(trackPointer!==null){trackPointer=null;selector?.cancelTrack();}}
+function cancelDrag(){drag=null;levelPointer=null;world?.cancelPull();if(trackPointer!==null){trackPointer=null;selector?.cancelTrack();}}
 function fitMenuHeight(){
   const panel=$('#settings-panel'),hidden=panel.hidden;
   if(hidden)panel.classList.add('menu-measure');
@@ -144,13 +147,51 @@ function anchorPose(anchor){
   const box=$('#'+anchor+'-ball').getBoundingClientRect();
   return {x:box.x+box.width/2,y:box.y+box.height/2,r:box.width/2};
 }
-function currentPlayerPose(){return uiAnchor==='over'?resultBounce(anchorPose('over'),result?.bounceTime||0,reducedMotion):uiAnchor?anchorPose(uiAnchor):screen==='home'?{...home.player}:screen==='levels'?{...selector.player}:{...world.player};}
+function selectionPlayerPose(){
+  const p={...selector.player},visual=playerVisuals.get(selector.player);
+  // activateAt has already changed the model phase. Preserve the contour and
+  // eyes from the last painted frame instead of re-reading the stopped rebound.
+  if(visual){
+    p.squash=visual.renderedSquash??0;
+    p.visualSquash=p.squash;
+    if(visual.renderedPull)p.visualPull={...visual.renderedPull};
+    p.visualEyeMix=visual.eyeMix;
+  }
+  return p;
+}
+function currentPlayerPose(){return uiAnchor==='over'?resultBounce(anchorPose('over'),result?.bounceTime||0,reducedMotion):uiAnchor?anchorPose(uiAnchor):screen==='home'?{...home.player}:screen==='levels'?selectionPlayerPose():{...world.player};}
 function detached(){return !!transfer||!!uiAnchor||['pause','settings','help'].includes(modal);}
 function paintUiBall(p){
   const el=$('#ui-ball'),sq=p.squash||0;
   el.hidden=false;el.style.width=el.style.height=p.r*2+'px';
   el.style.transform=`translate3d(${p.x-p.r}px,${p.y-p.r}px,0) scale(${1-sq},${1+sq*.7})`;
-  el.querySelector('.ui-eyes').style.transform=`translate(${(p.lookX||0)*50}px,${(p.lookY||0)*50}px) rotate(${p.roll||0}rad)`;
+  const body=el.querySelector('.ui-body'),contour=el.querySelector('.ui-pull-outline');
+  const amount=p.visualPull?.amount||0,angle=p.visualPull?.angle||0;
+  body.style.display=amount>0?'none':'';contour.style.display=amount>0?'':'none';
+  if(amount>0){
+    const cos=Math.cos(angle),sin=Math.sin(angle),points=[];
+    for(let i=0;i<=192;i++){
+      const t=i/192*Math.PI*2,point=pullBallPoint(Math.cos(t),Math.sin(t),amount);
+      points.push(`${i?'L':'M'}${50+50*(point.x*cos-point.y*sin)} ${50+50*(point.x*sin+point.y*cos)}`);
+    }
+    contour.setAttribute('d',points.join(' ')+' Z');
+  }
+  const eyes=el.querySelector('.ui-eyes'),normal=el.querySelector('.ui-normal-eyes'),paths=el.querySelector('.ui-eye-paths');
+  const mix=clamp(p.visualEyeMix||0,0,1),visual=p.visualEyeMix!==undefined;
+  normal.style.display=mix>0?'none':'';paths.style.display=mix>0?'':'none';
+  if(mix>0){
+    for(const [i,side] of [-1,1].entries()){
+      const points=strainedEyes[i].map((point,j)=>{
+        const relaxed=relaxedEyes[i][j];
+        return `${j?'L':'M'}${50+side*8.5+50*(relaxed.x+(point.x-relaxed.x)*mix)} ${46.5+50*(relaxed.y+(point.y-relaxed.y)*mix)}`;
+      });
+      el.querySelector(i?'.ui-eye-right':'.ui-eye-left').setAttribute('d',points.join(' ')+' Z');
+    }
+  }
+  // Canvas breathing deforms the body only. Cancel the overlay body's scale
+  // for captured selection eyes, then retain the existing gaze/roll transform.
+  eyes.style.transform=`${visual?`scale(${1/(1-sq)},${1/(1+sq*.7)}) `:''}translate(${(p.lookX||0)*50}px,${(p.lookY||0)*50}px) rotate(${p.roll||0}rad)`;
+  eyes.style.opacity=visual?'.9':'';
 }
 function movePlayer(from,target,duration,done){
   cancelDrag();transfer={from:{...from},target,duration:reducedMotion?Math.min(duration,.25):duration,elapsed:0,done,revealHome:screen==='home'&&homeReveal<1&&target==='home'};
@@ -321,17 +362,17 @@ function syncMode(){
 }
 function openLevels(from=currentPlayerPose()){
   if(transfer||controlFlight)return;
-  hidePanel();selectedMode='campaign';screen='levels';world=null;result=null;drag=null;trackPointer=null;paused=false;
-  selector=new LevelSelector(viewport.width,viewport.height,campaignProgress.unlocked,currentLevel);
+  hidePanel();selectedMode='campaign';screen='levels';world=null;result=null;drag=null;trackPointer=null;levelPointer=null;paused=false;
+  selector=new LevelSelector(viewport.width,viewport.height,campaignProgress.unlocked);
   $('#home').hidden=true;$('#hud').hidden=true;$('#choice-labels').innerHTML='';
   $('#levels-view').removeAttribute('hidden');levelsReveal=0;clearEffects();
   rebuildLevels();movePlayer(from,'levels',.65);
-  $('#level-announcement').textContent=`已解锁 ${campaignProgress.unlocked} 关。直接拖动中央小球选择关卡，沿圆环滑动浏览。`;
+  $('#level-announcement').textContent=`已解锁 ${campaignProgress.unlocked} 关。点击关卡小球进入，点击下方返回球回到主页，沿圆环滑动浏览。`;
 }
 function enterLevel(level){
   if(level>campaignProgress.unlocked||transfer||controlFlight)return;
   currentLevel=level;selectedMode='campaign';
-  const from={...selector.player};prepareGame();paused=true;
+  const from=selectionPlayerPose();prepareGame();paused=true;
   movePlayer(from,'arena',.65,finishArenaArrival);tone(420,.24,'sine',.055,1.7);
 }
 function rebuildLevels(){
@@ -416,11 +457,13 @@ function drawDragGuide(g,p){
     g.fillStyle(color,.36*(1-i/9));
     g.fillCircle(p.x+nx*d,p.y+ny*d,1.7);
   }
-  const tip=p.r+12+7*(8+power*8);
-  const ax=p.x+nx*tip,ay=p.y+ny*tip;
-  g.lineStyle(1.4,color,.35);g.beginPath();
-  g.moveTo(ax-nx*6-ny*4,ay-ny*6+nx*4);
-  g.lineTo(ax,ay);g.lineTo(ax-nx*6+ny*4,ay-ny*6-nx*4);g.strokePath();
+  if(screen!=='levels'){
+    const tip=p.r+12+7*(8+power*8);
+    const ax=p.x+nx*tip,ay=p.y+ny*tip;
+    g.lineStyle(1.4,color,.35);g.beginPath();
+    g.moveTo(ax-nx*6-ny*4,ay-ny*6+nx*4);
+    g.lineTo(ax,ay);g.lineTo(ax-nx*6+ny*4,ay-ny*6-nx*4);g.strokePath();
+  }
   const pull=Math.min(distance,screen==='levels'?selector.maxPull:world.maxPull);
   const tx=drag.x+drag.dx/distance*pull,ty=drag.y+drag.dy/distance*pull;
   g.lineStyle(1,color,.12);g.lineBetween(drag.x,drag.y,tx,ty);
@@ -435,34 +478,54 @@ function drawBall(g,b,color,alpha=1,pull=null){
   const angle=pull?Math.atan2(pull.dy,pull.dx):b.angle;
   const amount=pull?clamp(Math.hypot(pull.dx,pull.dy)/(screen==='home'?home.maxPull:(screen==='levels'?selector.maxPull:(world?.maxPull||150))),0,1):0;
   const cos=Math.cos(angle),sin=Math.sin(angle);
-  const squash=pull?0:b.squash;
+  const phase=screen==='home'?home.phase:screen==='levels'?selector.phase:null;
+  let visual;
+  if(b.isPlayer){
+    visual=playerVisualState(playerVisuals.get(b),{phase,
+      strained:usesStrainedEyes(settings.expressions,drag,phase),expressions:settings.expressions,
+      pulling:!!pull,dt:scene?.frameDt??1/60});
+    playerVisuals.set(b,visual);
+  }
+  // Restart breathing at the round rebound/overlay endpoint, independently of
+  // the old breathing phase and the clock driving the other home animations.
+  const menuPlayer=b.isPlayer&&(screen==='home'||screen==='levels');
+  const breathing=screen==='home'?home.animate:!reducedMotion;
+  const squash=pull?0:menuPlayer&&phase==='idle'
+    ?breathing?Math.sin(visual.idleAge*1.3)*.035:0:b.squash;
+  if(visual){
+    visual.renderedSquash=squash;
+    visual.renderedPull=pull?{amount,angle}:null;
+  }
   g.fillStyle(color,alpha*born);g.beginPath();
   const segments=192;
   for(let i=0;i<=segments;i++){
     const t=i/segments*Math.PI*2,ct=Math.cos(t),st=Math.sin(t);
-    // Only the hemisphere facing the drag stretches; the far hemisphere stays round.
-    const extension=ct>0?amount*.95*Math.pow(ct,2):0;
-    let lx=r*(ct+extension)*(1-squash),ly=r*st*(1+squash*.7);
-    if(pull&&ct>0)ly*=1-amount*.15*ct;
+    // Home, selection, both battle modes and rebound share the same smooth join.
+    const point=pullBallPoint(ct,st,amount);
+    const lx=r*point.x*(1-squash),ly=r*point.y*(1+squash*.7);
     const x=b.x+lx*cos-ly*sin,y=b.y+lx*sin+ly*cos;
     i?g.lineTo(x,y):g.moveTo(x,y);
   }
   g.closePath();g.fillPath();
   if(b.isPlayer){
     const face=isDark(settings.player)?0xf4f3eb:0x252720;
-    const faceOffset=smoothFace({x:b.lookX||0,y:b.lookY||0},faceTarget(b,pull,screen==='home'?home.maxPull:(screen==='levels'?selector.maxPull:(world?.maxPull||150))),scene?.frameDt||1/60);
+    const onScreen=levelPointer&&levelPointer.x>=0&&levelPointer.x<=viewport.width&&levelPointer.y>=0&&levelPointer.y<=viewport.height;
+    const target=screen==='levels'?pointerFaceTarget(b,onScreen?levelPointer:null)
+      :faceTarget(b,pull,screen==='home'?home.maxPull:(world?.maxPull||150));
+    const faceOffset=smoothFace({x:b.lookX||0,y:b.lookY||0},target,scene?.frameDt??1/60);
     b.lookX=faceOffset.x;b.lookY=faceOffset.y;
     const lookX=faceOffset.x*r,lookY=faceOffset.y*r;
     g.fillStyle(face,alpha*.9);
     const roll=b.roll??(world?.phase==='transition'?Math.PI*2*ease(world.phaseTime/1.45):0);
     const rc=Math.cos(roll),rs=Math.sin(roll);
-    const strained=usesStrainedEyes(settings.expressions,drag,screen==='home'?home.phase:screen==='levels'?selector.phase:null);
     for(const [i,eye] of [-1,1].entries()){
       const ex=eye*r*.17+lookX,ey=-r*.07+lookY;
-      if(strained){
+      if(visual.eyeMix>0){
         g.beginPath();
         strainedEyes[i].forEach((point,j)=>{
-          const x=ex+point.x*r,y=ey+point.y*r;
+          const normal=relaxedEyes[i][j],mix=visual.eyeMix;
+          const x=ex+(normal.x+(point.x-normal.x)*mix)*r;
+          const y=ey+(normal.y+(point.y-normal.y)*mix)*r;
           const px=b.x+x*rc-y*rs,py=b.y+x*rs+y*rc;
           j?g.lineTo(px,py):g.moveTo(px,py);
         });
@@ -474,16 +537,22 @@ function drawBall(g,b,color,alpha=1,pull=null){
 
 function bindInput(canvas){
   const position=e=>pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),viewport);
+  const moveLevelPointer=point=>{
+    levelPointer.x=point.x;levelPointer.y=point.y;
+    if(Math.hypot(point.x-levelPointer.startX,point.y-levelPointer.startY)>8)levelPointer.moved=true;
+  };
   canvas.addEventListener('pointerdown',e=>{
     if(paused||modal||transfer||controlFlight||!e.isPrimary||e.button>0)return;
     const point=position(e);
     if(screen==='levels'){
+      if(levelPointer||!['idle','wobble'].includes(selector.phase))return;
       unlockAudio();
+      const target=selector.targetAt(point.x,point.y);
+      levelPointer={id:e.pointerId,x:point.x,y:point.y,startX:point.x,startY:point.y,targetId:target?.id??null,moved:false};
       if(selector.ready&&selector.isPlayerPoint(point.x,point.y)){
         drag={id:e.pointerId,x:point.x,y:point.y,dx:0,dy:0};
-      }else if(selector.isTrackPoint(point.x,point.y)){
-        trackPointer=e.pointerId;selector.startTrack(point.x,point.y,e.timeStamp/1000);
-      }else return;
+      }else if(selector.isTrackPoint(point.x,point.y)&&selector.startTrack(point.x,point.y,e.timeStamp/1000))trackPointer=e.pointerId;
+      // Blank space is captured too, solely for the held-finger gaze.
       canvas.setPointerCapture(e.pointerId);e.preventDefault();return;
     }
     const active=screen==='home'?home:screen==='play'?world:null;
@@ -494,23 +563,46 @@ function bindInput(canvas){
     e.preventDefault();
   });
   canvas.addEventListener('pointermove',e=>{
-    if(trackPointer===e.pointerId&&screen==='levels'){const p=position(e);selector.moveTrack(p.x,p.y,e.timeStamp/1000);e.preventDefault();return;}
+    if(screen==='levels'&&levelPointer?.id===e.pointerId){
+      const p=position(e);moveLevelPointer(p);
+      if(trackPointer===e.pointerId&&levelPointer.moved)selector.moveTrack(p.x,p.y,e.timeStamp/1000);
+      if(drag?.id===e.pointerId){drag.dx=p.x-drag.x;drag.dy=p.y-drag.y;}
+      e.preventDefault();return;
+    }
     if(!drag||drag.id!==e.pointerId)return;
     const p=position(e);drag.dx=p.x-drag.x;drag.dy=p.y-drag.y;e.preventDefault();
   });
   canvas.addEventListener('pointerup',e=>{
-    if(trackPointer===e.pointerId&&screen==='levels'){selector.endTrack(e.timeStamp/1000);trackPointer=null;if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);return;}
+    if(screen==='levels'&&levelPointer?.id===e.pointerId){
+      const p=position(e);moveLevelPointer(p);
+      const gesture=levelPointer;
+      if(trackPointer===e.pointerId){
+        if(gesture.moved)selector.moveTrack(p.x,p.y,e.timeStamp/1000);
+        selector.endTrack(e.timeStamp/1000);trackPointer=null;
+      }
+      if(!paused&&!modal&&!transfer&&!controlFlight){
+        if(drag?.id===e.pointerId){
+          if(selector.shoot(p.x-drag.x,p.y-drag.y)){tone(330,.15,'sine',.045,.4);vibrate(9);}
+        }else if(!gesture.moved&&gesture.targetId!==null&&selector.targetAt(p.x,p.y)?.id===gesture.targetId){
+          selector.activateAt(p.x,p.y);
+        }
+      }
+      cancelDrag();if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
+      e.preventDefault();return;
+    }
     if(!drag||drag.id!==e.pointerId)return;
     const p=position(e);drag.dx=p.x-drag.x;drag.dy=p.y-drag.y;
     if(!paused&&!modal){
       if(screen==='home'&&home.shoot(drag.dx,drag.dy)){tone(220+home.power*190,.15,'sine',.045,.4);vibrate(9);}
       else if(screen==='play'&&world)world.shoot(drag.dx,drag.dy);
-      else if(screen==='levels'&&selector.shoot(drag.dx,drag.dy)){tone(330,.15,'sine',.045,.4);vibrate(9);}
     }
     cancelDrag();if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
   });
-  canvas.addEventListener('pointercancel',cancelDrag);
-  canvas.addEventListener('lostpointercapture',cancelDrag);
+  const cancelPointer=e=>{
+    if(e.pointerId===drag?.id||e.pointerId===levelPointer?.id||e.pointerId===trackPointer)cancelDrag();
+  };
+  canvas.addEventListener('pointercancel',cancelPointer);
+  canvas.addEventListener('lostpointercapture',cancelPointer);
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
 }
 
@@ -604,6 +696,7 @@ function boot(){
         drawFunctionalBall(g,c,colors[c.id],c.id==='mode'?(home.mode==='campaign'?'flag':'infinity'):c.id,fade,c.id==='sound'&&!settings.sound);
       }
       if(!detached())drawBall(g,home.player,hex(settings.player),1,drag||home.pull);
+      else playerVisuals.delete(home.player);
     }
     updateHome(dt){
       const before=home.phase;
@@ -668,12 +761,21 @@ function boot(){
         if(!transfer)selector.step(dt,!!drag);
         for(const e of selector.events.splice(0)){
           if(e.type==='tick'||e.type==='scroll'){tone(360+(Math.abs(selector.offset)%8)*35,.04,'sine',.018,1.1);}
+          if(e.type==='tap'){tone(680,.06,'sine',.04,1.15);vibrate(8);}
           if(e.type==='locked'){tone(150,.10,'sine',.03,.8);vibrate(8);$('#level-announcement').textContent='先通过前一关，即可解锁。';}
         }
+        // Capture the last visible breathing pose before painting an external
+        // state, so a click never inserts a round-ball frame before the transfer.
+        if(selector.action&&!transfer){
+          const action=selector.action;selector.action=null;
+          if(action.type==='home')showHome();else if(action.type==='level')enterLevel(action.level);
+          if(screen==='home')this.drawHome();else if(screen==='play')this.drawArena();
+          updateUiBall(dt);return;
+        }
         this.drawBorder();renderLevels();
-        if(!detached()){drawDragGuide(this.g,selector.player);drawBall(this.g,selector.player,hex(settings.player),1,drag||selector.pull);}
+        if(!detached())drawBall(this.g,selector.player,hex(settings.player),1,drag||selector.pull);
+        else playerVisuals.delete(selector.player);
         updateUiBall(dt);
-        if(selector.action&&!transfer){const action=selector.action;selector.action=null;if(action.type==='home')showHome();else if(action.type==='level')enterLevel(action.level);}
         return;
       }
       if(!world)return;

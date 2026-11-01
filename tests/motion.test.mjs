@@ -1,7 +1,83 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {faceTarget,smoothFace,transferPose} from '../dist/motion.js';
+import {faceTarget,pointerFaceTarget,smoothFace,transferPose,pullBallPoint,playerVisualState,strainedEyeOutline,relaxedEyeOutline} from '../dist/motion.js';
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-6,`${a} ≠ ${b}`);
+const pullPoint=(t,amount)=>pullBallPoint(Math.cos(t),Math.sin(t),amount);
+
+test('held-finger gaze stays subtle, points toward the finger and is continuous at the ball edge',()=>{
+  const body={x:200,y:300,r:30};
+  assert.deepEqual(pointerFaceTarget(body,null),{x:0,y:0});
+  assert.deepEqual(pointerFaceTarget(body,{x:205,y:295}),{x:0,y:0});
+  assert.deepEqual(pointerFaceTarget(body,{x:230,y:300}),{x:0,y:0});
+  assert.ok(pointerFaceTarget(body,{x:230.00001,y:300}).x<1e-7);
+  for(let i=0;i<8;i++){
+    const angle=i*Math.PI/4,dx=Math.cos(angle),dy=Math.sin(angle);
+    let previous=0;
+    for(const distance of [31,60,120,1000,1e6]){
+      const target=pointerFaceTarget(body,{x:body.x+dx*distance,y:body.y+dy*distance});
+      const amount=Math.hypot(target.x,target.y);
+      assert.ok(amount>=previous&&amount<=.080000001);previous=amount;
+      near(target.x/amount,dx);near(target.y/amount,dy);
+    }
+  }
+  const target=pointerFaceTarget(body,{x:600,y:300}),first=smoothFace({x:0,y:0},target,1/60);
+  assert.ok(first.x>0&&first.x<target.x*.5,'the first frame must not snap to the finger');
+  let gaze=first;
+  for(let i=0;i<45;i++)gaze=smoothFace(gaze,target,1/60);
+  near(gaze.x,target.x);
+  const released=smoothFace(gaze,pointerFaceTarget(body,null),1/60);
+  assert.ok(released.x>0&&released.x<gaze.x,'release returns smoothly rather than snapping');
+  assert.deepEqual(smoothFace(gaze,target,0),gaze);
+});
+
+test('pull contour joins the round hemisphere with matching position, tangent and curvature',()=>{
+  const h=1e-4;
+  for(const amount of [.01,.25,.5,.75,1])for(const t of [Math.PI/2,Math.PI*1.5]){
+    const p=pullPoint(t,amount);
+    near(p.x,Math.cos(t));near(p.y,Math.sin(t));
+    for(const side of [-1,1]){
+      const points=[0,1,2,3].map(i=>pullPoint(t+side*i*h,amount));
+      for(const [axis,first,second] of [['x',-Math.sin(t),-Math.cos(t)],['y',Math.cos(t),-Math.sin(t)]]){
+        const v=points.map(q=>q[axis]);
+        const tangent=(-3*v[0]+4*v[1]-v[2])/(2*side*h);
+        const curvature=(2*v[0]-5*v[1]+4*v[2]-v[3])/(h*h);
+        assert.ok(Math.abs(tangent-first)<1e-5,`tangent jump at ${t}, ${axis}, ${amount}`);
+        assert.ok(Math.abs(curvature-second)<1e-3,`curvature jump at ${t}, ${axis}, ${amount}`);
+      }
+    }
+  }
+});
+
+test('pull keeps the back hemisphere, round rest shape, reach and tip roundness',()=>{
+  for(const amount of [0,.25,.5,.75,1]){
+    for(let i=0;i<=200;i++){
+      const t=Math.PI/2+i/200*Math.PI,p=pullPoint(t,amount);
+      near(p.x,Math.cos(t));near(p.y,Math.sin(t));
+      const rest=pullPoint(t*2,0);near(rest.x,Math.cos(t*2));near(rest.y,Math.sin(t*2));
+    }
+    const tip=pullPoint(0,amount);near(tip.x,1+.95*amount);near(tip.y,0);
+  }
+  // Original fully stretched tip radius, measured from the contour rather than
+  // duplicating its weighting polynomial. Rounding the joins must not sharpen it.
+  const h=1e-4,left=pullPoint(-h,1),tip=pullPoint(0,1),right=pullPoint(h,1);
+  const dy=(right.y-left.y)/(2*h),ddx=(right.x-2*tip.x+left.x)/(h*h);
+  assert.ok(Math.abs(-ddx/(dy*dy)-4.01384083045)<1e-5);
+});
+
+test('the pull outline stays symmetric and strictly convex throughout its range',()=>{
+  const count=720;
+  for(let step=0;step<=100;step++){
+    const amount=step/100,points=Array.from({length:count},(_,i)=>pullPoint(i/count*Math.PI*2,amount));
+    for(let i=0;i<count;i++){
+      const prev=points[(i+count-1)%count],p=points[i],next=points[(i+1)%count];
+      const reflected=points[(count-i)%count];near(p.x,reflected.x);near(p.y,-reflected.y);
+      const ux=p.x-prev.x,uy=p.y-prev.y,vx=next.x-p.x,vy=next.y-p.y;
+      assert.ok(ux*vy-uy*vx>0,`shoulder dent or fold at pull ${amount}, sample ${i}`);
+      assert.ok(p.x>=-1-1e-9&&p.x<=1+.95*amount+1e-9);
+    }
+  }
+});
+
 test('reversing a tiny rebound displacement cannot flip the eyes by a fixed amount',()=>{
   const body={vx:0,vy:0};let state={x:0,y:0},maxJump=0;
   for(let i=0;i<120;i++){
@@ -56,6 +132,52 @@ test('the entire strained-eye contour closes smoothly without cusps or crossings
       if(i===0&&j===n-1)continue;
       const d=p[j],e=p[(j+1)%n];
       assert.ok(!(cross(b,c,d)*cross(b,c,e)<0&&cross(d,e,b)*cross(d,e,c)<0),`crossing at ${i},${j}`);
+    }
+  }
+});
+
+test('rebound eye relaxation keeps the handoff frame and settles without extending game phases',()=>{
+  for(const step of [1/120,1/60,1/30]){
+    let v=playerVisualState(undefined,{phase:'wobble',strained:true,expressions:true,pulling:true,dt:step});
+    v=playerVisualState(v,{phase:'idle',strained:false,expressions:true,pulling:false,dt:step});
+    assert.equal(v.eyeMix,1);assert.equal(v.idleAge,0);
+    for(let t=step;t<.12-1e-9;t+=step){
+      const next=playerVisualState(v,{phase:'idle',strained:false,expressions:true,pulling:false,dt:step});
+      assert.ok(next.eyeMix<v.eyeMix&&next.eyeMix>0);v=next;
+    }
+    for(let i=0;i<3;i++)v=playerVisualState(v,{phase:'idle',strained:false,expressions:true,pulling:false,dt:step});
+    assert.equal(v.eyeMix,0);
+  }
+  const rebound=playerVisualState(undefined,{phase:'wobble',strained:true,expressions:true,pulling:true,dt:0});
+  for(const phase of ['flight','external',null]){
+    const v=playerVisualState(rebound,{phase,strained:false,expressions:true,pulling:false,dt:0});
+    assert.equal(v.eyeMix,0,'successful launches still restore the ordinary eyes immediately');
+  }
+  const disabled=playerVisualState(rebound,{phase:'idle',strained:false,expressions:false,pulling:false,dt:0});
+  assert.equal(disabled.eyeMix,0,'turning expressions off takes effect immediately');
+});
+
+test('relaxing eye contours preserve mirror symmetry and reach the exact original ellipse without folds',()=>{
+  const outlines=[-1,1].map(strainedEyeOutline),normal=outlines.map(relaxedEyeOutline);
+  const cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+  for(let step=0;step<=20;step++){
+    const mix=step/20;
+    const contours=outlines.map((points,side)=>points.map((p,i)=>({
+      x:normal[side][i].x+(p.x-normal[side][i].x)*mix,
+      y:normal[side][i].y+(p.y-normal[side][i].y)*mix,
+    })));
+    const [left,right]=contours;
+    for(let i=0;i<left.length;i++){
+      near(left[i].x,-right[i].x);near(left[i].y,right[i].y);
+      if(step===0)near((left[i].x/.0525)**2+(left[i].y/.095)**2,1);
+    }
+    for(const p of contours)for(let i=0;i<p.length;i++){
+      const a=p[i],b=p[(i+1)%p.length];
+      for(let j=i+2;j<p.length;j++){
+        if(i===0&&j===p.length-1)continue;
+        const c=p[j],d=p[(j+1)%p.length];
+        assert.ok(!(cross(a,b,c)*cross(a,b,d)<0&&cross(c,d,a)*cross(c,d,b)<0),`eye folds at blend ${mix}`);
+      }
     }
   }
 });

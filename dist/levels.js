@@ -1,6 +1,4 @@
-import {clamp,lerp} from './physics.js';
-import {contactDistance} from './home.js';
-import {smooth} from './motion.js';
+import {clamp} from './physics.js';
 
 const TAU=Math.PI*2;
 const START=Math.PI*2/3;
@@ -8,26 +6,6 @@ const SPAN=Math.PI*5/3;
 const point=(cx,cy,r,a)=>({x:cx+Math.cos(a)*r,y:cy+Math.sin(a)*r});
 const angleOnTrack=(x,y,l)=>((Math.atan2(y-l.cy,x-l.cx)-l.startAngle)%TAU+TAU)%TAU;
 
-
-// Earliest contact of the player's moving disc with a clipped ball's straight
-// end-cap. The segment's radius-expanded capsule includes both rounded ends.
-function capsuleContact(player,nx,ny,a,b){
-  const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy);
-  const endpoint=v=>Math.hypot(player.x-v.x,player.y-v.y)<=player.r?0:contactDistance(player,{...v,r:0},nx,ny);
-  let first=Math.min(endpoint(a),endpoint(b));
-  if(len<1e-8)return first;
-  const ux=dx/len,uy=dy/len,px=player.x-a.x,py=player.y-a.y;
-  const across=ux*py-uy*px,along=ux*px+uy*py,velocity=ux*ny-uy*nx;
-  if(Math.abs(across)<=player.r&&along>=0&&along<=len)return 0;
-  if(Math.abs(velocity)>1e-9){
-    for(const side of [-1,1]){
-      const distance=(side*player.r-across)/velocity;
-      const position=along+distance*(nx*ux+ny*uy);
-      if(distance>=0&&position>=0&&position<=len)first=Math.min(first,distance);
-    }
-  }
-  return first;
-}
 
 export function levelLayout(width,height){
   const short=Math.min(width,height),unit=clamp(short*.047,18,34),ballRadius=unit*1.7;
@@ -55,13 +33,17 @@ export function trackPath(l){
 }
 
 export class LevelSelector{
-  constructor(width,height,unlocked=1,focusLevel=1){
+  constructor(width,height,unlocked=1,focusLevel=unlocked){
     this.width=width;this.height=height;this.layout=levelLayout(width,height);
     this.unlocked=clamp(Math.floor(Number(unlocked)||1),1,100);
-    this.offset=clamp(Math.floor(Number(focusLevel)||1)-1-Math.floor(this.layout.count/2),0,this.maxOffset);
+    // Focus the top-centre slot when it exists; with an even count, use the
+    // left of the middle pair. Keep whole slots and clamp to the first/last
+    // page when alignment would exceed the finite 1–100 range.
+    const focusSlot=Math.floor((this.layout.count-1)/2);
+    this.offset=clamp(Math.floor(Number(focusLevel)||1)-1-focusSlot,0,this.maxOffset);
     this.velocity=0;this.snapTarget=this.offset;this.trackDrag=null;
     this.clock=0;this.events=[];this.action=null;this.phase='idle';this.phaseTime=0;
-    this.direction={x:0,y:1};this.power=0;this.target=null;this.remaining=0;this.speed=0;this.lastTick=Math.round(this.offset);this.hitTimes=new Map();
+    this.direction={x:0,y:1};this.power=0;this.lastTick=Math.round(this.offset);this.hitTimes=new Map();
     this.player={x:width/2,y:height/2,r:this.layout.ballRadius,isPlayer:true,born:1,solid:true,vx:0,vy:0,angle:0,squash:0,roll:0,lookX:0,lookY:0};
   }
   get maxOffset(){return 100-this.layout.count;}
@@ -95,8 +77,29 @@ export class LevelSelector{
     return r>=l.inner&&r<=l.outer&&a<=SPAN;
   }
   isPlayerPoint(x,y){return Math.hypot(x-this.player.x,y-this.player.y)<=this.player.r;}
+  targetAt(x,y){
+    const contains=b=>((x-b.x)/(b.r*(b.sx||1)))**2+((y-b.y)/(b.r*(b.sy||1)))**2<=1;
+    if(contains(this.returnBall))return this.returnBall;
+    if(!this.isTrackPoint(x,y))return null;
+    return this.visibleBalls.find(contains)||null;
+  }
+  activateAt(x,y){
+    if(!['idle','wobble'].includes(this.phase)||this.trackDrag)return false;
+    const target=this.targetAt(x,y);
+    if(!target)return false;
+    if(target.id!=='home'&&!target.unlocked){
+      this.hitTimes.set(target.level,this.clock);
+      this.events.push({type:'locked',level:target.level});
+      return true;
+    }
+    this.phase='external';this.phaseTime=0;
+    this.player.vx=this.player.vy=0;
+    this.action=target.id==='home'?{type:'home'}:{type:'level',level:target.level};
+    this.events.push({type:'tap',id:target.id,target});
+    return true;
+  }
   startTrack(x,y,time=0){
-    if(this.phase!=='idle'||!this.isTrackPoint(x,y))return false;
+    if(this.phase==='external'||this.trackDrag||!this.isTrackPoint(x,y))return false;
     const l=this.layout,angle=Math.atan2(y-l.cy,x-l.cx);
     this.trackDrag={x,y,time,lastTime:time,raw:this.offset,startOffset:this.offset,tx:-Math.sin(angle),ty:Math.cos(angle),samples:[{time,value:this.offset}]};
     this.velocity=0;this.snapTarget=null;return true;
@@ -134,44 +137,12 @@ export class LevelSelector{
     if(!this.ready||distance<6)return false;
     this.power=clamp(distance/this.maxPull,0,1);
     this.direction={x:-dx/distance,y:-dy/distance};
-    const speed=this.layout.unit*40*this.power;
-    const candidates=[this.returnBall,...this.visibleBalls].map(target=>{
-      let travel=contactDistance(this.player,target,this.direction.x,this.direction.y);
-      if(target.id!=='home'){
-        if(Number.isFinite(travel)){
-          const px=this.player.x+this.direction.x*travel,py=this.player.y+this.direction.y*travel;
-          const dx=px-target.x,dy=py-target.y,d=Math.hypot(dx,dy);
-          if(!this.isTrackPoint(target.x+dx/d*target.r,target.y+dy/d*target.r))travel=Infinity;
-        }
-        // All balls clear the inner/outer circles by 8px. Partial clipping can
-        // therefore only expose a chord on one of the two radial end-caps.
-        for(const angle of [this.layout.startAngle,this.layout.endAngle]){
-          const ux=Math.cos(angle),uy=Math.sin(angle);
-          const dx=target.x-this.layout.cx,dy=target.y-this.layout.cy;
-          const along=dx*ux+dy*uy,across=ux*dy-uy*dx;
-          if(along<=0||Math.abs(across)>=target.r)continue;
-          const half=Math.sqrt(target.r*target.r-across*across);
-          const a=point(this.layout.cx,this.layout.cy,along-half,angle);
-          const b=point(this.layout.cx,this.layout.cy,along+half,angle);
-          travel=Math.min(travel,capsuleContact(this.player,this.direction.x,this.direction.y,a,b));
-        }
-      }
-      return {target,distance:travel};
-    }).sort((a,b)=>a.distance-b.distance);
-    this.target=candidates[0].target;this.remaining=candidates[0].distance;
-    this.phaseTime=0;
-    this.cancelTrack();
-    const reachable=speed*(1-Math.exp(-.6*1.6))/.6;
-    if(!Number.isFinite(this.remaining)||this.remaining>reachable){
-      this.phase='wobble';this.player.vx=this.player.vy=0;
-    }else{
-      this.phase='flight';this.speed=speed;
-      this.player.angle=Math.atan2(dy,dx);this.player.squash=-.25*this.power;
-    }
+    this.phase='wobble';this.phaseTime=0;
+    this.player.vx=this.player.vy=0;
     this.events.push({type:'shoot',power:this.power});return true;
   }
   resetPlayer(){
-    this.phase='idle';this.phaseTime=0;this.target=null;
+    this.phase='idle';this.phaseTime=0;
     Object.assign(this.player,{x:this.layout.cx,y:this.layout.cy,r:this.layout.ballRadius,vx:0,vy:0,squash:0,roll:0});
   }
   resize(width,height){
@@ -185,8 +156,7 @@ export class LevelSelector{
     dt=clamp(dt,0,.1);this.clock+=dt;
     const n=Math.max(1,Math.ceil(dt*120)),h=dt/n;
     for(let i=0;i<n;i++){
-      // Freeze the rendered rail during the predicted flight and return.
-      if(this.phase==='idle'&&!dragging||this.phase==='wobble')this.stepTrack(h);
+      if((this.phase==='idle'&&!dragging)||this.phase==='wobble')this.stepTrack(h);
       this.stepPlayer(h);
     }
     this.emitTick();
@@ -206,37 +176,8 @@ export class LevelSelector{
     }
   }
   stepPlayer(dt){
-    const p=this.player,l=this.layout;
     this.phaseTime+=dt;
-    if(this.phase==='idle'){p.squash=0;return;}
-    if(this.phase==='wobble'){
-      if(this.phaseTime>=.82)this.resetPlayer();
-      return;
-    }
-    if(this.phase==='flight'){
-      const travel=this.speed*(1-Math.exp(-.6*dt))/.6;
-      const move=Math.min(travel,this.remaining);
-      p.x+=this.direction.x*move;p.y+=this.direction.y*move;
-      this.remaining-=move;this.speed*=Math.exp(-.6*dt);
-      p.vx=this.direction.x*this.speed;p.vy=this.direction.y*this.speed;
-      p.squash*=Math.exp(-dt*10);
-      if(this.remaining<=.001){
-        p.vx=p.vy=0;this.phaseTime=0;
-        const b=this.target;
-        if(b.id==='home'||b.unlocked){
-          this.phase='external';this.action=b.id==='home'?{type:'home'}:{type:'level',level:b.level};
-        }else{
-          this.phase='returning';this.from={x:p.x,y:p.y,r:p.r};
-          this.hitTimes.set(b.level,this.clock);this.events.push({type:'locked',level:b.level});
-        }
-      }
-      return;
-    }
-    if(this.phase==='returning'){
-      const t=smooth(this.phaseTime/.68);
-      p.x=lerp(this.from.x,l.cx,t);p.y=lerp(this.from.y,l.cy,t);
-      p.squash=Math.sin(this.phaseTime*14)*.15*(1-t);p.roll=Math.sin(Math.PI*t)*.5;
-      if(this.phaseTime>=.68)this.resetPlayer();
-    }
+    if(this.phase==='idle'){this.player.squash=0;return;}
+    if(this.phase==='wobble'&&this.phaseTime>=.82)this.resetPlayer();
   }
 }

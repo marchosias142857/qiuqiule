@@ -49,7 +49,7 @@
     <button id="home-play" class="home-play" data-action="home-launch" aria-label="开始游戏：拖动屏幕，让黑球撞击播放球；也可按回车开始"></button>
   </div>
 
-  <svg id="levels-view" hidden aria-label="关卡选择：直接拖动中央小球，撞向关卡；滑动圆环浏览1至100关"></svg>
+  <svg id="levels-view" hidden aria-label="关卡选择：点击关卡小球进入，点击下方返回球回到主页；滑动圆环浏览1至100关"></svg>
   <div id="level-announcement" class="visually-hidden" role="status" aria-live="polite"></div>
   <section id="hud" class="screen hud" hidden aria-label="游戏状态">
     <div class="hud-top">
@@ -102,7 +102,7 @@
       <div class="buff-legend"><span><b>△</b> 密度</span><span><b>□</b> 能量</span><span><b>⬠</b> 特殊能力</span></div>
       <div id="buff-guide" class="buff-guide"></div>
       <p class="help-rule">场上敌球达到 <strong>18 颗</strong>，本局结束。开场 2 颗敌球，基础血量 19。敌球的血量、体型、密度和分值随阶段提高，刷新间隔逐渐缩短；局内经过的时间也会提高血量、密度和刷新速度，暂停时不计时。</p>
-      <p class="game-version">球球了 · 3.0.5</p>
+      <p class="game-version">球球了 · 4.1.0</p>
       </div>
     </section>
     <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-label="本局结算">
@@ -117,7 +117,7 @@
       </div>
     </section>
   </div>
-  <div id="ui-ball" hidden aria-hidden="true"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="50"/><g class="ui-eyes"><ellipse cx="41.5" cy="46.5" rx="2.625" ry="4.75"/><ellipse cx="58.5" cy="46.5" rx="2.625" ry="4.75"/></g></svg></div>
+  <div id="ui-ball" hidden aria-hidden="true"><svg viewBox="0 0 100 100"><circle class="ui-body" cx="50" cy="50" r="50"/><path class="ui-pull-outline" style="display:none"/><g class="ui-eyes"><g class="ui-normal-eyes"><ellipse cx="41.5" cy="46.5" rx="2.625" ry="4.75"/><ellipse cx="58.5" cy="46.5" rx="2.625" ry="4.75"/></g><g class="ui-eye-paths" style="display:none"><path class="ui-eye-left"/><path class="ui-eye-right"/></g></g></svg></div>
   <div id="result-shadow" hidden aria-hidden="true"></div>
   <div id="control-transfers" aria-hidden="true"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

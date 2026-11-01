@@ -36,6 +36,47 @@ test('first and last pages show 1 lower-left and 100 lower-right without wrappin
   assert.equal(s.visibleBalls.length,l.count);assert.ok(s.visibleBalls.every(b=>b.level>=1&&b.level<=100));
 });
 
+test('entry centres the highest unlocked level at the top, choosing the left middle slot only when needed',()=>{
+  for(const [w,h] of [[320,568],[390,844],[844,390],[1363,936]]){
+    for(const unlocked of [12,50,80]){
+      const s=new LevelSelector(w,h,unlocked),l=s.layout;
+      const target=s.visibleBalls.find(b=>b.level===unlocked);
+      assert.ok(target?.fullyVisible&&target.unlocked);
+      // Compare actual rendered positions rather than repeating the index
+      // formula: focus must be nearest to the top of the centreline.
+      const distance=b=>Math.hypot(b.x-l.cx,b.y-(l.cy-l.radius));
+      for(const b of s.visibleBalls)assert.ok(distance(target)<=distance(b)+1e-8);
+      if(l.count%2===1){
+        near(target.x,l.cx);near(target.y,l.cy-l.radius);
+      }else{
+        assert.ok(target.x<l.cx);
+        const next=s.visibleBalls.find(b=>b.level===target.level+1);
+        assert.ok(next.x>l.cx);near(next.y,target.y);near(distance(next),distance(target));
+      }
+      assert.equal(s.visibleBalls.length,l.count);
+      assert.ok(s.visibleBalls.every(b=>b.fullyVisible));
+      assert.equal(s.offset,Math.round(s.offset));
+      assert.equal(s.snapTarget,s.offset);assert.equal(s.velocity,0);
+      advance(s,.5);assert.equal(s.visibleBalls.find(b=>b.level===unlocked).x,target.x);
+    }
+  }
+});
+
+test('default entry clamps at the first and last pages and retains explicit focus support',()=>{
+  for(const [w,h] of [[320,568],[390,844],[844,390],[1363,936]]){
+    const first=new LevelSelector(w,h,1),last=new LevelSelector(w,h,100);
+    assert.equal(first.offset,0);assert.equal(first.visibleBalls[0].level,1);
+    assert.equal(last.offset,last.maxOffset);assert.equal(last.visibleBalls.at(-1).level,100);
+    for(const s of [first,last]){
+      assert.equal(s.visibleBalls.length,s.layout.count);
+      assert.ok(s.visibleBalls.every(b=>b.fullyVisible&&b.level>=1&&b.level<=100));
+    }
+    const explicit=new LevelSelector(w,h,100,1);
+    assert.equal(explicit.offset,0);assert.equal(explicit.unlocked,100);
+    assert.equal(explicit.visibleBalls[0].level,1);
+  }
+});
+
 test('slow precise drag snaps to integer slots and fast flick continues with inertia',()=>{
   const slow=new LevelSelector(390,844,100);slow.offset=20;slow.snapTarget=20;
   dragTangent(slow,.38,1);const released=slow.offset;advance(slow,3);
@@ -46,7 +87,7 @@ test('slow precise drag snaps to integer slots and fast flick continues with ine
 });
 
 test('clockwise at top reduces offset; endpoints rubber-band without nonexistent levels',()=>{
-  const s=new LevelSelector(390,844,100);dragTangent(s,-10,.1);
+  const s=new LevelSelector(390,844,100,1);dragTangent(s,-10,.1);
   assert.ok(s.offset<0&&s.offset>-.91);assert.ok(s.visibleBalls.every(b=>b.level>=1));advance(s,4);near(s.offset,0);
   s.offset=s.maxOffset;s.snapTarget=s.offset;dragTangent(s,10,.1);
   assert.ok(s.offset>s.maxOffset&&s.offset<s.maxOffset+.91);assert.ok(s.visibleBalls.every(b=>b.level<=100));advance(s,4);near(s.offset,s.maxOffset);
@@ -60,19 +101,29 @@ test('gesture starting radial line controls direction even after pointer crosses
   assert.equal(s.startTrack(l.cx,l.cy,1),false);assert.equal(s.isTrackPoint(l.cx,l.cy+l.radius),false);
 });
 
-test('unlocked collision emits exactly one level action; locked collision bounces',()=>{
-  for(const unlocked of [1,100]){
-    const s=new LevelSelector(390,844,unlocked),b=s.visibleBalls[2],p=s.player,d=Math.hypot(b.x-p.x,b.y-p.y);
-    s.shoot((p.x-b.x)/d*s.maxPull,(p.y-b.y)/d*s.maxPull);advance(s,.8);
-    if(unlocked===100){assert.deepEqual(s.action,{type:'level',level:b.level});assert.equal(s.phase,'external');}
-    else{assert.equal(s.action,null);assert.ok(s.events.some(e=>e.type==='locked'));assert.equal(s.phase,'idle');}
-  }
+test('clicking an unlocked level emits one tap and enters it once',()=>{
+  const s=new LevelSelector(390,844,100),b=s.visibleBalls[2];
+  assert.equal(s.targetAt(b.x,b.y).level,b.level);
+  assert.equal(s.activateAt(b.x,b.y),true);
+  assert.deepEqual(s.action,{type:'level',level:b.level});assert.equal(s.phase,'external');
+  assert.equal(s.events.filter(e=>e.type==='tap').length,1);
+  assert.equal(s.events[0].id,b.id);assert.equal(s.events[0].target.level,b.level);
+  assert.equal(s.activateAt(b.x,b.y),false);assert.equal(s.shoot(20,0),false);
+  assert.equal(s.startTrack(s.layout.cx,s.layout.cy-s.layout.radius),false);
+  assert.equal(s.events.filter(e=>e.type==='tap').length,1);
 });
 
-test('return collision leaves selection and resize preserves a valid integer page',()=>{
-  const s=new LevelSelector(390,844,100,98);s.shoot(0,-s.maxPull);advance(s,.6);assert.deepEqual(s.action,{type:'home'});
+
+test('return ball is independently clickable outside the track and resize preserves a valid page',()=>{
+  const s=new LevelSelector(390,844,100,98),b=s.returnBall;
+  assert.equal(s.isTrackPoint(b.x,b.y),false);assert.equal(s.targetAt(b.x,b.y).id,'home');
+  assert.equal(s.activateAt(b.x,b.y),true);assert.deepEqual(s.action,{type:'home'});
+  assert.equal(s.phase,'external');assert.equal(s.events[0].type,'tap');
+  assert.equal(s.events[0].id,'home');
   s.resize(844,390);assert.ok(s.offset>=0&&s.offset<=s.maxOffset);near(s.offset,Math.round(s.offset));near(s.player.x,422);near(s.player.y,195);
+  assert.equal(s.phase,'idle');assert.equal(s.action,null);
 });
+
 
 test('player, level and return balls share the same enlarged diameter',()=>{
   for(const [w,h] of [[320,568],[390,844],[844,390],[1363,936]]){
@@ -88,21 +139,34 @@ test('player, level and return balls share the same enlarged diameter',()=>{
   }
 });
 
-test('an off-target shot rebounds in place with the same alternating home pull',()=>{
-  const s=new LevelSelector(390,844,100);
-  // The overscroll's blank edge is real empty space, not a wrapped phantom ball.
-  s.offset=-.89;
-  const angle=Math.PI*.75;
-  assert.equal(s.shoot(-Math.cos(angle)*s.maxPull,-Math.sin(angle)*s.maxPull),true);
-  assert.equal(s.phase,'wobble');assert.equal(s.ready,false);
-  const signs=new Set(),x=s.player.x,y=s.player.y;
-  for(let i=0;i<99;i++){
-    s.step(1/120);near(s.player.x,x);near(s.player.y,y);
-    if(s.pull)signs.add(Math.sign(s.pull.dx));
+test('every pull direction and strength rebounds in place without activating any ball',()=>{
+  for(const unlocked of [1,100])for(const distance of [6.001,7,60,170,500]){
+    const sample=new LevelSelector(390,844,unlocked);
+    for(const target of [sample.returnBall,...sample.visibleBalls,{x:sample.player.x+1,y:sample.player.y}]){
+      const s=new LevelSelector(390,844,unlocked),p=s.player,d=Math.hypot(target.x-p.x,target.y-p.y);
+      assert.equal(s.shoot((p.x-target.x)/d*distance,(p.y-target.y)/d*distance),true);
+      assert.equal(s.phase,'wobble');assert.equal(s.ready,false);
+      const x=p.x,y=p.y;
+      for(let i=0;i<99;i++){
+        s.step(1/120);near(p.x,x);near(p.y,y);
+        assert.equal(p.vx,0);assert.equal(p.vy,0);assert.equal(s.action,null);
+      }
+      assert.equal(s.phase,'idle');assert.equal(s.pull,null);
+      assert.ok(!s.events.some(e=>['tap','locked'].includes(e.type)));
+    }
   }
-  assert.ok(signs.has(1)&&signs.has(-1));assert.equal(s.phase,'idle');assert.equal(s.pull,null);
-  assert.equal(s.action,null);assert.equal(s.player.vx,0);assert.equal(s.player.vy,0);
 });
+
+test('short taps do not start a rebound; accepted pulls keep their clamped strength',()=>{
+  const s=new LevelSelector(390,844,100);
+  for(const [dx,dy] of [[0,0],[5,0],[0,-5.99]])assert.equal(s.shoot(dx,dy),false);
+  assert.equal(s.phase,'idle');assert.equal(s.events.length,0);
+  assert.equal(s.shoot(6,0),true);advance(s,.9);
+  assert.equal(s.shoot(0,-500),true);assert.equal(s.power,1);
+  assert.deepEqual(s.direction,{x:-0,y:1});
+  assert.equal(s.shoot(30,0),false,'a second player drag waits for the rebound');
+});
+
 
 test('a weak aimed shot never drifts halfway towards a level',()=>{
   const s=new LevelSelector(390,844,100),b=s.visibleBalls[2],p=s.player;
@@ -112,24 +176,38 @@ test('a weak aimed shot never drifts halfway towards a level',()=>{
   near(p.x,x);near(p.y,y);assert.equal(s.ready,true);assert.equal(s.action,null);
 });
 
-test('a locked hit freezes target geometry, returns to center, and emits once',()=>{
-  const s=new LevelSelector(390,844,1),b=s.visibleBalls[2],p=s.player;
-  const d=Math.hypot(b.x-p.x,b.y-p.y),x=p.x,y=p.y;
-  s.velocity=12;
-  assert.equal(s.shoot((p.x-b.x)/d*s.maxPull,(p.y-b.y)/d*s.maxPull),true);
-  assert.equal(s.phase,'flight');const offset=s.offset;
-  let n=0;while(s.phase==='flight'&&n++<240)s.step(1/120);
-  assert.equal(s.phase,'returning');near(s.offset,offset);
-  near(Math.hypot(p.x-b.x,p.y-b.y),p.r+b.r);
-  assert.equal(s.startTrack(s.layout.cx,s.layout.cy-s.layout.radius,0),false);
-  advance(s,.8);near(p.x,x);near(p.y,y);
-  assert.equal(s.ready,true);assert.equal(s.action,null);
+test('clicking a locked ball gives only lock feedback and leaves the player in place',()=>{
+  const s=new LevelSelector(390,844,1),b=s.visibleBalls[2],x=s.player.x,y=s.player.y;
+  s.clock=.1;
+  assert.equal(s.activateAt(b.x,b.y),true);assert.equal(s.phase,'idle');assert.equal(s.action,null);
+  assert.equal(s.hitTimes.get(b.level),.1);assert.deepEqual(s.events,[{type:'locked',level:b.level}]);
+  near(s.player.x,x);near(s.player.y,y);assert.equal(s.ready,true);
+  s.step(.04);assert.notEqual(s.visibleBalls.find(v=>v.level===b.level).sx,1);
+  advance(s,.8);near(s.player.x,x);near(s.player.y,y);assert.equal(s.phase,'idle');
   assert.equal(s.events.filter(e=>e.type==='locked').length,1);
 });
 
-test('resizing an unfinished shot safely resets player and selection control',()=>{
+test('blank space and the central player cannot be activated',()=>{
+  const s=new LevelSelector(390,844,100),l=s.layout;
+  for(const [x,y] of [[0,0],[l.cx,l.cy],[l.cx+l.outer+5,l.cy],[l.cx,l.cy+l.radius+s.returnBall.r+2]]){
+    assert.equal(s.targetAt(x,y),null);assert.equal(s.activateAt(x,y),false);
+  }
+  assert.equal(s.action,null);assert.equal(s.events.length,0);assert.equal(s.phase,'idle');
+});
+
+test('click hit regions follow the displayed locked-ball deformation',()=>{
+  const s=new LevelSelector(390,844,1),b=s.visibleBalls[2];
+  s.hitTimes.set(b.level,0);s.clock=.04;
+  const shown=s.visibleBalls.find(v=>v.level===b.level);
+  assert.ok(shown.sx>1.04&&shown.sy<.97);
+  assert.equal(s.targetAt(b.x+b.r*1.04,b.y).level,b.level);
+  assert.equal(s.targetAt(b.x,b.y+b.r*.97),null);
+});
+
+
+test('resizing an unfinished rebound safely resets player and selection control',()=>{
   const s=new LevelSelector(390,844,100);s.shoot(0,-s.maxPull);
-  assert.equal(s.phase,'flight');s.resize(844,390);
+  assert.equal(s.phase,'wobble');s.resize(844,390);
   assert.equal(s.phase,'idle');assert.equal(s.ready,true);assert.equal(s.action,null);
   near(s.player.x,422);near(s.player.y,195);
 });
@@ -149,24 +227,59 @@ test('selection rebound matches homepage deformation and expression lifetime',()
 });
 
 
-test('a partly clipped level can be hit on its visible end-cap chord',()=>{
-  const s=new LevelSelector(390,844,100);s.offset=.65;
-  const angle=Math.PI*2/3;
-  s.shoot(-Math.cos(angle)*s.maxPull,-Math.sin(angle)*s.maxPull);
-  assert.equal(s.phase,'flight');assert.equal(s.target.level,1);
-  const travel=s.remaining;assert.ok(travel>68&&travel<69);
-  advance(s,.3);assert.deepEqual(s.action,{type:'level',level:1});
-  near(Math.hypot(s.player.x-s.layout.cx,s.player.y-s.layout.cy),travel);
+test('partly clipped balls can only be clicked on the visible side of either track cap',()=>{
+  for(const side of ['start','end']){
+    const s=new LevelSelector(390,844,100),l=s.layout;
+    s.offset=side==='start'?.65:.35;
+    const b=side==='start'?s.visibleBalls[0]:s.visibleBalls.at(-1);
+    assert.equal(b.fullyVisible,false);assert.equal(s.isTrackPoint(b.x,b.y),false);
+    assert.equal(s.targetAt(b.x,b.y),null);assert.equal(s.activateAt(b.x,b.y),false);
+    const angle=side==='start'?l.startAngle+.02:l.endAngle-.02;
+    const x=l.cx+Math.cos(angle)*l.radius,y=l.cy+Math.sin(angle)*l.radius;
+    assert.ok(Math.hypot(x-b.x,y-b.y)<b.r);
+    assert.equal(s.targetAt(x,y).level,b.level);assert.equal(s.activateAt(x,y),true);
+    assert.deepEqual(s.action,{type:'level',level:b.level});
+  }
 });
 
-test('fractional and overscrolled rails resume integer snapping after locked return',()=>{
+
+test('locked taps preserve fractional and overscrolled track settling',()=>{
   for(const offset of [-.7,4.35,93.7]){
-    const s=new LevelSelector(390,844,1);s.offset=offset;s.velocity=15;
-    const b=s.visibleBalls.find(b=>b.fullyVisible&&b.level>1),p=s.player;
-    const d=Math.hypot(b.x-p.x,b.y-p.y);
-    s.shoot((p.x-b.x)/d*s.maxPull,(p.y-b.y)/d*s.maxPull);
-    assert.equal(s.phase,'flight');advance(s,.4);near(s.offset,offset);
-    advance(s,4);assert.equal(s.phase,'idle');near(s.offset,Math.max(0,Math.min(s.maxOffset,Math.round(offset))));
+    const s=new LevelSelector(390,844,1);s.offset=offset;s.velocity=0;s.snapTarget=Math.max(0,Math.min(s.maxOffset,Math.round(offset)));
+    const b=s.visibleBalls.find(b=>b.fullyVisible&&b.level>1);
+    assert.equal(s.activateAt(b.x,b.y),true);assert.equal(s.phase,'idle');near(s.offset,offset);
+    advance(s,4);near(s.offset,Math.max(0,Math.min(s.maxOffset,Math.round(offset))));
     assert.equal(s.visibleBalls.length,s.layout.count);assert.ok(s.visibleBalls.every(b=>b.fullyVisible));
   }
+});
+
+test('levels and return remain clickable during the player rebound',()=>{
+  for(const kind of ['level','home','locked']){
+    const s=new LevelSelector(390,844,kind==='locked'?1:100);
+    assert.equal(s.shoot(40,0),true);s.step(.1);
+    const b=kind==='home'?s.returnBall:s.visibleBalls[2];
+    assert.equal(s.activateAt(b.x,b.y),true);
+    if(kind==='locked'){
+      assert.equal(s.phase,'wobble');assert.equal(s.action,null);assert.ok(s.pull);
+      assert.equal(s.events.filter(e=>e.type==='locked').length,1);
+    }else{
+      assert.equal(s.phase,'external');assert.equal(s.pull,null);
+      assert.deepEqual(s.action,kind==='home'?{type:'home'}:{type:'level',level:b.level});
+    }
+    near(s.player.x,s.layout.cx);near(s.player.y,s.layout.cy);
+  }
+});
+
+test('track scrolling works throughout a rebound and track drags cannot activate balls',()=>{
+  const s=new LevelSelector(390,844,100),l=s.layout;
+  s.offset=20;s.snapTarget=20;assert.equal(s.shoot(40,0),true);
+  assert.equal(s.startTrack(l.cx,l.cy-l.radius,0),true);
+  assert.equal(s.startTrack(l.cx+l.radius,l.cy,0),false,'a drag cannot overwrite another drag');
+  s.moveTrack(l.cx-l.radius*l.stepAngle,l.cy-l.radius,.2);assert.ok(s.offset>20);
+  const b=s.visibleBalls.find(b=>b.fullyVisible);
+  assert.equal(s.activateAt(b.x,b.y),false);assert.equal(s.activateAt(s.returnBall.x,s.returnBall.y),false);
+  advance(s,.9);assert.equal(s.phase,'idle');assert.equal(s.ready,false);
+  near(s.player.x,l.cx);near(s.player.y,l.cy);
+  s.endTrack(1.1);assert.equal(s.ready,true);advance(s,4);
+  near(s.offset,21);assert.equal(s.action,null);assert.ok(s.events.some(e=>e.type==='tick'));
 });

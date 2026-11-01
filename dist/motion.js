@@ -1,7 +1,26 @@
 import {clamp,lerp} from './physics.js';
 export const smooth = t => { t=clamp(t,0,1);return t*t*t*(10+t*(-15+6*t)); };
+
+// Unit-radius contour in drag-local coordinates. Both weights and their first
+// two derivatives vanish at the hemisphere joins, matching the untouched circle
+// in position, tangent and curvature. The (2-front) factor keeps the original
+// tip's curvature as well as its 95% extension, without making it sharper.
+export function pullBallPoint(ct,st,amount){
+  const front=Math.max(0,ct),weight=front*front*front;
+  return {x:ct+.95*amount*weight*(2-front),y:st*(1-.15*amount*weight)};
+}
+
 export function faceTarget(body,pull,maxPull){
   return pull?{x:-clamp(pull.dx/maxPull,-1,1)*.1,y:-clamp(pull.dy/maxPull,-1,1)*.1}:{x:clamp(body.vx/500,-.15,.15),y:clamp(body.vy/500,-.15,.15)};
+}
+// A subtle radial gaze, continuous at the player's edge and bounded even when
+// the finger is far away. The caller smooths changes, including release to zero.
+export function pointerFaceTarget(body,point){
+  if(!point)return {x:0,y:0};
+  const dx=point.x-body.x,dy=point.y-body.y,distance=Math.hypot(dx,dy);
+  if(distance<=body.r)return {x:0,y:0};
+  const amount=.08*(1-Math.exp(-(distance-body.r)/Math.max(1,body.r*4)));
+  return {x:dx/distance*amount,y:dy/distance*amount};
 }
 export function smoothFace(current,target,dt){
   const k=1-Math.exp(-Math.min(dt,.05)*20);
@@ -10,7 +29,10 @@ export function smoothFace(current,target,dt){
 export function transferPose(from,to,progress){
   const t=smooth(progress),dx=to.x-from.x,dy=to.y-from.y,d=Math.hypot(dx,dy);
   const arc=Math.sin(Math.PI*t)*Math.min(26,d*.07);
-  return {x:lerp(from.x,to.x,t)-(d?dy/d*arc:0),y:lerp(from.y,to.y,t)+(d?dx/d*arc:0),r:lerp(from.r,to.r,t),roll:t*Math.PI*2,squash:Math.sin(Math.PI*t)*.12};
+  const pose={x:lerp(from.x,to.x,t)-(d?dy/d*arc:0),y:lerp(from.y,to.y,t)+(d?dx/d*arc:0),r:lerp(from.r,to.r,t),roll:t*Math.PI*2,squash:Math.sin(Math.PI*t)*.12+(from.visualSquash||0)*(1-t)};
+  if(from.visualPull)pose.visualPull={amount:from.visualPull.amount*(1-t),angle:from.visualPull.angle};
+  if(from.visualEyeMix!==undefined)pose.visualEyeMix=from.visualEyeMix*(1-t);
+  return pose;
 }
 
 // Ballistic flight followed by a short, damped landing; shadow follows height.
@@ -30,6 +52,45 @@ export function resultBounce(anchor, seconds, reducedMotion = false) {
 // Keep the expression through every zero crossing of the home rebound.
 export function usesStrainedEyes(enabled,drag,homePhase){
   return !!enabled && (homePhase==='wobble' || !!drag && Math.hypot(drag.dx,drag.dy)>0);
+}
+
+// Presentation-only state: game phases, readiness and body properties are never
+// changed. A completed rebound keeps its last eye shape on the handoff frame,
+// then relaxes it; other releases retain their immediate normal expression.
+export function playerVisualState(previous,{phase,strained,expressions,pulling,dt}){
+  const elapsed=Math.max(0,Math.min(dt,.05));
+  const idle=phase==='idle'&&!pulling;
+  // A fresh visual breathing cycle begins at rest; never inherit the world's
+  // clock or the squash retained before a drag. Let the full cycle keep running.
+  const idleAge=idle&&previous?.phase==='idle'&&!previous.pulling
+    ?previous.idleAge+elapsed:0;
+  let eyeAge=.12;
+  if(expressions&&idle&&!strained){
+    if(previous?.phase==='wobble'&&previous.eyeMix>0)eyeAge=0;
+    else eyeAge=Math.min(.12,(previous?.eyeAge??.12)+elapsed);
+  }
+  return {phase,pulling,idleAge,eyeAge,eyeMix:strained?1:1-smooth(eyeAge/.12)};
+}
+
+// Corresponding points on the original normal eye, aligned to the strained
+// outline's winding and best-fitting phase. This avoids twisting either eye
+// while its concave contour relaxes, and preserves the original ellipse size.
+export function relaxedEyeOutline(outline){
+  const n=outline.length,rx=.105/2,ry=.19/2;
+  const area=outline.reduce((sum,p,i)=>{
+    const q=outline[(i+1)%n];return sum+p.x*q.y-p.y*q.x;
+  },0);
+  const direction=Math.sign(area)||1;
+  let a=0,b=0;
+  for(let i=0;i<n;i++){
+    const t=direction*i/n*Math.PI*2,c=Math.cos(t),s=Math.sin(t),p=outline[i];
+    a+=rx*p.x*c+ry*p.y*s;b+=-rx*p.x*s+ry*p.y*c;
+  }
+  const phase=Math.atan2(b,a);
+  return outline.map((_,i)=>{
+    const t=direction*i/n*Math.PI*2+phase;
+    return {x:rx*Math.cos(t),y:ry*Math.sin(t)};
+  });
 }
 
 // A periodic cubic B-spline rounds all six corners, including the inner notch.
