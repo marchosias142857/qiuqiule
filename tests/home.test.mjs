@@ -54,3 +54,11 @@ test('settings collision holds the player at contact for the UI transfer',()=>{
   assert.equal(h.phase,'external');assert.equal(h.action,'settings');const {x,y}=h.player;
   advance(h,.5);near(h.player.x,x);near(h.player.y,y);h.reset();assert.equal(h.ready,true);
 });
+
+test('mode ball toggles once per collision and campaign entry lands at selection center',()=>{
+  const h=new HomeWorld(390,844,'endless');
+  h.launchTo('mode');while(h.phase==='flight')h.step(1/120);
+  assert.equal(h.mode,'campaign');assert.equal(h.action,'mode');assert.equal(h.phase,'returning');
+  h.action=null;advance(h,.7);assert.equal(h.action,null);assert.equal(h.mode,'campaign');
+  h.launchToPlay();advance(h,3);assert.equal(h.phase,'done');near(h.player.x,195);near(h.player.y,422);
+});

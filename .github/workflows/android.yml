@@ -1,0 +1,79 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dist/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'capacitor.config.json'
+      - 'scripts/prepare-android.mjs'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install locked dependencies and verify game
+        run: |
+          npm ci
+          npm run check
+          npm test
+
+      - name: Install Android SDK 35
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Generate Android project and bundle game
+        id: prepare
+        run: node scripts/prepare-android.mjs
+
+      - name: Build unsigned release APK
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Align APK and collect signing tool
+        env:
+          APP_VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          mkdir -p artifacts
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -P 16 -f -v 4 \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk \
+            "artifacts/qiuqiule-v${APP_VERSION}-unsigned.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 \
+            "artifacts/qiuqiule-v${APP_VERSION}-unsigned.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging \
+            "artifacts/qiuqiule-v${APP_VERSION}-unsigned.apk" > artifacts/APK-INFO.txt
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" artifacts/apksigner.jar
+          cd artifacts
+          sha256sum *.apk apksigner.jar APK-INFO.txt > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: qiuqiule-v${{ steps.prepare.outputs.version }}-android-unsigned
+          path: artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

@@ -18,7 +18,7 @@ export const BUFFS = [
 ];
 
 export class World {
-  constructor(width, height, random = Math.random) {
+  constructor(width, height, random = Math.random, {spawnInitial = true} = {}) {
     this.random = random;
     this.width = width;
     this.height = height;
@@ -47,8 +47,10 @@ export class World {
     this.player = this.makeBody(width * .5, height * .62, this.unit, PLAYER_BASE_DENSITY);
     this.player.isPlayer = true;
     this.player.hp = Infinity;
-    this.spawnEnemy();
-    this.spawnEnemy();
+    if (spawnInitial) {
+      this.spawnEnemy();
+      this.spawnEnemy();
+    }
   }
 
   makeBody(x, y, r, density) {
@@ -66,6 +68,15 @@ export class World {
   cancelPull() { this.pullStartSpeed = null; }
   get maxPull() { return clamp(Math.min(this.width, this.height) * .25, 90, 170); }
   get baseSpeed() { return this.unit * 40; }
+  get spawnInterval() { return Math.max(.52, 2.45 - (this.stage - 1) * .18 - this.time * .002); }
+  enemyProfile() {
+    return {
+      radiusScale: .7 + this.random() * .38 + Math.min(this.stage - 1, 12) * .014,
+      density: .65 + this.stage * .09 + this.time * .0007,
+      hp: 19 + (this.stage - 1) * 6 + Math.floor(this.time / 45) * 2,
+      value: 10 + Math.floor((this.stage - 1) / 3) * 5,
+    };
+  }
   emit(type, data = {}) { this.events.push({type, ...data}); }
 
   resize(width, height) {
@@ -86,7 +97,8 @@ export class World {
 
   spawnEnemy() {
     if (this.phase !== 'battle' || this.enemies.length >= this.limit) return;
-    const r = this.unit * (.7 + this.random() * .38 + Math.min(this.stage - 1, 12) * .014);
+    const profile = this.enemyProfile();
+    const r = this.unit * profile.radiusScale;
     let x, y, best = -Infinity, pos;
     for (let n = 0; n < 24; n++) {
       x = this.inset + r + this.random() * (this.width - 2 * (this.inset + r));
@@ -96,9 +108,9 @@ export class World {
       if (distance > best) { best = distance; pos = {x, y}; }
       if (best > this.unit * .5) break;
     }
-    const b = this.makeBody(pos.x, pos.y, r, .65 + this.stage * .09 + this.time * .0007);
-    b.maxHp = b.hp = 19 + (this.stage - 1) * 6 + Math.floor(this.time / 45) * 2;
-    b.value = 10 + Math.floor((this.stage - 1) / 3) * 5;
+    const b = this.makeBody(pos.x, pos.y, r, profile.density);
+    b.maxHp = b.hp = profile.hp;
+    b.value = profile.value;
     b.born = 0;
     b.angle = this.random() * Math.PI * 2;
     b.vx = Math.cos(b.angle) * this.unit * .2;
@@ -281,7 +293,7 @@ export class World {
       this.breathTime = Math.max(0, this.breathTime - dt);
       if (this.spawnTimer <= 0) {
         this.spawnEnemy();
-        this.spawnTimer = Math.max(.52, 2.45 - (this.stage - 1) * .18 - this.time * .002);
+        this.spawnTimer = this.spawnInterval;
       }
     }
     const bodies = [p, ...this.enemies];

@@ -1,0 +1,15 @@
+node_modules/
+.DS_Store
+android/
+ios/
+*.tgz
+*.tar.gz
+.sites/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.p12
+.android-signing/
+android-build/
+.openai/

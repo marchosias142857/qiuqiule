@@ -4,7 +4,8 @@ const arc=(cx,cy,r,start,end,n=48)=>Array.from({length:n+1},(_,i)=>{const a=star
 function rounded(vertices,cut=.22){
   return vertices.flatMap((v,i)=>{
     const prev=vertices[(i+vertices.length-1)%vertices.length],next=vertices[(i+1)%vertices.length];
-    const a=v.map((n,k)=>n+(prev[k]-n)*cut),b=v.map((n,k)=>n+(next[k]-n)*cut);
+    const cornerCut=Array.isArray(cut)?cut[i]:cut;
+    const a=v.map((n,k)=>n+(prev[k]-n)*cornerCut),b=v.map((n,k)=>n+(next[k]-n)*cornerCut);
     return Array.from({length:17},(_,j)=>{const t=j/16,u=1-t;return [u*u*a[0]+2*u*t*v[0]+t*t*b[0],u*u*a[1]+2*u*t*v[1]+t*t*b[1]];});
   });
 }
@@ -26,6 +27,26 @@ export function iconGeometry(type,muted=false){
     // Rotate only the arrowhead 12 degrees counterclockwise about its fixed tip.
     const headAngle=end-Math.PI/15,nx=-Math.sin(headAngle),ny=Math.cos(headAngle);
     strokes.push(arc(0,0,r,start,end),[[tip[0]-nx*.2-ny*.15,tip[1]-ny*.2+nx*.15],tip,[tip[0]-nx*.2+ny*.15,tip[1]-ny*.2-nx*.15]]);
+  }
+  if(type==='flag'){
+    width=.085;
+    const vertices=[[-.27,-.43],[.47,-.15],[-.27,.10]];
+    // Re-round the original sharp upper vertex with a smaller corner only.
+    const flag=rounded(vertices,[.09,.14,.14]);
+    // Bury the round pole cap inside the flag, leaving one rounded upper tip.
+    const poleX=vertices[0][0]+width/2,poleTop=vertices[0][1]+width;
+    strokes.push([[poleX,.43],[poleX,poleTop]]);
+    fills.push(flag);
+  }
+  if(type==='infinity'){
+    // A continuous rounded lemniscate, with no polygon corners.
+    strokes.push(Array.from({length:161},(_,i)=>{const t=i/160*Math.PI*2;return [.52*Math.cos(t),.27*Math.sin(2*t)];}));
+    width=.105;
+  }
+  if(type==='lock'){
+    fills.push(rounded([[-.35,-.06],[.35,-.06],[.35,.40],[-.35,.40]],.19));
+    strokes.push(arc(0,-.07,.23,Math.PI,Math.PI*2));
+    width=.09;
   }
   if(type==='home')strokes.push([[.34,-.35],[.34,.08],[-.35,.08]],[[-.1,-.17],[-.35,.08],[-.1,.33]]);
   const geometry={fills,strokes,width};geometries.set(key,geometry);return geometry;

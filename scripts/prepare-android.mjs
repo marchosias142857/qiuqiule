@@ -1,0 +1,83 @@
+import {access, appendFile, copyFile, mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {dirname, join, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const pkg=JSON.parse(await readFile(join(root,'package.json'),'utf8'));
+const config=JSON.parse(await readFile(join(root,'capacitor.config.json'),'utf8'));
+const match=/^(\d+)\.(\d+)\.(\d+)$/.exec(pkg.version);
+if(!match)throw new Error('Android builds require a stable major.minor.patch version.');
+const [major,minor,patch]=match.slice(1).map(Number);
+const versionCode=major*10000+minor*100+patch;
+if(minor>99||patch>99||!Number.isSafeInteger(versionCode)||versionCode<1||versionCode>2100000000){
+  throw new Error('Version cannot be represented by major*10000 + minor*100 + patch.');
+}
+if(config.webDir!=='dist'||config.server?.url){
+  throw new Error('Android must bundle the local dist/ game without a remote server URL.');
+}
+const background=/^#[\da-f]{6}$/i.test(config.backgroundColor)?config.backgroundColor:'#f4f3eb';
+const icon=join(root,'dist/icons/icon-512.png');
+await access(join(root,'dist/index.html'));
+await access(icon);
+const cli=join(root,'node_modules/@capacitor/cli/bin/capacitor');
+await access(cli);
+const android=join(root,'android');
+let exists=true;
+try{await access(android);}catch{exists=false;}
+const cap=(...args)=>execFileSync(process.execPath,[cli,...args],{
+  cwd:root,stdio:'inherit',env:{...process.env,CI:'true'}
+});
+if(!exists)cap('add','android');
+cap('sync','android');
+
+function replaceOne(source,pattern,replacement,label){
+  const matches=[...source.matchAll(new RegExp(pattern.source,'g'))];
+  if(matches.length!==1)throw new Error(`Expected one ${label} in generated Android project.`);
+  return source.replace(pattern,replacement);
+}
+const gradlePath=join(android,'app/build.gradle');
+let gradle=await readFile(gradlePath,'utf8');
+gradle=replaceOne(gradle,/\bversionCode\s+\d+/,`versionCode ${versionCode}`,'versionCode');
+gradle=replaceOne(gradle,/\bversionName\s+"[^"]+"/,`versionName "${pkg.version}"`,'versionName');
+await writeFile(gradlePath,gradle);
+const variables=await readFile(join(android,'variables.gradle'),'utf8');
+if(!/compileSdkVersion\s*=\s*35\b/.test(variables)||!/targetSdkVersion\s*=\s*35\b/.test(variables)){
+  throw new Error('This build workflow expects the Capacitor 7 Android SDK 35 template.');
+}
+
+// Reuse the game's existing artwork for legacy and adaptive launcher icons.
+const res=join(android,'app/src/main/res');
+for(const density of ['mdpi','hdpi','xhdpi','xxhdpi','xxxhdpi']){
+  const dir=join(res,`mipmap-${density}`);
+  await mkdir(dir,{recursive:true});
+  for(const name of ['ic_launcher.png','ic_launcher_round.png','ic_launcher_foreground.png']){
+    await copyFile(icon,join(dir,name));
+  }
+}
+await writeFile(join(res,'values/ic_launcher_background.xml'),`<?xml version="1.0" encoding="utf-8"?>
+<resources><color name="ic_launcher_background">${background}</color></resources>
+`);
+
+// Replace the generated Capacitor splash artwork, keeping the existing theme.
+for(const entry of await readdir(res,{withFileTypes:true})){
+  if(entry.isDirectory()&&entry.name.startsWith('drawable')){
+    await rm(join(res,entry.name,'splash.png'),{force:true});
+  }
+}
+await mkdir(join(res,'drawable'),{recursive:true});
+await writeFile(join(res,'drawable/splash.xml'),`<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+  <item><shape><solid android:color="${background}"/></shape></item>
+  <item android:width="128dp" android:height="128dp" android:gravity="center" android:drawable="@mipmap/ic_launcher"/>
+</layer-list>
+`);
+await access(join(android,'app/src/main/assets/public/index.html'));
+const manifest=await readFile(join(android,'app/src/main/AndroidManifest.xml'),'utf8');
+if(/android:screenOrientation\s*=/.test(manifest)){
+  throw new Error('The game must retain both portrait and landscape support.');
+}
+if(process.env.GITHUB_OUTPUT){
+  await appendFile(process.env.GITHUB_OUTPUT,`version=${pkg.version}\nversion-code=${versionCode}\n`);
+}
+console.log(`Prepared ${config.appId} ${pkg.version} (versionCode ${versionCode}) with bundled dist/ assets.`);

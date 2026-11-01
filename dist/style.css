@@ -93,7 +93,7 @@
 .result-actions{display:flex;gap:27px;align-items:flex-start}
 .result-actions>div{display:flex;flex-direction:column;align-items:center;gap:20px}
 
-.result-actions.arriving button{visibility:hidden}
+.result-actions.arriving button:not(#result-levels){visibility:hidden}
 
 
 #result-shadow{position:fixed;top:0;left:0;z-index:30;background:var(--ink);border-radius:50%;pointer-events:none;will-change:transform,opacity,filter}
@@ -127,3 +127,22 @@ body{position:fixed;inset:0;transition:color .3s}
 /* WebKit samples 4px inside the edge and reads solid backgrounds above 10px high.
    Keep this strip above the canvas/menus, within the existing 15px field margin. */
 #page-top-color{position:fixed;top:0;left:0;right:0;height:12px;z-index:100;background:var(--bg);pointer-events:none}
+
+
+/* The circular level rail shares the arena coordinate system. */
+#levels-view{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:2}
+#levels-view text{font-family:BallScore,"Arial Rounded MT Bold",ui-rounded,sans-serif;font-weight:500;font-synthesis:none;fill:#fff9ec;text-anchor:start;dominant-baseline:alphabetic}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#hud.campaign #score{visibility:hidden}
+.levels-ball{background:#b4ced4}
+.result-actions{position:relative}
+#over-panel.campaign .result-actions{--result-diameter:68px;--result-gap:27px;margin-top:calc((var(--result-diameter) + var(--result-gap)) * .8660254)}
+.result-levels-wrap{position:absolute;left:50%;top:calc((var(--result-diameter) + var(--result-gap)) * -.8660254);transform:translateX(-50%)}
+#over-panel.campaign #over-ball{align-self:center}
+#over-panel.campaign .result-score{padding-bottom:32px}
+#final-score{display:inline-block;transform-origin:center;will-change:transform}
+@media(max-width:420px){#over-panel.campaign .result-actions{--result-diameter:58px;--result-gap:18px}}
+@media(max-height:520px) and (orientation:landscape){#over-panel.campaign .result-score{padding-bottom:14px}#over-panel.campaign .result-balls{min-height:140px}}
+
+#levels-view svg{width:2px;height:2px}
+#levels-view,#levels-view circle,#levels-view text{stroke:none}

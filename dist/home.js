@@ -7,8 +7,16 @@ export function homeLayout(width, height) {
   const r = Math.min(86, width * (portrait ? .125 : .065), height * (portrait ? .085 : .13));
   const player = {x: width * (portrait ? .5 : .66), y: height * (portrait ? .48 : .57), r: r * .84};
   const play = {x: width * (portrait ? .5 : .27), y: height * (portrait ? .79 : .57), r: r * 1.2};
-  const offsets = portrait ? [[1.65,-1.55,.66], [2.05,.75,.88], [-.8,-2.05,.25]] : [[1.5,-1.5,.66], [1.9,.95,.88], [-.55,-1.9,.25]];
-  return {portrait, base: r, player, play, others: offsets.map(([x,y,size],i)=>({x:player.x+x*r,y:player.y+y*r,r:r*size,seed:i+1,born:1,angle:0,squash:0}))};
+  const offsets = portrait ? [[1.65,-1.55,.66], [2.05,.75,.88], [-.8,-2.05,.43]] : [[1.5,-1.5,.66], [1.9,.95,.88], [-.55,-1.9,.43]];
+  const orbitCenter={x:player.x+r*.4,y:player.y};
+  const others=offsets.map(([x,y,size],i)=>({x:player.x+x*r,y:player.y+y*r,r:r*size,seed:i+1,born:1,angle:0,squash:0}));
+  const settings=others[0],dx=settings.x-orbitCenter.x,dy=settings.y-orbitCenter.y,turn=-4*Math.PI/180;
+  settings.x=orbitCenter.x+dx*Math.cos(turn)-dy*Math.sin(turn);
+  settings.y=orbitCenter.y+dx*Math.sin(turn)+dy*Math.cos(turn);
+  const mode=others[1];
+  mode.x=lerp(orbitCenter.x,mode.x,1.08);mode.y=lerp(orbitCenter.y,mode.y,1.08);mode.r*=.9;
+  settings.r=(others[2].r+mode.r)/2;
+  return {portrait, base:r, player, play, orbitCenter, others};
 }
 
 // Distance to first contact along a straight launch. A miss never moves the center.
@@ -21,7 +29,8 @@ export function contactDistance(player, target, nx, ny) {
 }
 
 export class HomeWorld {
-  constructor(width,height) {
+  constructor(width,height,mode='endless') {
+    this.mode=mode;
     this.width=width;this.height=height;this.layout=homeLayout(width,height);
     this.player={...this.layout.player,isPlayer:true,vx:0,vy:0,angle:0,squash:0,roll:0};
     this.phase='idle';this.phaseTime=0;this.clock=0;
@@ -31,7 +40,7 @@ export class HomeWorld {
     const t=this.animate?this.clock:0,b=this.layout.base;
     return [
       {...this.layout.play,r:this.layout.play.r*(1+Math.sin(t*1.7)*.018),id:'play'},
-      ...this.layout.others.slice(0,2).map((c,i)=>({...c,y:c.y+Math.sin(t*.85+c.seed)*b*.1,id:i?'settings':'sound'}))
+      ...this.layout.others.map((c,i)=>({...c,y:c.y+Math.sin(t*.85+c.seed)*b*.1,id:['settings','mode','sound'][i]}))
     ].map(c=>{
       const hit=this.contactAction===c.id&&this.phase==='returning'?Math.sin(this.phaseTime*15)*Math.exp(-this.phaseTime*7)*.10:0;
       return {...c,sx:1+hit,sy:1-hit};
@@ -82,9 +91,9 @@ export class HomeWorld {
   }
   placeEntering(){
     const t=ease(this.phaseTime/1.45),p=this.player;
-    p.x=lerp(this.from.x,this.width*.5,t);p.y=lerp(this.from.y,this.height*.62,t);
-    p.r=lerp(this.from.r,clamp(Math.min(this.width,this.height)*.047,18,34),t);
-    p.angle=Math.atan2(this.height*.62-this.from.y,this.width*.5-this.from.x);
+    p.x=lerp(this.from.x,this.width*.5,t);p.y=lerp(this.from.y,this.height*(this.mode==='campaign'?.5:.62),t);
+    p.r=lerp(this.from.r,clamp(Math.min(this.width,this.height)*.047,18,34)*(this.mode==='campaign'?1.7:1),t);
+    p.angle=Math.atan2(this.height*(this.mode==='campaign'?.5:.62)-this.from.y,this.width*.5-this.from.x);
     p.squash=Math.sin(this.phaseTime*13)*.14*(1-t);p.roll=t*Math.PI*2;
   }
   step(dt,animate=true){
@@ -106,7 +115,8 @@ export class HomeWorld {
       if(this.remaining<=.001){
         this.contactAction=this.target.id;this.phaseTime=0;this.from={x:p.x,y:p.y,r:p.r};
         p.vx=p.vy=0;
-        this.phase=this.target.id==='play'?'entering':this.target.id==='sound'?'returning':'external';
+        this.phase=this.target.id==='play'?'entering':['sound','mode'].includes(this.target.id)?'returning':'external';
+        if(this.target.id==='mode')this.mode=this.mode==='campaign'?'endless':'campaign';
         if(this.target.id!=='play')this.action=this.target.id;
       }
       return;
