@@ -22,6 +22,13 @@ export function iconGeometry(type,muted=false){
     const gear=Array.from({length:32},(_,i)=>{const a=i/32*Math.PI*2,r=[.36,.48,.48,.36][i%4];return [Math.cos(a)*r,Math.sin(a)*r];});
     const outline=rounded(gear,.25);strokes.push([...outline,outline[0]],arc(0,0,.17,0,Math.PI*2));width=.067;
   }
+  if(type==='wardrobe'||type==='hanger'){
+    width=.075;
+    const hook=arc(-.015,-.29,.115,Math.PI,Math.PI*2.43,40);
+    strokes.push(hook);
+    const neck=hook.at(-1),outline=rounded([[0,-.12],[.49,.23],[.45,.32],[-.45,.32],[-.49,.23]],.16);
+    strokes.push([neck,[0,-.12]], [...outline,outline[0]]);
+  }
   if(type==='restart'){
     const start=-.9,end=4.45,r=.39,tip=[Math.cos(end)*r,Math.sin(end)*r];
     // Rotate only the arrowhead 12 degrees counterclockwise about its fixed tip.

@@ -5,17 +5,26 @@ import {smooth} from './motion.js';
 export function homeLayout(width, height) {
   const portrait = width <= height;
   const r = Math.min(86, width * (portrait ? .125 : .065), height * (portrait ? .085 : .13));
-  const player = {x: width * (portrait ? .5 : .66), y: height * (portrait ? .48 : .57), r: r * .84};
+  const player = {x: width * (portrait ? .5 : .66), y: height * (portrait ? .48 : .57), r: r * .84 * .9};
   const play = {x: width * (portrait ? .5 : .27), y: height * (portrait ? .79 : .57), r: r * 1.2};
   const offsets = portrait ? [[1.65,-1.55,.66], [2.05,.75,.88], [-.8,-2.05,.43]] : [[1.5,-1.5,.66], [1.9,.95,.88], [-.55,-1.9,.43]];
   const orbitCenter={x:player.x+r*.4,y:player.y};
   const others=offsets.map(([x,y,size],i)=>({x:player.x+x*r,y:player.y+y*r,r:r*size,seed:i+1,born:1,angle:0,squash:0}));
-  const settings=others[0],dx=settings.x-orbitCenter.x,dy=settings.y-orbitCenter.y,turn=-4*Math.PI/180;
-  settings.x=orbitCenter.x+dx*Math.cos(turn)-dy*Math.sin(turn);
-  settings.y=orbitCenter.y+dx*Math.sin(turn)+dy*Math.cos(turn);
-  const mode=others[1];
+  const settings=others[0],mode=others[1],sound=others[2];
   mode.x=lerp(orbitCenter.x,mode.x,1.08);mode.y=lerp(orbitCenter.y,mode.y,1.08);mode.r*=.9;
-  settings.r=(others[2].r+mode.r)/2;
+  settings.r=lerp(sound.r,mode.r,1/3);
+  const modeAngle=Math.atan2(mode.y-player.y,mode.x-player.x),gap=50*Math.PI/180;
+  const distance=Math.hypot(mode.x-player.x,mode.y-player.y);
+  const wardrobe={r:lerp(sound.r,mode.r,2/3),seed:4,born:1,angle:0,squash:0};
+  // Keep mode fixed and diameters evenly increasing. Match settings' edge gap
+  // to wardrobe, with sound tucked a little closer along its existing direction.
+  const place=(body,angle,inset=0)=>{
+    const radialDistance=distance+body.r-wardrobe.r-inset;
+    Object.assign(body,{x:player.x+Math.cos(angle)*radialDistance,y:player.y+Math.sin(angle)*radialDistance});
+  };
+  place(settings,modeAngle-gap*2);
+  place(sound,modeAngle-gap*3+4*Math.PI/180,r*.05);
+  place(wardrobe,modeAngle-gap-3*Math.PI/180);others.push(wardrobe);
   return {portrait, base:r, player, play, orbitCenter, others};
 }
 
@@ -40,7 +49,7 @@ export class HomeWorld {
     const t=this.animate?this.clock:0,b=this.layout.base;
     return [
       {...this.layout.play,r:this.layout.play.r*(1+Math.sin(t*1.7)*.018),id:'play'},
-      ...this.layout.others.map((c,i)=>({...c,y:c.y+Math.sin(t*.85+c.seed)*b*.1,id:['settings','mode','sound'][i]}))
+      ...this.layout.others.map((c,i)=>({...c,y:c.y+Math.sin(t*.85+c.seed)*b*.1,id:['settings','mode','sound','wardrobe'][i]}))
     ].map(c=>{
       const hit=this.contactAction===c.id&&this.phase==='returning'?Math.sin(this.phaseTime*15)*Math.exp(-this.phaseTime*7)*.10:0;
       return {...c,sx:1+hit,sy:1-hit};

@@ -27,6 +27,7 @@
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="preload" href="./fonts/fredoka-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./skin-unlock.css">
   <script defer src="./vendor/phaser.min.js"></script>
   <script type="module" src="./game.js"></script>
   <script type="module" src="./offline.js"></script>
@@ -45,6 +46,7 @@
     </h1>
     <button id="home-sound" class="home-play" data-action="home-sound" aria-label="撞击红球静音"></button>
     <button id="home-settings" class="home-play" data-action="home-settings" aria-label="撞击绿球打开设置"></button>
+    <button id="home-wardrobe" class="home-play" data-action="home-wardrobe" aria-label="撞击衣架球打开换装"></button>
     <button id="home-mode" class="home-play" data-action="home-mode" aria-label="撞击蓝球切换闯关或无尽模式"></button>
     <button id="home-play" class="home-play" data-action="home-launch" aria-label="开始游戏：拖动屏幕，让黑球撞击播放球；也可按回车开始"></button>
   </div>
@@ -90,19 +92,30 @@
       <button class="secondary-button gameplay-button" data-action="help">玩法介绍</button>
       </div></div>
     </section>
+    <section id="wardrobe-panel" class="panel wardrobe-panel" hidden role="dialog" aria-modal="true" aria-labelledby="wardrobe-title">
+      <div class="panel-heading wardrobe-heading"><h2 id="wardrobe-title">你的球，你的风格</h2><button class="close-button" data-action="close" aria-label="关闭换装">×</button></div>
+      <div class="wardrobe-body">
+        <div class="wardrobe-row"><span>多边形皮肤</span><div class="wardrobe-value"><span id="skin-lock" class="skin-lock" role="img" aria-label="通过第10关解锁多边形皮肤"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><button id="skin-toggle" class="toggle" role="switch" aria-checked="false" aria-label="多边形皮肤" hidden></button></div></div>
+        <div class="wardrobe-row"><span>自定义边长数</span><div class="wardrobe-value"><span id="skin-infinity" class="skin-infinity" aria-label="圆形">∞</span><div id="skin-stepper" class="skin-stepper" hidden><button id="skin-minus" class="skin-step" aria-label="减少边数">−</button><output id="skin-sides" aria-live="polite" aria-label="当前边数">6</output><button id="skin-plus" class="skin-step" aria-label="增加边数">+</button></div></div></div>
+        <div class="wardrobe-row"><span>自定义外观</span><div class="wardrobe-value appearance-buttons"><button id="appearance-select" class="appearance-select">选取图片</button><button id="appearance-clear" class="appearance-clear" aria-label="移除自定义图片，恢复小球眼睛" hidden>移除</button><input id="appearance-file" type="file" accept="image/*" hidden></div></div>
+        <div class="wardrobe-preview"><span id="wardrobe-ball" class="ball-anchor" aria-hidden="true"></span></div>
+      </div>
+    </section>
     <section id="menu-transition-panel" class="panel menu-panel" hidden role="dialog" aria-modal="true" aria-label="切换菜单">
       <div class="panel-heading settings-heading"><span id="menu-transition-ball" class="ball-anchor" aria-hidden="true"></span><span class="menu-title-space" aria-hidden="true"></span><button class="close-button" data-action="close" aria-label="返回设置">×</button></div>
     </section>
     <section id="help-panel" class="panel help-panel menu-panel" hidden role="dialog" aria-modal="true" aria-labelledby="help-title">
       <div class="panel-heading settings-heading"><span id="help-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="help-title">弹出点名堂</h2><button class="close-button" data-action="close" aria-label="关闭玩法介绍">×</button></div>
       <div class="menu-body">
-      <p>首页向后拉、反向弹：撞播放球开始游戏；撞红色喇叭球切换静音并弹回；撞绿色齿轮球进入设置。未瞄准功能球或力度不足时，会留在原地回弹。暂停菜单的四颗球依次为继续、设置、重开和主页，点击即可。点击主页球会先结算本局，再从结算页返回主界面。设置中可分别调节背景音乐和音效音量，拉到最左侧即可单独静音。还可开启拖拽表情：主页原地回弹结束后恢复常态，其余情况松手立即恢复。</p>
+      <p>首页向后拉、反向弹：撞播放球开始游戏；撞红色喇叭球切换静音并弹回；撞绿色齿轮球进入设置；撞衣架球进入换装。未瞄准功能球或力度不足时，会留在原地回弹。暂停菜单的四颗球依次为继续、设置、重开和主页，点击即可。点击主页球会先结算本局，再从结算页返回主界面。设置中可分别调节背景音乐和音效音量，拉到最左侧即可单独静音。还可开启拖拽表情：主页原地回弹结束后恢复常态，其余情况松手立即恢复。</p>
       <ol class="help-steps"><li><b>01</b><div><strong>慢下来，就能蓄力。</strong><p>小球速度降下来后，按住屏幕任意位置并拖动。拉得越长，力量越大，直到蓄满。速度过高时无法蓄力，稍等片刻即可。第 6、11、16…阶段，可拖拽速度阈值各增加初始阈值的 50%。</p></div></li><li><b>02</b><div><strong>向后拉，向前弹。</strong><p>松手向拖动的反方向弹射，弹射速度会加上按下开始拖拽瞬间的速度；蓄力期间减速不会扣掉已记录的速度。冲击越强，伤害越高；撞墙反弹，撞球互相弹开。</p></div></li><li><b>03</b><div><strong>分数达标，选个强化。</strong><p>敌球持续刷新，实际得分达到阶段目标时，剩余敌球直接碎掉，不计额外分数。首阶段目标为 140 分，后续累计目标依次为 380、670、1010 分，逐阶段提高。小球自动就位后，拉动并撞向两颗奖励球中的一颗，1 秒后进入新阶段。</p></div></li></ol>
-      <p class="help-rule"><strong>闯关模式</strong>：撞击主页蓝色小球，在小旗帜与 ∞ 之间切换。旗帜进入 100 关挑战；直接拖动选关中央小球并松手，撞击数字进入该关；未瞄准或力度不足时，小球会原地弹动，开启表情后与主页保持一致。沿圆环拖动或快速滑动浏览关卡，通关后解锁下一关。关卡内按击杀数自动强化，击破全部敌球即通关。∞ 保留原有无尽玩法。</p>
+      <p class="help-rule"><strong>闯关模式</strong>：撞击主页蓝色小球，在小旗帜与 ∞ 之间切换。旗帜进入 100 关挑战；点击已解锁的数字球进入该关，点击下方返回球回到主页。中央小球可以拉扯，松手只会原地回弹。沿圆环拖动或快速滑动浏览关卡，通关后解锁下一关。关卡内按击杀数自动强化，击破全部敌球即通关。∞ 保留原有无尽玩法。</p>
+      <p class="help-rule"><strong>换装</strong>：通过第10、20…100关，依次解锁圆润的正6至15边形皮肤。可在换装中开关皮肤、调节已解锁的边数，或选取图片裁剪为自定义外观。换装只改变外观，碰撞和玩法不变。</p>
       <div class="buff-legend"><span><b>△</b> 密度</span><span><b>□</b> 能量</span><span><b>⬠</b> 特殊能力</span></div>
+      <p>无尽模式每5阶段会进入正方形场地，挑战中央不断膨胀的Boss。撞击让它缩小；缩到奖励球大小后，它会停止膨胀、露出眩晕表情，此时继续撞击造成伤害才能击败。Boss直径达到场地边长的75%会失败。Boss战中，更高速度下也能重新蓄力。打进更小的五个区间时分别加分，击败另有奖励；玩家减速、转圈戴上王冠庆祝后，场地恢复并进入强化选择。</p>
       <div id="buff-guide" class="buff-guide"></div>
-      <p class="help-rule">场上敌球达到 <strong>18 颗</strong>，本局结束。开场 2 颗敌球，基础血量 19。敌球的血量、体型、密度和分值随阶段提高，刷新间隔逐渐缩短；局内经过的时间也会提高血量、密度和刷新速度，暂停时不计时。</p>
-      <p class="game-version">球球了 · 4.1.0</p>
+      <p class="help-rule">普通战斗中，场上敌球达到 <strong>18 颗</strong>，本局结束。开场 2 颗敌球，基础血量 19。敌球的血量、体型、密度和分值随阶段提高，刷新间隔逐渐缩短；局内经过的时间也会提高血量、密度和刷新速度，暂停时不计时。</p>
+      <p class="game-version">球球了 · 5.1.1</p>
       </div>
     </section>
     <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-label="本局结算">
@@ -120,6 +133,15 @@
   <div id="ui-ball" hidden aria-hidden="true"><svg viewBox="0 0 100 100"><circle class="ui-body" cx="50" cy="50" r="50"/><path class="ui-pull-outline" style="display:none"/><g class="ui-eyes"><g class="ui-normal-eyes"><ellipse cx="41.5" cy="46.5" rx="2.625" ry="4.75"/><ellipse cx="58.5" cy="46.5" rx="2.625" ry="4.75"/></g><g class="ui-eye-paths" style="display:none"><path class="ui-eye-left"/><path class="ui-eye-right"/></g></g></svg></div>
   <div id="result-shadow" hidden aria-hidden="true"></div>
   <div id="control-transfers" aria-hidden="true"></div>
+  <div id="appearance-cropper" class="appearance-cropper" hidden>
+    <section class="crop-dialog" role="dialog" aria-modal="true" aria-labelledby="crop-title">
+      <div class="panel-heading"><h2 id="crop-title">调整图片</h2><button id="crop-cancel" class="close-button" aria-label="取消图片裁剪">×</button></div>
+      <div class="crop-stage"><canvas id="crop-canvas" width="768" height="768" aria-label="拖动图片调整裁剪位置，也可双指缩放"></canvas><div class="crop-grid" aria-hidden="true"></div></div>
+      <div class="crop-zoom-row"><span>缩放</span><input id="crop-zoom" type="range" min="1" max="4" step="0.01" value="1" aria-label="图片缩放"></div>
+      <p class="crop-hint">拖动调整位置 · 双指缩放</p>
+      <button id="crop-apply" class="primary-button">应用</button>
+    </section>
+  </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <noscript>请启用 JavaScript 来玩球球了。</noscript>
 </body>

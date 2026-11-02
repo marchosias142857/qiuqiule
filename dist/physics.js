@@ -5,6 +5,22 @@ export const lerp = (a, b, t) => a + (b - a) * t;
 export const PLAYER_BASE_DENSITY = 1.5;
 export const BREATH_DURATION = 2;
 export const BREATH_SPAWN_RATE = .5;
+export const BOSS_TIMING = Object.freeze({entry: .85, brake: .8, spin: .85, hold: 1, fade: .22});
+const smooth = value => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
+
+// Boss difficulty and rewards grow with encounter number, starting at one.
+// Keep this pure: looking up boss difficulty must not consume spawn randomness.
+export function bossConfig(stage, unit, squareSide) {
+  const index = Math.max(1, Math.floor(stage / 5));
+  const difficulty = Math.log2(index);
+  const initialRadius = unit * 4.8, minRadius = unit * 2;
+  const segmentValue = 90 + 10 * index;
+  return {index, initialRadius, minRadius, maxRadius: squareSide * .375,
+    stunHealthScale: 100 * (1 + .12 * difficulty),
+    inflationRate: initialRadius / 150 * (1 + .15 * difficulty),
+    shrinkDivisor: 1 + .05 * difficulty, segmentValue, killValue: 450 + 50 * index,
+    thresholds: Array.from({length: 5}, (_, i) => initialRadius - (initialRadius - minRadius) * (i + 1) / 5)};
+}
 
 export const BUFFS = [
   // Growth changes only geometry; mass and all launch/impact tuning stay independent.
@@ -37,6 +53,10 @@ export class World {
     this.events = [];
     this.enemies = [];
     this.choices = [];
+    this.boss = null;
+    this.bossCelebration = null;
+    this.arenaBlend = 0;
+    this.arenaRestoreFrom = 0;
     this.buffs = {};
     this.buffOffers = {};
     this.id = 0;
@@ -57,9 +77,17 @@ export class World {
     return {id: ++this.id, x, y, vx: 0, vy: 0, r, mass: density * (r / this.unit) ** 2,
       density, born: 0, solid: false, hp: 20, maxHp: 20, value: 10, hit: 0, squash: 0, angle: 0, spin: 0};
   }
-  get readySpeed() { return this.unit * (8 + 4 * Math.floor(Math.max(0, this.stage - 1) / 5)); }
+  get arenaBounds() {
+    const side = Math.min(this.width, this.height) - this.inset * 2;
+    const blend = clamp(this.arenaBlend, 0, 1);
+    const left = lerp(this.inset, (this.width - side) / 2, blend);
+    const top = lerp(this.inset, (this.height - side) / 2, blend);
+    const right = this.width - left, bottom = this.height - top;
+    return {left, right, top, bottom, width: right - left, height: bottom - top};
+  }
+  get readySpeed() { return this.unit * (8 + 4 * Math.floor(Math.max(0, this.stage - 1) / 5) + (this.phase === 'boss' ? 12 : 0)); }
   get maxPhysicsSpeed() { return this.unit * 60 + this.readySpeed; }
-  get ready() { return (this.phase === 'battle' || this.phase === 'choose') && (this.pullStartSpeed !== null || length(this.player) < this.readySpeed); }
+  get ready() { return (this.phase === 'battle' || this.phase === 'choose' || this.phase === 'boss') && (this.pullStartSpeed !== null || length(this.player) < this.readySpeed); }
   beginPull() {
     if (!this.ready || this.pullStartSpeed !== null) return false;
     this.pullStartSpeed = length(this.player);
@@ -82,17 +110,40 @@ export class World {
   resize(width, height) {
     this.cancelPull();
     const rx = width / this.width, ry = height / this.height;
+    const oldBounds = this.arenaBounds, oldUnit = this.unit;
     this.width = width; this.height = height;
-    const oldUnit = this.unit;
     this.unit = clamp(Math.min(width, height) * .047, 18, 34);
-    const k = this.unit / oldUnit;
-    for (const b of [this.player, ...this.enemies]) {
-      b.x = clamp(b.x * rx, b.r * k + this.inset, width - b.r * k - this.inset);
-      b.y = clamp(b.y * ry, b.r * k + this.inset, height - b.r * k - this.inset);
-      b.r *= k; b.vx *= k; b.vy *= k;
+    const k = this.unit / oldUnit, bounds = this.arenaBounds;
+    const mapPoint = (point, radius) => ({...point,
+      x: clamp(bounds.left + (point.x - oldBounds.left) / oldBounds.width * bounds.width, bounds.left + radius, bounds.right - radius),
+      y: clamp(bounds.top + (point.y - oldBounds.top) / oldBounds.height * bounds.height, bounds.top + radius, bounds.bottom - radius)});
+    for (const body of [this.player, ...this.enemies]) {
+      // Preserve ordinary resize behavior; the boss arena maps within its own
+      // current bounds so rotating a square arena cannot squash its contents.
+      const mapped = this.arenaBlend > 0 ? mapPoint(body, body.r * k) : {
+        x: clamp(body.x * rx, body.r * k + this.inset, width - body.r * k - this.inset),
+        y: clamp(body.y * ry, body.r * k + this.inset, height - body.r * k - this.inset)};
+      body.x = mapped.x; body.y = mapped.y; body.r *= k; body.vx *= k; body.vy *= k;
     }
     this.layoutChoices();
     if (this.phase === 'transition') this.rollFrom = {x: this.player.x, y: this.player.y};
+    if (this.boss) {
+      const boss = this.boss;
+      const inflationProgress = boss.r > boss.initialRadius ? (boss.r - boss.initialRadius) / (boss.maxRadius - boss.initialRadius) : 0;
+      for (const key of ['r', 'initialRadius', 'minRadius', 'inflationRate']) boss[key] *= k;
+      boss.maxRadius = (Math.min(width, height) - this.inset * 2) * .375;
+      if (inflationProgress > 0) boss.r = lerp(boss.initialRadius, boss.maxRadius, clamp(inflationProgress, 0, 1));
+      boss.thresholds = boss.thresholds.map(radius => radius * k);
+      Object.assign(boss, this.bossAnchor());
+      if (this.phase === 'boss-entry') {
+        this.rollFrom = {x: this.rollFrom.x * rx, y: this.rollFrom.y * ry};
+        this.positionBossEntry();
+      } else if (this.phase === 'boss') this.separateBossPlayer();
+      if (this.phase === 'boss-celebrate' && this.bossCelebration?.stop) {
+        this.bossCelebration.stop = mapPoint(this.bossCelebration.stop, this.player.r);
+        this.player.x = this.bossCelebration.stop.x; this.player.y = this.bossCelebration.stop.y;
+      }
+    }
   }
 
   spawnEnemy() {
@@ -137,12 +188,12 @@ export class World {
   }
 
   wall(b) {
-    const pad = this.inset;
+    const bounds = this.arenaBounds;
     let nx = 0, ny = 0, speed = 0;
-    if (b.x < pad + b.r) { b.x = pad + b.r; if (b.vx < 0) { speed = -b.vx; b.vx *= -.92; nx = -1; } }
-    if (b.x > this.width - pad - b.r) { b.x = this.width - pad - b.r; if (b.vx > 0) { speed = b.vx; b.vx *= -.92; nx = 1; } }
-    if (b.y < pad + b.r) { b.y = pad + b.r; if (b.vy < 0) { speed = Math.max(speed, -b.vy); b.vy *= -.92; ny = -1; } }
-    if (b.y > this.height - pad - b.r) { b.y = this.height - pad - b.r; if (b.vy > 0) { speed = Math.max(speed, b.vy); b.vy *= -.92; ny = 1; } }
+    if (b.x < bounds.left + b.r) { b.x = bounds.left + b.r; if (b.vx < 0) { speed = -b.vx; b.vx *= -.92; nx = -1; } }
+    if (b.x > bounds.right - b.r) { b.x = bounds.right - b.r; if (b.vx > 0) { speed = b.vx; b.vx *= -.92; nx = 1; } }
+    if (b.y < bounds.top + b.r) { b.y = bounds.top + b.r; if (b.vy < 0) { speed = Math.max(speed, -b.vy); b.vy *= -.92; ny = -1; } }
+    if (b.y > bounds.bottom - b.r) { b.y = bounds.bottom - b.r; if (b.vy > 0) { speed = Math.max(speed, b.vy); b.vy *= -.92; ny = 1; } }
     if (speed > this.unit * .8) {
       b.squash = Math.min(.32, speed / this.baseSpeed * .4);
       b.angle = Math.atan2(ny, nx);
@@ -216,13 +267,20 @@ export class World {
     }
   }
 
-  beginUpgrade() {
-    if (this.phase !== 'battle') return;
-    this.cancelPull();
-    this.phase = 'transition'; this.phaseTime = 0;
+  clearEnemies() {
     for (const b of this.enemies) if (b.hp > 0) this.emit('shatter', {x:b.x, y:b.y, r:b.r * ease(b.born), vx:b.vx, vy:b.vy});
     this.enemies = [];
     this.breathTime = 0;
+  }
+
+  beginUpgrade({bypassBoss = false} = {}) {
+    if (this.phase !== 'battle' && !(bypassBoss && this.phase === 'boss-celebrate')) return;
+    if (!bypassBoss && this.mode !== 'campaign' && this.stage % 5 === 0) { this.beginBoss(); return; }
+    this.cancelPull();
+    this.arenaRestoreFrom = this.arenaBlend;
+    this.phase = 'transition'; this.phaseTime = 0;
+    this.clearEnemies();
+    this.boss = null; this.bossCelebration = null; delete this.player.roll;
     this.player.vx = this.player.vy = 0;
     this.rollFrom = {x: this.player.x, y: this.player.y};
     const special = BUFFS.filter(b => b.kind === 'special' && (b.id === 'growth' ? (this.buffOffers.growth || 0) < 2 && (this.buffs.growth || 0) < 2 : !this.buffs[b.id]));
@@ -233,6 +291,166 @@ export class World {
     for (const choice of this.choices) this.buffOffers[choice.id] = (this.buffOffers[choice.id] || 0) + 1;
     this.layoutChoices();
     this.emit('upgrade');
+  }
+
+  bossAnchor() { return {x: this.width * .5, y: this.height * .5}; }
+
+  bossPlayerAnchor() {
+    const side = Math.min(this.width, this.height) - this.inset * 2;
+    return {x: this.width * .5, y: this.height * .5 + side * .5 - this.player.r - Math.max(2, this.unit * .1)};
+  }
+
+  beginBoss() {
+    this.cancelPull(); this.clearEnemies(); this.choices = [];
+    this.phase = 'boss-entry'; this.phaseTime = 0; this.arenaBlend = 0;
+    this.player.vx = this.player.vy = 0; this.player.roll = 0;
+    this.rollFrom = {x: this.player.x, y: this.player.y};
+    const config = bossConfig(this.stage, this.unit, Math.min(this.width, this.height) - this.inset * 2);
+    this.boss = Object.assign(this.makeBody(0, 0, config.initialRadius, 1), config,
+      {isBoss: true, mass: Infinity, hp: Infinity, maxHp: Infinity, value: 0, scoredSegments: 0,
+        defeated: false, stunned: false, stunnedTime: 0});
+    Object.assign(this.boss, this.bossAnchor());
+    this.emit('bossEntry', {stage: this.stage, x: this.boss.x, y: this.boss.y, r: this.boss.r});
+  }
+
+  positionBossEntry() {
+    const p = this.player, target = this.bossPlayerAnchor(), t = smooth(this.phaseTime / BOSS_TIMING.entry);
+    this.arenaBlend = t;
+    const bounds = this.arenaBounds;
+    p.x = clamp(lerp(this.rollFrom.x, target.x, t), bounds.left + p.r, bounds.right - p.r);
+    p.y = clamp(lerp(this.rollFrom.y, target.y, t), bounds.top + p.r, bounds.bottom - p.r);
+    p.angle = .4; p.roll = Math.PI * 2 * t; p.squash = Math.sin(this.phaseTime * 10) * .12 * (1 - t);
+    this.boss.born = clamp(this.phaseTime / BOSS_TIMING.entry, 0, 1);
+  }
+
+  // Resize or inflation can squeeze a player between the boss and a wall.
+  // Include circle/bounds intersections so separation slides along that wall
+  // instead of jumping all the way to one of the four cardinal directions.
+  separateBossPlayer() {
+    const p = this.player, b = this.boss, distance = Math.hypot(p.x - b.x, p.y - b.y), sum = p.r + b.r;
+    if (distance >= sum) return;
+    const radius = sum + .001, angle = Math.atan2(p.y - b.y, p.x - b.x), candidates = [];
+    const bounds = this.arenaBounds;
+    const minX = bounds.left + p.r, maxX = bounds.right - p.r;
+    const minY = bounds.top + p.r, maxY = bounds.bottom - p.r;
+    const add = (x, y) => { if (x >= minX && x <= maxX && y >= minY && y <= maxY) candidates.push({x, y}); };
+    for (const a of [angle, Math.PI / 2, 0, Math.PI, -Math.PI / 2]) add(b.x + Math.cos(a) * radius, b.y + Math.sin(a) * radius);
+    for (const x of [minX, maxX]) {
+      const delta = x - b.x;
+      if (Math.abs(delta) <= radius) { const h = Math.sqrt(Math.max(0, radius * radius - delta * delta)); add(x, b.y + h); add(x, b.y - h); }
+    }
+    for (const y of [minY, maxY]) {
+      const delta = y - b.y;
+      if (Math.abs(delta) <= radius) { const h = Math.sqrt(Math.max(0, radius * radius - delta * delta)); add(b.x + h, y); add(b.x - h, y); }
+    }
+    candidates.sort((a, c) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(c.x - p.x, c.y - p.y));
+    if (candidates.length) { p.x = candidates[0].x; p.y = candidates[0].y; }
+  }
+
+  collideBoss() {
+    if (this.phase !== 'boss' || !this.boss?.solid) return;
+    const p = this.player, b = this.boss, dx = p.x - b.x, dy = p.y - b.y;
+    const distance = Math.hypot(dx, dy), sum = p.r + b.r;
+    if (distance >= sum) return;
+    const nx = distance > .001 ? dx / distance : 0, ny = distance > .001 ? dy / distance : 1;
+    const closing = -(p.vx * nx + p.vy * ny), overlap = sum - distance;
+    p.x += nx * overlap; p.y += ny * overlap;
+    const bounds = this.arenaBounds;
+    p.x = clamp(p.x, bounds.left + p.r, bounds.right - p.r);
+    p.y = clamp(p.y, bounds.top + p.r, bounds.bottom - p.r);
+    this.separateBossPlayer();
+    if (closing <= 0) return;
+    // A fixed body reflects only the normal component; tangent speed is kept.
+    p.vx += (1 + .985) * closing * nx; p.vy += (1 + .985) * closing * ny;
+    p.squash = b.squash = Math.min(.3, closing / this.baseSpeed * .42);
+    p.angle = b.angle = Math.atan2(ny, nx);
+    this.damageBoss(closing, {x: b.x + nx * b.r, y: b.y + ny * b.r});
+  }
+
+  damageBoss(closing, contact = {}) {
+    const boss = this.boss;
+    if (this.phase !== 'boss' || !boss?.solid || !Number.isFinite(closing) || closing <= this.unit * 2.4) return false;
+    let damage = 0;
+    if (boss.stunned) {
+      // As for ordinary impacts, use normal relative kinetic energy. A fixed
+      // boss has infinite mass, so reduced mass is simply the player's mass.
+      const impact = .5 * this.player.mass * (closing / this.unit) ** 2;
+      damage = Math.max(1, Math.round(impact * .31 * (1 + this.bank * .6)));
+      boss.hp -= damage;
+    } else {
+      const span = boss.initialRadius - boss.minRadius;
+      boss.r = Math.max(boss.minRadius, boss.r - span * (.0225 + .0225 * clamp(closing / this.baseSpeed, 0, 1)) / boss.shrinkDivisor);
+    }
+    boss.hit = 1; this.bank = 0;
+    this.emit('bossHit', {x: contact.x ?? boss.x, y: contact.y ?? boss.y, r: boss.r, power: closing / this.baseSpeed, damage});
+    while (boss.scoredSegments < 5 && boss.r <= boss.thresholds[boss.scoredSegments] + 1e-9) {
+      boss.scoredSegments++; this.score += boss.segmentValue; this.target += boss.segmentValue;
+      this.emit('bossScore', {value: boss.segmentValue, segment: boss.scoredSegments, x: boss.x, y: boss.y, r: boss.r});
+    }
+    if (!boss.stunned && boss.r <= boss.minRadius + 1e-9) {
+      boss.r = boss.minRadius; boss.stunned = true; boss.stunnedTime = 0;
+      // Snapshot health once from this build's strongest ordinary launch,
+      // including captured speed and the two-wall bonus when it is available.
+      // Subsequent contacts keep using uncapped ordinary kinetic damage.
+      const launch = Math.min(this.unit * 60, this.baseSpeed * Math.sqrt(this.energy / this.density));
+      const impact = .5 * this.player.mass * ((launch + this.readySpeed) / this.unit) ** 2;
+      const strongestHit = Math.max(1, Math.round(impact * .31 * (this.buffs.bank ? 2.2 : 1)));
+      boss.maxHp = boss.hp = Math.ceil(strongestHit * 1.05 * (boss.stunHealthScale / 100));
+      this.emit('bossStunned', {x: boss.x, y: boss.y, r: boss.r});
+    } else if (boss.stunned && boss.hp <= 0) this.defeatBoss();
+    return true;
+  }
+
+  defeatBoss() {
+    const boss = this.boss, p = this.player;
+    if (this.phase !== 'boss' || !boss || boss.defeated) return;
+    boss.r = boss.minRadius; boss.defeated = true; boss.solid = false; boss.hp = 0;
+    this.score += boss.killValue; this.target += boss.killValue;
+    this.cancelPull(); this.phase = 'boss-celebrate'; this.phaseTime = 0; p.roll = 0;
+    // Preserve the exact post-impact velocity. The brake integrates its smooth
+    // envelope and real wall rebounds instead of lerping to a clamped endpoint.
+    this.bossCelebration = {celebrated: false, stop: null};
+    this.emit('bossDefeated', {value: boss.killValue, x: boss.x, y: boss.y, r: boss.r});
+  }
+
+  advanceBossCelebration(dt) {
+    const p = this.player, motion = this.bossCelebration, duration = BOSS_TIMING.brake;
+    const previous = Math.max(0, this.phaseTime - dt), end = Math.min(this.phaseTime, duration);
+    if (previous < duration) {
+      const from = Math.max(0, 1 - previous / duration), to = Math.max(0, 1 - end / duration);
+      const travel = from > 0 ? duration / 3 * (from ** 3 - to ** 3) / (from * from) : 0;
+      p.x += p.vx * travel; p.y += p.vy * travel;
+      const retention = from > 0 ? to * to / (from * from) : 0;
+      p.vx *= retention; p.vy *= retention;
+      this.wall(p); p.squash *= Math.exp(-dt * 13);
+    }
+    if (this.phaseTime + 1e-9 >= duration) {
+      p.vx = p.vy = 0;
+      if (!motion.stop) motion.stop = {x: p.x, y: p.y};
+      p.x = motion.stop.x; p.y = motion.stop.y; p.squash = 0;
+      if (!motion.celebrated) { motion.celebrated = true; this.emit('bossCelebrate', {x: p.x, y: p.y, r: p.r}); }
+    }
+    p.roll = Math.PI * 2 * smooth((this.phaseTime - duration) / BOSS_TIMING.spin);
+    const total = duration + BOSS_TIMING.spin + BOSS_TIMING.hold + BOSS_TIMING.fade;
+    if (this.phaseTime + 1e-9 >= total) { delete p.roll; this.beginUpgrade({bypassBoss: true}); }
+  }
+
+  advanceBoss(dt, dragging) {
+    const p = this.player, b = this.boss;
+    if (b.stunned) { b.r = b.minRadius; b.stunnedTime += dt; }
+    else b.r = Math.min(b.maxRadius, b.r + b.inflationRate * dt);
+    const friction = Math.exp(-(dragging ? 10 : .04) * dt);
+    p.vx *= friction; p.vy *= friction;
+    if (length(p) < 2) p.vx = p.vy = 0;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.spin += p.vx * dt / Math.max(1, p.r);
+    p.hit = Math.max(0, p.hit - dt * 5); p.squash *= Math.exp(-dt * 13);
+    b.hit = Math.max(0, b.hit - dt * 5); b.squash *= Math.exp(-dt * 13);
+    this.wall(p); this.collideBoss();
+    const bounds = this.arenaBounds;
+    p.x = clamp(p.x, bounds.left + p.r, bounds.right - p.r);
+    p.y = clamp(p.y, bounds.top + p.r, bounds.bottom - p.r);
+    // A same-frame incoming hit can save the run or win before the size limit.
+    if (this.phase === 'boss' && !b.stunned && b.r >= b.maxRadius) { this.cancelPull(); this.phase = 'over'; this.emit('over', {boss: true}); }
   }
 
   layoutChoices() {
@@ -259,8 +477,10 @@ export class World {
     // Each integration covers at most half a base radius at the sampled speed.
     let remaining = dt;
     while (remaining > 1e-10 && this.phase !== 'over') {
-      const speed = Math.min(this.maxPhysicsSpeed, Math.max(length(this.player), ...this.enemies.map(length)));
-      const h = Math.min(remaining, speed > 0 ? this.unit * .5 / speed : remaining);
+      const sampledSpeed = Math.max(length(this.player), ...this.enemies.map(length));
+      const speed = ['boss', 'boss-celebrate'].includes(this.phase) ? sampledSpeed : Math.min(this.maxPhysicsSpeed, sampledSpeed);
+      let h = Math.min(remaining, speed > 0 ? this.unit * .5 / speed : remaining);
+      if (this.phase === 'boss-celebrate' && this.phaseTime < BOSS_TIMING.brake) h = Math.min(h, 1 / 120, BOSS_TIMING.brake - this.phaseTime);
       this.advance(h, dragging);
       remaining -= h;
     }
@@ -271,14 +491,28 @@ export class World {
     this.pulseCooldown -= dt;
     const p = this.player;
     if (this.phase === 'battle' && this.score >= this.target) { this.beginUpgrade(); return; }
+    if (this.phase === 'boss-entry') {
+      this.positionBossEntry(); p.spin += dt * 4;
+      if (this.phaseTime + 1e-9 >= BOSS_TIMING.entry) {
+        this.phase = 'boss'; this.phaseTime = 0; this.arenaBlend = 1; this.boss.born = 1; this.boss.solid = true;
+        p.squash = 0; delete p.roll; this.emit('bossReady', {stage: this.stage});
+      }
+      return;
+    }
+    if (this.phase === 'boss') { this.advanceBoss(dt, dragging); return; }
+    if (this.phase === 'boss-celebrate') { this.advanceBossCelebration(dt); return; }
     if (this.phase === 'transition') {
+      this.arenaBlend = this.arenaRestoreFrom * (1 - smooth(this.phaseTime / BOSS_TIMING.entry));
       const t = ease(this.phaseTime / 1.45);
       p.x = lerp(this.rollFrom.x, this.width * .5, t);
       p.y = lerp(this.rollFrom.y, this.height * .72, t);
+      const bounds = this.arenaBounds;
+      p.x = clamp(p.x, bounds.left + p.r, bounds.right - p.r);
+      p.y = clamp(p.y, bounds.top + p.r, bounds.bottom - p.r);
       p.spin += dt * 4;
       p.angle = .4; p.squash = Math.sin(this.phaseTime * 10) * .12 * (1 - t);
       for (const c of this.choices) c.born = clamp((this.phaseTime - .25) / 1.5, 0, 1);
-      if (this.phaseTime >= 1.85) { this.phase = 'choose'; this.phaseTime = 0; this.emit('choiceReady'); }
+      if (this.phaseTime >= 1.85) { this.arenaBlend = 0; this.phase = 'choose'; this.phaseTime = 0; this.emit('choiceReady'); }
       return;
     }
     if (this.phase === 'reward' && this.phaseTime >= 1) {
@@ -317,13 +551,14 @@ export class World {
       const a = this.enemies[i];
       if (a.hp <= 0) continue;
       if (a.solid) this.collide(p, a);
-      if (this.phase === 'transition') return;
+      if (this.phase === 'transition' || this.phase === 'boss-entry') return;
       for (let j = i + 1; j < this.enemies.length; j++) {
         const b = this.enemies[j];
         if (b.hp > 0) this.collide(a, b, !a.solid || !b.solid);
       }
     }
-    for (const b of bodies) { b.x = clamp(b.x, this.inset + b.r, this.width - this.inset - b.r); b.y = clamp(b.y, this.inset + b.r, this.height - this.inset - b.r); }
+    const bounds = this.arenaBounds;
+    for (const b of bodies) { b.x = clamp(b.x, bounds.left + b.r, bounds.right - b.r); b.y = clamp(b.y, bounds.top + b.r, bounds.bottom - b.r); }
     this.enemies = this.enemies.filter(b => b.hp > 0);
     if (this.phase === 'choose') {
       for (const c of this.choices) {

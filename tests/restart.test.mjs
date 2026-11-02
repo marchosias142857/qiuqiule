@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {CampaignWorld} from '../dist/campaign.js';
+import {skinContour,contourArea} from '../dist/skins.js';
 
 // Run the real entry module and scene with DOM/audio/Phaser boundaries stubbed.
 const elements=new Map(),listeners=new Map(),saved=new Map();
@@ -10,10 +11,11 @@ function element(selector){
   const classes=new Set();
   const e={hidden:false,inert:false,children:[],dataset:{},style:{setProperty(){},removeProperty(){}},
     classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle(x,on){on?classes.add(x):classes.delete(x);}},
-    attributes:{},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},addEventListener(){},focus(){},replaceChildren(...children){this.children=children;},
+    attributes:{},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},addEventListener(){},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
+    firstElementChild:{style:{}},lastElementChild:{style:{}},
     querySelector:child=>element(selector+' '+child),
     getBoundingClientRect(){
-      const [x,y,width,height]=selector==='#over-ball'?[96,320,72,72]:selector==='#pause-ball'?[110,200,64,64]:[0,0,390,844];
+      const [x,y,width,height]=selector==='#over-ball'?[96,320,72,72]:selector==='#pause-ball'?[110,200,64,64]:selector==='#skin-unlock-ball'?[141,370,108,108]:[0,0,390,844];
       return {x,y,width,height,top:y,bottom:y+height,left:x,right:x+width};
     }};
   elements.set(selector,e);return e;
@@ -24,7 +26,8 @@ globalThis.Phaser={AUTO:0,Scale:{NONE:0},Scene:class{constructor(){this.cameras=
 window.Phaser=globalThis.Phaser;
 globalThis.matchMedia=()=>({matches:false});
 globalThis.requestAnimationFrame=fn=>fn();
-globalThis.document={readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),
+let createdElementCount=0;
+globalThis.document={readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(`created-${tag}-${++createdElementCount}`),
   querySelector:element,
   querySelectorAll:selector=>selector==='.menu-panel'?['#settings-panel','#help-panel','#menu-transition-panel'].map(element):[],
   addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn);}};
@@ -56,7 +59,14 @@ export function seedRenderer(graphics,width=390,height=844,arena=false){
   viewport=displayMetrics(width,height,1);home=new HomeWorld(width,height,'endless');
   world=arena?new World(width,height):null;screen=arena?'play':'home';
   modal=null;paused=false;transfer=null;controlFlight=null;uiAnchor=null;result=null;drag=null;releaseOverlay=0;pauseOnArrival=false;homeReveal=1;
-  settings.expressions=false;boot();scene=game.scene;scene.g=graphics;
+  settings.expressions=false;boot();scene=game.scene;scene.g=graphics;scene.testLabels=[];
+  scene.add={text(x,y,text,style){
+    const label={x,y,text,style,visible:true,alpha:1,destroyed:false,
+      setOrigin(){return this;},setScale(){return this;},setDepth(){return this;},
+      setVisible(value){this.visible=value;return this;},setAlpha(value){this.alpha=value;return this;},
+      setPosition(x,y){this.x=x;this.y=y;return this;},destroy(){this.destroyed=true;}};
+    scene.testLabels.push(label);return label;
+  }};
   return {home,world,scene};
 }
 export function seedLevelRenderer(graphics,width=390,height=844,unlocked=100){
@@ -77,15 +87,34 @@ export function enterFromHome(){
 export const bindCanvas=bindInput;
 export const readHome=()=>home;
 export const expressionEnabled=()=>settings.expressions;
+export const playerInk=()=>hex(settings.player);
+export function setPlayerInk(value){const previous=settings.player;settings.player=value;return previous;}
 export function recordTones(){
   const calls=[],original=sound.tone;sound.tone=(...args)=>calls.push(args);
   return {calls,restore(){sound.tone=original;}};
+}
+export function recordBossVictory(){
+  const calls=[],original=sound.bossVictory;sound.bossVictory=(...args)=>calls.push(args);
+  return {calls,restore(){sound.bossVictory=original;}};
 }
 export function openUnlockedSelection(unlocked,current=1){
   campaignProgress={completed:unlocked-1,unlocked};currentLevel=current;
   openLevels({...home.player});
   return selector;
 }
+export function seedSkins(raw=null,completed=0){
+  skins=normalizeSkins(raw,completed);playerContour=skinContour(skins.enabled?skins.sides:0);
+  skinTween=null;skinOverride=null;skinUnlock=null;lastUiPose=null;appearance=null;
+  campaignProgress=normalizeProgress({completed});
+}
+export function readSkins(){return {skins,playerContour,skinOverride,skinTween,skinUnlock,lastUiPose,active:activeContour()};}
+export function changeSkinEnabled(enabled){setSkinState(toggleSkins(skins,enabled));}
+export function changeSkinSides(sides){setSkinState(selectSkin(skins,sides));}
+export const advanceSkin=updateSkin;
+export function bindPhotoRenderer(renderer){photoRenderer=renderer;}
+export const applyAppearance=setAppearance;
+export const hidePhotoForFrame=clearPhoto;
+export function readAppearance(){return {appearance,appearanceUrl};}
 `;
 const app=await import('data:text/javascript;base64,'+Buffer.from(source+adapter).toString('base64'));
 
@@ -93,6 +122,34 @@ function clickRestart(){
   for(const fn of listeners.get('click'))fn({target:{closest:()=>({dataset:{action:'restart'}})},detail:1});
 }
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-6,`${a} != ${b}`);
+test('appearance replacement and removal invalidate cached images while ordinary frames only hide them',async t=>{
+  const originalImage=globalThis.Image,calls=[];
+  globalThis.Image=class{async decode(){}};
+  const renderer={setImage:image=>calls.push(['image',image]),hide:()=>calls.push(['hide'])};
+  app.bindPhotoRenderer(renderer);
+  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedSkins();});
+  await app.applyAppearance('data:image/png;base64,b2xk');
+  const first=app.readAppearance().appearance;
+  app.hidePhotoForFrame();app.hidePhotoForFrame();
+  assert.equal(calls.filter(c=>c[0]==='image').length,1,'frame hiding must retain the image cache');
+  await app.applyAppearance('data:image/png;base64,bmV3');
+  assert.notEqual(app.readAppearance().appearance,first);
+  assert.equal(calls.filter(c=>c[0]==='image').length,2);
+  await app.applyAppearance(null);
+  assert.deepEqual(app.readAppearance(),{appearance:null,appearanceUrl:null});
+  assert.equal(calls.filter(c=>c[0]==='image').at(-1)[1],null,'removal must release renderer caches');
+});
+test('an older image decode cannot recreate the photo cache or saved image after removal',async t=>{
+  const originalImage=globalThis.Image,calls=[];let decoded;
+  globalThis.Image=class{decode(){return new Promise(resolve=>decoded=resolve);}};
+  app.bindPhotoRenderer({setImage:image=>calls.push(image),hide(){}});
+  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedSkins();saved.delete('qiuqiule-appearance');});
+  const pending=app.applyAppearance('data:image/png;base64,b2xk',true);
+  await app.applyAppearance(null,true);decoded();await pending;
+  assert.deepEqual(calls,[null]);
+  assert.deepEqual(app.readAppearance(),{appearance:null,appearanceUrl:null});
+  assert.equal(JSON.parse(saved.get('qiuqiule-appearance')).image,null);
+});
 for(const origin of ['over','pause'])test(`${origin} restart animates only the player while a fresh world waits`,()=>{
   const previous=app.seedRestart(origin),from=app.sourcePose();
   clickRestart();
@@ -142,8 +199,11 @@ test('backgrounding during restart keeps the fresh world paused after arrival',(
 });
 
 function graphicsRecorder(){
-  let points=[],color,alpha;
-  const g={shapes:[],clear(){this.shapes=[];},fillStyle(c,a=1){color=c;alpha=a;},beginPath(){points=[];},
+  let points=[],color,alpha,strokeColor,strokeAlpha,strokeWidth;
+  const g={shapes:[],borders:[],clear(){this.shapes=[];this.borders=[];},fillStyle(c,a=1){color=c;alpha=a;},beginPath(){points=[];},
+    lineStyle(width,c,a=1){strokeWidth=width;strokeColor=c;strokeAlpha=a;},
+    strokePath(){this.shapes.push({type:'stroke',color:strokeColor,alpha:strokeAlpha,width:strokeWidth,points:[...points]});},
+    strokeRoundedRect(x,y,width,height,r){this.borders.push({x,y,width,height,r});},
     moveTo(x,y){points.push({x,y});},lineTo(x,y){points.push({x,y});},
     fillPath(){this.shapes.push({type:'path',color,alpha,points:[...points]});},
     fillEllipse(x,y,width,height){this.shapes.push({type:'ellipse',color,alpha,x,y,width,height});}};
@@ -739,8 +799,8 @@ function uiContours(){
   const ball=element('#ui-ball'),diameter=parseFloat(ball.style.width),r=diameter/2;
   const position=/translate3d\(([^p]+)px,([^p]+)px,0\)/.exec(ball.style.transform);
   const scale=/scale\(([^,]+),([^\)]+)\)/.exec(ball.style.transform);
-  assert.ok(position&&scale);
-  const sx=Number(scale[1]),sy=Number(scale[2]),center={x:Number(position[1])+r,y:Number(position[2])+r};
+  assert.ok(position);
+  const sx=scale?Number(scale[1]):1,sy=scale?Number(scale[2]):1,center={x:Number(position[1])+r,y:Number(position[2])+r};
   const toScreen=p=>({x:center.x+(p.x-50)*r/50*sx,y:center.y+(p.y-50)*r/50*sy});
   const eyeTransforms=[...uiNode('.ui-eyes').style.transform.matchAll(/([a-z]+)\(([^\)]+)\)/gi)].reverse();
   const transformEye=point=>{
@@ -891,4 +951,452 @@ test('home and selection share the same complete independent breathing cycle and
       if(mode==='levels')near(player.squash,0);
     }
   }
+});
+
+const crownShapes=g=>{
+  const p=app.readRestart().world?.player;if(!p)return [];
+  return g.shapes.filter(shape=>{
+    if(shape.type!=='path'||shape.color!==app.playerInk()||shape.points.length===193)return false;
+    const bounds=outlineBounds(shape);
+    return Math.abs(bounds.cx-p.x)<p.r*.1&&bounds.cy<p.y-p.r*.7&&bounds.cy>p.y-p.r*3;
+  });
+};
+const playerEyes=(g,p)=>eyeShapes(g).filter(shape=>shape.type==='ellipse'&&Math.hypot(shape.x-p.x,shape.y-p.y)<p.r);
+function bossScene(stage=5,width=390,height=844){
+  const g=graphicsRecorder(),{world,scene}=app.seedRenderer(g,width,height,true);
+  world.stage=stage;world.score=world.target;scene.update(0,1000/120);
+  assert.equal(world.phase,'boss-entry');assert.ok(world.boss?.isBoss);
+  return {g,world,scene};
+}
+function advanceToBoss(world,scene){
+  for(let frame=0;world.phase==='boss-entry'&&frame<240;frame++)scene.update(0,1000/120);
+  assert.equal(world.phase,'boss');assert.equal(world.boss.born,1);
+}
+function stunBoss(world,scene){
+  for(let hit=0;!world.boss.stunned&&hit<100;hit++){
+    world.damageBoss(world.baseSpeed);scene.update(0,0);
+  }
+  assert.equal(world.phase,'boss');assert.equal(world.boss.stunned,true);
+  assert.ok(Number.isFinite(world.boss.hp)&&world.boss.hp>0);assert.equal(world.boss.defeated,false);
+  assert.equal(world.boss.hp,world.boss.maxHp,'the shrinking hit that triggers stun does not consume the new health pool');
+}
+function defeatBoss(world,scene){
+  for(let hit=0;world.phase==='boss'&&hit<100;hit++){
+    world.damageBoss(world.baseSpeed);scene.update(0,0);
+  }
+  assert.equal(world.phase,'boss-celebrate');assert.equal(world.boss.defeated,true);assert.equal(world.boss.solid,false);
+}
+function bossSimulationSnapshot(world,scene){
+  const p=world.player;
+  return JSON.stringify({phase:world.phase,phaseTime:world.phaseTime,time:world.time,score:world.score,target:world.target,
+    spawnTimer:world.spawnTimer,arenaBounds:world.arenaBounds,boss:world.boss,bossCelebration:world.bossCelebration,enemies:world.enemies,choices:world.choices,
+    player:{x:p.x,y:p.y,vx:p.vx,vy:p.vy,r:p.r,squash:p.squash,angle:p.angle,roll:p.roll},
+    effects:scene.effects.map(e=>({life:e.life,x:e.x,y:e.y}))});
+}
+const bossSpiralShapes=(g,b)=>g.shapes.filter(shape=>shape.type==='stroke'&&shape.points.length>10&&shape.points.every(point=>Math.hypot(point.x-b.x,point.y-b.y)<b.r));
+const bossAngryShapes=(g,b)=>g.shapes.filter(shape=>shape.type==='path'&&shape.color===0x8b5444&&shape.points.every(point=>Math.hypot(point.x-b.x,point.y-b.y)<b.r));
+function assertArenaBorder(g,world){
+  assert.equal(g.borders.length,1);const drawn=g.borders[0],bounds=world.arenaBounds;
+  // Preserve the established one-pixel optical outset around the collision box.
+  near(drawn.x,bounds.left-1);near(drawn.y,bounds.top-1);
+  near(drawn.width,bounds.width+2);near(drawn.height,bounds.height+2);
+}
+
+test('boss entry reaches a centered square in 0.85 seconds and its visible border agrees with every collision wall',()=>{
+  for(const [width,height] of [[390,844],[844,390]]){
+    const {g,world,scene}=bossScene(5,width,height),initial={...world.arenaBounds};
+    assertArenaBorder(g,world);advanceScene(scene,.4);assert.equal(world.phase,'boss-entry');
+    const middle={...world.arenaBounds};assertArenaBorder(g,world);
+    near((middle.left+middle.right)/2,width/2);near((middle.top+middle.bottom)/2,height/2);
+    assert.ok(middle.width<=initial.width&&middle.height<=initial.height);
+    assert.ok(middle.width<initial.width||middle.height<initial.height);
+    advanceScene(scene,.44);assert.equal(world.phase,'boss-entry');advanceScene(scene,.02);assert.equal(world.phase,'boss');
+    const bounds=world.arenaBounds;near(bounds.width,bounds.height);
+    near((bounds.left+bounds.right)/2,width/2);near((bounds.top+bounds.bottom)/2,height/2);assertArenaBorder(g,world);
+    near(world.boss.initialRadius,world.unit*4.8);near(world.boss.minRadius,world.unit*2);near(world.boss.maxRadius,bounds.width*.375);
+    const p=world.player;
+    for(const side of ['left','right','top','bottom']){
+      p.x=bounds.left+p.r+5;p.y=bounds.bottom-p.r-5;p.vx=p.vy=0;
+      const horizontal=side==='left'||side==='right',coordinate=horizontal?'x':'y',velocity=horizontal?'vx':'vy';
+      const inward=side==='left'||side==='top'?1:-1;
+      p[coordinate]=bounds[side]+inward*(p.r-3);p[velocity]=-inward*100;
+      world.wall(p);near(p[coordinate],bounds[side]+inward*p.r);assert.ok(p[velocity]*inward>0);
+      scene.update(0,0);assertArenaBorder(g,world);
+    }
+    p.x=width/2;p.y=bounds.bottom-p.r-5;p.vx=world.unit*19;p.vy=0;
+    const pointer=inputCanvas(width,height);pointer('pointerdown',p.x,p.y);
+    assert.ok(app.readRestart().drag,'the boss ready-speed allowance permits a new pull while the player is still moving');
+    pointer('pointercancel');
+  }
+});
+
+test('reaching the boss minimum radius leaves a living stunned boss whose angry eyes gradually become spirals',()=>{
+  const {g,world,scene}=bossScene();advanceToBoss(world,scene);const scoreBefore=world.score;
+  assert.equal(bossSpiralShapes(g,world.boss).length,0);assert.equal(bossAngryShapes(g,world.boss).length,2);
+  const horns=g.shapes.filter(shape=>shape.type==='path'&&shape.color===0xe88c72&&shape.points.length!==193);
+  assert.equal(horns.length,2);
+  assert.ok(horns.every(horn=>Math.max(...horn.points.map(point=>Math.hypot(point.x-world.boss.x,point.y-world.boss.y)))<world.boss.r*1.4),'larger horns remain cosmetic appendages within the intended outline');
+  stunBoss(world,scene);
+  const b=world.boss,hp=b.hp;near(b.r,world.unit*2);assert.equal(world.score-scoreBefore,500);
+  assert.equal(scene.testLabels.filter(label=>label.text==='+500').length,0,'the minimum-size hit does not also award the kill');
+  assert.equal(bossSpiralShapes(g,b).length,0,'stun entry retains the old eye shape on its first frame');
+  advanceScene(scene,.12);assert.equal(world.phase,'boss');near(b.r,world.unit*2);assert.equal(b.hp,hp);
+  const halfway=bossSpiralShapes(g,b);assert.equal(halfway.length,2);
+  assert.ok(halfway.every(eye=>eye.alpha>0&&eye.alpha<1),'spirals fade in through a real intermediate state');
+  const fading=bossAngryShapes(g,b);assert.equal(fading.length,2);assert.ok(fading.every(eye=>eye.alpha>0&&eye.alpha<1));
+  advanceScene(scene,.13);const complete=bossSpiralShapes(g,b);assert.equal(complete.length,2);
+  assert.ok(complete.every(eye=>Math.abs(eye.alpha-1)<1e-6));assert.equal(b.hp,hp);near(b.r,world.unit*2);
+  assert.equal(bossAngryShapes(g,b).length,0,'the angry eyes fully disappear after the smooth handoff');
+  let followupHits=0;
+  while(world.phase==='boss'&&followupHits<3){
+    world.damageBoss(world.baseSpeed);scene.update(0,0);followupHits++;
+    if(followupHits===1){
+      assert.equal(world.phase,'boss','the first normal follow-up impact must not kill the stunned boss');
+      assert.ok(b.hp>0&&b.hp<hp);assert.equal(b.stunned,true);near(b.r,b.minRadius);
+      assert.equal(bossSpiralShapes(g,b).length,2,'spiral eyes persist through a surviving follow-up impact');
+      assert.equal(bossAngryShapes(g,b).length,0);assert.equal(world.score-scoreBefore,500);
+    }
+    assert.ok(!g.shapes.some(shape=>shape.type==='ellipse'&&[0xf9f8f0,0xffffff].includes(shape.color)&&shape.alpha>0),'stunned impacts retain the no-white-flash rendering');
+  }
+  assert.equal(followupHits,3,'the first boss takes three unbuffed base-speed follow-up impacts');
+  assert.equal(world.phase,'boss-celebrate');assert.equal(world.score-scoreBefore,1000);
+  const labels=scene.testLabels.map(label=>label.text);
+  assert.deepEqual(labels,['+100','+100','+100','+100','+100','+500']);
+  for(let repeated=0;repeated<3;repeated++){world.damageBoss(world.baseSpeed);scene.update(0,0);}
+  assert.equal(world.score-scoreBefore,1000);assert.deepEqual(scene.testLabels.map(label=>label.text),labels,'segment and kill rewards are each dispatched only once');
+});
+
+test('boss defeat keeps the current velocity and slows smoothly for 0.8 seconds before spinning',()=>{
+  const {world,scene}=bossScene();advanceToBoss(world,scene);stunBoss(world,scene);
+  const p=world.player,bounds=world.arenaBounds;
+  p.x=(bounds.left+bounds.right)/2;p.y=(bounds.top+bounds.bottom)/2;p.vx=100;p.vy=-20;
+  const initialSpeed=Math.hypot(p.vx,p.vy),initial={x:p.x,y:p.y};
+  defeatBoss(world,scene);
+  near(Math.hypot(p.vx,p.vy),initialSpeed);near(p.x,initial.x);near(p.y,initial.y);
+  let previous=initialSpeed;
+  for(let frame=1;frame<=96;frame++){
+    scene.update(0,1000/120);const speed=Math.hypot(p.vx,p.vy);
+    assert.ok(speed<=previous+1e-8,'braking never adds speed');
+    if(frame===1){assert.ok(speed>initialSpeed*.9,'the first frame does not abruptly cut velocity');assert.ok(p.x>initial.x&&p.y<initial.y);}
+    if(frame<96)assert.ok(speed>0,'braking continues until its full duration');
+    previous=speed;
+  }
+  near(previous,0);near(p.roll,0);advanceScene(scene,.05);assert.ok(p.roll>0);
+});
+
+test('the real scene renders the boss, routes its segment and defeat rewards, then offers the ordinary upgrade',()=>{
+  for(const [stage,segmentValue,totalValue] of [[5,100,1000],[10,110,1100]]){
+    const {g,world,scene}=bossScene(stage),scoreBefore=world.score;
+    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');assert.equal(crownShapes(g).length,0);
+    advanceToBoss(world,scene);
+    assert.deepEqual(world.enemies,[]);assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');
+    assert.equal(g.shapes.filter(shape=>shape.type==='path'&&shape.color===0xe88c72&&shape.points.length===193).length,1,'the separate boss body reaches the real renderer');
+    const boss=world.boss;world.damageBoss(world.baseSpeed);scene.update(0,0);
+    assert.ok(!g.shapes.some(shape=>shape.type==='ellipse'&&[0xf9f8f0,0xffffff].includes(shape.color)&&shape.alpha>0&&Math.abs(shape.x-boss.x)<1e-6),'boss damage never paints a white flash over its body');
+    defeatBoss(world,scene);
+    assert.equal(g.shapes.filter(shape=>shape.type==='path'&&shape.color===0xe88c72&&shape.points.length===193).length,0,'the defeated boss does not remain as a solid or flashing ball');
+    assert.equal(world.score-scoreBefore,totalValue);
+    assert.deepEqual(scene.testLabels.map(label=>label.text),[...Array(5).fill('+'+segmentValue),'+'+segmentValue*5]);
+    assert.ok(scene.testLabels.every(label=>label.style.fontFamily==='GameSans, sans-serif'));
+    assert.equal(element('#score').textContent,String(world.score).padStart(4,'0'));
+    assert.equal(Number(saved.get('qiuqiule-best')),world.score);
+    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');
+    advanceScene(scene,2.85);assert.equal(world.phase,'boss-celebrate');
+    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');
+    advanceScene(scene,.03);assert.equal(world.phase,'transition');assert.equal(world.choices.length,2);
+    assert.ok(element('#choice-labels').innerHTML.includes('choice-label'),'the existing upgrade transition becomes visible only after the celebration');
+    assert.equal(crownShapes(g).length,0);
+    advanceScene(scene,.86);near(world.arenaBounds.width,world.width-32);near(world.arenaBounds.height,world.height-32);assertArenaBorder(g,world);
+    advanceScene(scene,1.04);assert.equal(world.phase,'choose');assert.equal(world.ready,true);
+    assert.ok(element('#choice-labels').innerHTML.includes('opacity:1'));
+  }
+});
+
+test('boss collisions keep deformation, sound and scoring without white flashes while ordinary enemies retain their hit flash',()=>{
+  const {g,world,scene}=bossScene();advanceToBoss(world,scene);
+  const boss=world.boss,p=world.player,scoreBefore=world.score,radiusBefore=boss.r;
+  const audio=app.recordTones();
+  try{
+    for(let hit=0;hit<40&&world.score===scoreBefore;hit++){
+      p.x=boss.x;p.y=boss.y+boss.r+p.r-1;p.vx=0;p.vy=-world.baseSpeed*.5;
+      world.collideBoss();scene.update(0,0);
+      assert.ok(p.vy>0,'the real collision still rebounds the player');
+      assert.ok(boss.squash>0&&p.squash>0,'the normal impact deformation remains active');
+      assert.ok(!g.shapes.some(shape=>shape.type==='ellipse'&&[0xf9f8f0,0xffffff].includes(shape.color)&&shape.alpha>0),'boss hit feedback contains no white overlay');
+    }
+    assert.ok(boss.r<radiusBefore);assert.equal(world.score-scoreBefore,100);
+    assert.ok(scene.testLabels.some(label=>label.text==='+100'));
+    assert.ok(audio.calls.some(args=>args[0]>0&&args[1]>0&&args[2]==='triangle'),'boss impacts still dispatch their sound');
+    const body=g.shapes.find(shape=>shape.type==='path'&&shape.color===0xe88c72&&shape.points.length===193);
+    assert.ok(body);const bounds=outlineBounds(body);assert.ok(Math.abs(bounds.width-bounds.height)>1,'the renderer keeps the visible collision squash');
+  }finally{audio.restore();}
+  const ordinaryGraphics=graphicsRecorder(),ordinary=app.seedRenderer(ordinaryGraphics,390,844,true);
+  const player=ordinary.world.player,enemy=ordinary.world.enemies[0],hp=enemy.hp;
+  enemy.born=1;enemy.solid=true;enemy.x=player.x+player.r+enemy.r-1;enemy.y=player.y;enemy.vx=enemy.vy=0;
+  player.vx=ordinary.world.unit*3;player.vy=0;
+  ordinary.world.collide(player,enemy);ordinary.scene.update(0,0);
+  assert.ok(enemy.hp<hp&&enemy.hp>0,'exercise a surviving ordinary-enemy impact');
+  assert.ok(ordinaryGraphics.shapes.some(shape=>shape.type==='ellipse'&&shape.color===0xf9f8f0&&shape.alpha>0&&Math.abs(shape.x-enemy.x)<1e-6&&Math.abs(shape.y-enemy.y)<1e-6),'ordinary enemies retain their existing white hit effect');
+});
+
+test('boss entry, battle and celebration freeze through pause or backgrounding and resume from the same simulation pose',()=>{
+  for(const phase of ['boss-entry','boss','stunned','boss-celebrate'])for(const interruption of ['pause','background']){
+    const {g,world,scene}=bossScene();
+    if(phase!=='boss-entry')advanceToBoss(world,scene);
+    if(phase==='boss-celebrate'){defeatBoss(world,scene);advanceScene(scene,1.1);}
+    else if(phase==='stunned'){stunBoss(world,scene);advanceScene(scene,.3);}
+    else if(phase==='boss-entry')advanceScene(scene,.4);
+    const before=bossSimulationSnapshot(world,scene),rollBefore=world.player.roll||0;
+    const eyesBefore=playerEyes(g,world.player).map(({x,y,width,height})=>({x,y,width,height}));
+    const spiralsBefore=phase==='stunned'?bossSpiralShapes(g,world.boss):null;
+    const uiEyeRotation=()=>Number(/rotate\(([^r]+)rad\)/.exec(element('#ui-ball .ui-eyes').style.transform)[1]);
+    if(interruption==='pause')clickAction('pause');
+    else{
+      document.hidden=true;
+      for(const listener of listeners.get('visibilitychange'))listener();
+    }
+    try{
+      assert.equal(app.readRestart().paused,true);assert.equal(app.readRestart().modal,'pause');
+      near(uiEyeRotation(),rollBefore);app.advanceUi(0);near(uiEyeRotation(),rollBefore,'the first pause animation frame preserves the spinning face');
+      advanceScene(scene,.75);
+      assert.equal(bossSimulationSnapshot(world,scene),before,'neither the boss nor timed celebration can progress behind a pause overlay');
+      assertArenaBorder(g,world);
+      if(spiralsBefore)assert.deepEqual(bossSpiralShapes(g,world.boss),spiralsBefore,'stunned spiral geometry freezes with world time');
+      assert.equal(crownShapes(g).length,0,'the detached pause player never leaves a crown floating in the arena');
+      assert.ok(scene.testLabels.filter(label=>!label.destroyed).every(label=>!label.visible));
+    }finally{
+      document.hidden=false;
+      if(interruption==='background')for(const listener of listeners.get('visibilitychange'))listener();
+    }
+    clickAction('resume');assert.equal(app.readRestart().paused,true);
+    app.advanceUi(0);near(uiEyeRotation(),0);
+    app.advanceUi(.65);assert.equal(app.readRestart().paused,false);
+    near(Math.cos(uiEyeRotation()),Math.cos(rollBefore));near(Math.sin(uiEyeRotation()),Math.sin(rollBefore));
+    assert.equal(bossSimulationSnapshot(world,scene),before,'the return flight itself does not advance gameplay');
+    scene.update(0,0);assert.deepEqual(playerEyes(g,world.player).map(({x,y,width,height})=>({x,y,width,height})),eyesBefore,'the resumed canvas face retains its frozen orientation');
+    const previousTime=world.time;advanceScene(scene,.05);assert.ok(world.time>previousTime);assert.equal(world.phase,phase==='stunned'?'boss':phase);
+  }
+});
+
+test('restarting from any boss phase removes the boss, celebration, labels and crown before a fresh endless attempt',()=>{
+  for(const phase of ['boss-entry','boss','stunned','boss-celebrate']){
+    const {g,world,scene}=bossScene();
+    if(phase!=='boss-entry')advanceToBoss(world,scene);
+    if(phase==='boss-celebrate'){defeatBoss(world,scene);advanceScene(scene,1.1);assert.equal(crownShapes(g).length,1);}
+    else if(phase==='stunned'){stunBoss(world,scene);advanceScene(scene,.3);}
+    const oldLabels=[...scene.testLabels];
+    clickAction('pause');app.advanceUi(.42);clickRestart();
+    const state=app.readRestart(),fresh=state.world;
+    assert.notEqual(fresh,world);assert.equal(fresh.phase,'battle');assert.equal(fresh.stage,1);assert.equal(fresh.score,0);
+    assert.equal(fresh.boss,null);assert.ok(!fresh.player.roll);assert.deepEqual(fresh.choices,[]);assert.deepEqual(scene.effects,[]);
+    assert.ok(oldLabels.every(label=>label.destroyed));assert.equal(element('#choice-labels').innerHTML,'');
+    assert.equal(state.transfer.duration,.65);assert.equal(state.paused,true);
+    app.advanceUi(.65);scene.update(0,0);
+    assert.equal(app.readRestart().paused,false);assert.equal(crownShapes(g).length,0);assert.equal(fresh.time,0);
+    near(fresh.arenaBounds.width,fresh.width-32);near(fresh.arenaBounds.height,fresh.height-32);assertArenaBorder(g,fresh);
+  }
+});
+
+test('boss celebration renders an upright crown and player spin, with one fanfare after braking and no early reward controls',()=>{
+  const {g,world,scene}=bossScene();advanceToBoss(world,scene);
+  const audio=app.recordBossVictory();
+  try{
+    defeatBoss(world,scene);assert.equal(crownShapes(g).length,0);assert.equal(audio.calls.length,0);
+    advanceScene(scene,.79);assert.equal(crownShapes(g).length,0);assert.equal(audio.calls.length,0);
+    advanceScene(scene,.31);assert.equal(world.phase,'boss-celebrate');assert.equal(audio.calls.length,1);
+    assert.equal(world.ready,false);assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');
+    const crown=crownShapes(g);assert.equal(crown.length,1);assert.ok(crown[0].points.length>50);
+    const p=world.player,firstRoll=p.roll;assert.ok(firstRoll>0&&firstRoll<Math.PI*2);
+    const bounds=outlineBounds(crown[0]);near(bounds.cx,p.x);assert.ok(bounds.cy<p.y-p.r);assert.ok(bounds.width>p.r&&bounds.width<2*p.r,'the narrower crown fits within the player diameter');
+    const eyes=playerEyes(g,p);assert.equal(eyes.length,2);
+    const ex=-p.r*.17+(p.lookX||0)*p.r,ey=-p.r*.07+(p.lookY||0)*p.r;
+    near(eyes[0].x,p.x+ex*Math.cos(firstRoll)-ey*Math.sin(firstRoll));
+    near(eyes[0].y,p.y+ex*Math.sin(firstRoll)+ey*Math.cos(firstRoll));
+    const crownLocal=crown[0].points.map(point=>({x:point.x-p.x,y:point.y-p.y}));
+    advanceScene(scene,.2);assert.ok(p.roll>firstRoll);
+    const next=crownShapes(g);assert.equal(next.length,1);
+    assertSameContour(next[0].points.map(point=>({x:point.x-p.x,y:point.y-p.y})),crownLocal);
+    assert.equal(audio.calls.length,1,'spinning frames do not replay the fanfare');
+    advanceScene(scene,.35);near(p.roll,Math.PI*2);
+    const held=crownShapes(g)[0];assert.ok(held);near(held.alpha,1);assert.equal(held.color,0x252720);
+    const previousColor=app.setPlayerInk('#205c67');
+    try{
+      scene.update(0,0);assert.equal(crownShapes(g)[0].color,0x205c67);
+      assert.ok(g.shapes.some(shape=>shape.type==='path'&&shape.points.length===193&&shape.color===0x205c67),'crown and player share the customized color');
+    }finally{app.setPlayerInk(previousColor);scene.update(0,0);}
+    const holdStart=world.phaseTime;assert.ok(Math.abs(holdStart-1.65)<1/120+1e-8);
+    for(let frame=0;frame<20;frame++){
+      advanceScene(scene,.05);assert.equal(world.phase,'boss-celebrate');near(p.roll,Math.PI*2);
+      const holding=crownShapes(g);assert.equal(holding.length,1);near(holding[0].alpha,1);
+      assertSameContour(holding[0].points,held.points);assert.equal(element('#choice-labels').innerHTML,'');
+    }
+    advanceScene(scene,.05);assert.equal(world.phase,'boss-celebrate');assert.ok(crownShapes(g)[0].alpha<1&&crownShapes(g)[0].alpha>0);
+    advanceScene(scene,.2);assert.equal(world.phase,'transition');assert.equal(crownShapes(g).length,0);assert.equal(audio.calls.length,1);
+  }finally{audio.restore();}
+});
+
+test('campaign levels retain finite enemies and direct attribute upgrades without boss or crown scenes',()=>{
+  for(const level of [5,10,50]){
+    const g=graphicsRecorder(),{world,scene}=app.seedCampaignRenderer(g,390,844,level);
+    world.stage=5;
+    for(let kill=0;kill<world.config.upgradeEvery;kill++){
+      let enemy=world.enemies.find(body=>body.hp>0);
+      if(!enemy){world.spawnEnemy();enemy=world.enemies.find(body=>body.hp>0);}
+      world.damage(enemy,1e6);scene.update(0,0);
+    }
+    assert.equal(world.mode,'campaign');assert.equal(world.phase,'battle');assert.equal(world.boss,null);
+    assert.equal(world.kills,world.config.upgradeEvery);assert.equal(world.upgrades,1);assert.equal(world.score,0);
+    assert.equal(world.totalEnemies,world.config.totalEnemies);assert.deepEqual(world.choices,[]);
+    assert.equal(crownShapes(g).length,0);assert.equal(element('#choice-labels').innerHTML,'');
+    assert.deepEqual(scene.testLabels.map(label=>label.text),['弹力 +14%']);
+  }
+});
+
+function finishCampaign(world,scene){
+  while(!world.completed){
+    let enemy=world.enemies.find(body=>body.hp>0);
+    if(!enemy){world.spawnEnemy();enemy=world.enemies.find(body=>body.hp>0);}
+    assert.ok(enemy,'a real finite campaign enemy remains to be defeated');
+    world.damage(enemy,1e6);
+    scene.update(0,0);
+    world.enemies=world.enemies.filter(body=>body.hp>0);
+  }
+  assert.equal(world.phase,'over');assert.equal(world.kills,world.totalEnemies);
+}
+
+test('real milestone wins save progress before the unlock scene, gate dismissal, restore the old skin and never reward a replay',()=>{
+  try{
+    let g=graphicsRecorder(),run=app.seedCampaignRenderer(g,390,844,10);
+    app.seedSkins(null,9);
+    const original=app.readSkins().playerContour;
+    finishCampaign(run.world,run.scene);
+    let state=app.readRestart(),skin=app.readSkins();
+    assert.equal(state.result,null,'settlement does not appear before the reward animation');
+    assert.equal(state.modal,'skin-unlock');assert.equal(state.paused,true);
+    assert.equal(skin.skinUnlock.sides,6);assert.equal(skin.skinUnlock.ready,false);
+    assert.equal(skin.skinUnlock.phase,'enter');assert.equal(element('#skin-unlock-continue').disabled,true);
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-campaign')),{completed:10,unlocked:11});
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:false,sides:6,unlocked:6});
+    assertSameContour(skin.active,original);
+    clickAction('close');assert.equal(app.readSkins().skinUnlock.phase,'enter');assert.equal(app.readRestart().result,null);
+    app.advanceUi(.8);
+    assert.equal(app.readSkins().skinUnlock.ready,false);
+    assert.notDeepEqual(app.readSkins().active,original,'the real animation reaches an intermediate skin');
+    clickAction('close');assert.equal(app.readRestart().result,null,'an early tap cannot skip the reveal');
+    app.advanceUi(.86);skin=app.readSkins();
+    assert.equal(skin.skinUnlock.ready,true);assert.equal(element('#skin-unlock-continue').disabled,false);
+    assertSameContour(skin.active,skinContour(6));
+    assert.equal(element('#skin-unlock-title').style.opacity,1);
+    const revealed=uiContours();
+    clickAction('close');state=app.readRestart();skin=app.readSkins();
+    assert.ok(state.result?.completed);assert.equal(state.result.percent,100);
+    assert.equal(skin.skinUnlock.phase,'leave');assert.equal(state.transfer,null);
+    assert.equal(skin.skins.enabled,false,'showing a reward never equips it');
+    assert.equal(state.result.clock,0);
+    app.advanceUi(0);assertSameContour(uiContours().body,revealed.body);
+    app.advanceUi(.31);
+    assert.notDeepEqual(app.readSkins().active,original);
+    assert.notDeepEqual(app.readSkins().active,skinContour(6),'departure morphs back while moving');
+    app.advanceUi(.31);state=app.readRestart();skin=app.readSkins();
+    assert.equal(skin.skinUnlock,null);assert.equal(skin.skinOverride,null);
+    assert.equal(state.uiAnchor,'over');assert.equal(state.controlFlight,null);
+    assert.equal(element('#skin-unlock-panel').hidden,true);
+    assertSameContour(skin.playerContour,original);
+    assert.equal(element('#ui-ball .ui-body').style.display,'');
+    near(uiContours().center.x,132);near(uiContours().center.y,356);
+
+    // A retry uses the skin state earned above and routes directly to result.
+    g=graphicsRecorder();run=app.seedCampaignRenderer(g,390,844,10);
+    finishCampaign(run.world,run.scene);
+    assert.equal(app.readSkins().skinUnlock,null);assert.ok(app.readRestart().result?.completed);
+    assert.equal(app.readRestart().transfer.target,'over');
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-campaign')),{completed:10,unlocked:11});
+
+    // Milestone 20 previews seven sides but keeps an equipped six-sided skin.
+    run=app.seedCampaignRenderer(graphicsRecorder(),390,844,20);
+    app.seedSkins({enabled:true,sides:6,unlocked:6},19);
+    const equipped=app.readSkins().playerContour;
+    finishCampaign(run.world,run.scene);
+    assert.equal(app.readSkins().skinUnlock.sides,7);assert.equal(app.readRestart().result,null);
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-campaign')),{completed:20,unlocked:21});
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:true,sides:6,unlocked:7});
+    app.advanceUi(1.66);assertSameContour(app.readSkins().active,skinContour(7));
+    clickAction('close');app.advanceUi(.62);
+    assert.equal(app.readSkins().skinUnlock,null);
+    assert.deepEqual(app.readSkins().skins,{enabled:true,sides:6,unlocked:7});
+    assertSameContour(app.readSkins().active,equipped);
+    assert.equal(element('#ui-ball .ui-body').style.display,'none');
+  }finally{app.seedSkins();}
+});
+
+test('the actual renderer uses six-sided skins everywhere without changing collision radii or mass',()=>{
+  try{
+    for(const mode of ['home','levels','endless','campaign']){
+      const g=graphicsRecorder(),{scene,player}=pullScene(mode,g);
+      app.seedSkins({enabled:false,sides:6,unlocked:6},10);
+      const physical={r:player.r,mass:player.mass,density:player.density};
+      scene.update(0,0);
+      const circle=bodyShapes(g)[0].points;
+      app.changeSkinEnabled(true);
+      assertSameContour(app.readSkins().playerContour,skinContour(0));
+      app.advanceSkin(.15);scene.update(0,0);
+      const middle=bodyShapes(g)[0].points;
+      app.advanceSkin(.15);scene.update(0,0);
+      const polygon=bodyShapes(g)[0].points;
+      assert.notDeepEqual(polygon,circle);assert.notDeepEqual(middle,circle);assert.notDeepEqual(middle,polygon);
+      near(contourArea(polygon),Math.PI*player.r*player.r);
+      assert.equal(polygon.length,193);assert.equal(eyeShapes(g).length,2);
+      assert.deepEqual({r:player.r,mass:player.mass,density:player.density},physical);
+      assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:true,sides:6,unlocked:6});
+    }
+  }finally{app.seedSkins();}
+});
+
+test('six-sided selection skin and rebound deformation stay continuous across the canvas-to-SVG transfer',()=>{
+  try{
+    for(const destination of ['level','home'])for(const rebound of [false,true]){
+      const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,50),pointer=inputCanvas();
+      app.seedSkins({enabled:true,sides:6,unlocked:6},49);
+      const p=selector.player,physical={r:p.r,mass:p.mass};scene.update(0,0);
+      if(rebound){
+        pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+selector.maxPull,p.y);
+        pointer('pointerup',p.x+selector.maxPull,p.y);advanceScene(scene,.82/12);
+        assert.equal(selector.phase,'wobble');
+      }else advanceScene(scene,.2);
+      const rendered=bodyShapes(g)[0].points.slice(0,-1);
+      const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===50);
+      pointer('pointerdown',target.x,target.y);pointer('pointerup',target.x,target.y);scene.update(0,0);
+      assert.ok(app.readRestart().transfer);
+      assertSameContour(uiContours().body,rendered);
+      app.advanceUi(0);assertSameContour(uiContours().body,rendered);
+      let previous=normalizedContours(uiContours()).body;
+      for(let frame=0;frame<130;frame++){
+        app.advanceUi(.005);
+        const next=normalizedContours(uiContours()).body;
+        // The existing transfer performs a full turn: corresponding polygon
+        // vertices move with that turn, unlike the old rotation-invariant ball.
+        assertSameContour(next,previous,.14);previous=next;
+      }
+      assert.equal(app.readRestart().transfer,null);
+      assert.deepEqual({r:p.r,mass:p.mass},physical,'visual transfers never resize the source collision body');
+      assertSameContour(app.readSkins().active,skinContour(6));
+    }
+  }finally{app.seedSkins();}
+});
+
+test('actual wardrobe state changes preserve the selected side count while switched off and restore it when enabled',()=>{
+  try{
+    app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:6,unlocked:10},50);
+    app.changeSkinSides(8);app.advanceSkin(.3);
+    assertSameContour(app.readSkins().playerContour,skinContour(8));
+    app.changeSkinEnabled(false);app.advanceSkin(.15);
+    const intermediate=app.readSkins().playerContour;
+    assert.notDeepEqual(intermediate,skinContour(8));assert.notDeepEqual(intermediate,skinContour(0));
+    app.advanceSkin(.15);
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:false,sides:8,unlocked:10});
+    assertSameContour(app.readSkins().playerContour,skinContour(0));
+    app.changeSkinEnabled(true);app.advanceSkin(.3);
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:true,sides:8,unlocked:10});
+    assertSameContour(app.readSkins().playerContour,skinContour(8));
+  }finally{app.seedSkins();}
 });

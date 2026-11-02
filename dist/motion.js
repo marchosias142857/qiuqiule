@@ -29,7 +29,7 @@ export function smoothFace(current,target,dt){
 export function transferPose(from,to,progress){
   const t=smooth(progress),dx=to.x-from.x,dy=to.y-from.y,d=Math.hypot(dx,dy);
   const arc=Math.sin(Math.PI*t)*Math.min(26,d*.07);
-  const pose={x:lerp(from.x,to.x,t)-(d?dy/d*arc:0),y:lerp(from.y,to.y,t)+(d?dx/d*arc:0),r:lerp(from.r,to.r,t),roll:t*Math.PI*2,squash:Math.sin(Math.PI*t)*.12+(from.visualSquash||0)*(1-t)};
+  const pose={x:lerp(from.x,to.x,t)-(d?dy/d*arc:0),y:lerp(from.y,to.y,t)+(d?dx/d*arc:0),r:lerp(from.r,to.r,t),roll:lerp(from.roll||0,to.roll||0,t)+t*Math.PI*2,squash:Math.sin(Math.PI*t)*.12+(from.visualSquash||0)*(1-t)};
   if(from.visualPull)pose.visualPull={amount:from.visualPull.amount*(1-t),angle:from.visualPull.angle};
   if(from.visualEyeMix!==undefined)pose.visualEyeMix=from.visualEyeMix*(1-t);
   return pose;

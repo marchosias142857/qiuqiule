@@ -1,8 +1,8 @@
 const ROOT = new URL('./',self.location).href;
 const CACHE_PREFIX = 'qiuqiule-'+encodeURIComponent(new URL(ROOT).pathname)+'-';
-const CACHE = CACHE_PREFIX+'v4.1.0-sites-offline';
+const CACHE = CACHE_PREFIX+'v5.1.1-offline';
 const urls = files => files.map(path => new URL(path,ROOT).href);
-const CORE = urls(['./','./index.html','./style.css','./game.js','./physics.js','./campaign.js','./levels.js','./home.js','./icons.js','./motion.js','./audio.js','./offline.js','./display.js','./vendor/phaser.min.js']);
+const CORE = urls(['./','./index.html','./style.css','./game.js','./physics.js','./campaign.js','./levels.js','./home.js','./icons.js','./motion.js','./boss-visuals.js','./skins.js','./skin-render.js','./photo-renderer.js','./wardrobe.js','./skin-unlock.js','./skin-unlock.css','./audio.js','./offline.js','./display.js','./vendor/phaser.min.js']);
 const EXTRA = urls(['./fonts/fredoka-latin-500-normal.woff2','./manifest.webmanifest','./icon.svg','./icons/icon-192.png','./icons/icon-512.png','./audio/light-bounce.mp3']);
 const MUSIC = new URL('./audio/light-bounce.mp3',ROOT).href;
 let warming = null;

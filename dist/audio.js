@@ -62,13 +62,28 @@ export class GameAudio {
     else this.unlock();
   }
   tone(freq = 300, duration = .09, type = 'sine', volume = .06, slide = .5) {
+    this.toneAt(this.context?.currentTime, freq, duration, type, volume, slide);
+  }
+  // All note starts use one audio-clock origin, independent of frame/timer jitter.
+  // This original ascending reward phrase uses only locally synthesized voices.
+  bossVictory() {
     const c = this.context;
     if (!this.enabled || this.hidden || !this.sfxVolume || !c || c.state !== 'running') return;
-    const at = c.currentTime, osc = c.createOscillator(), gain = c.createGain();
+    const at = c.currentTime;
+    const notes = [[523.251,.00,.13],[659.255,.115,.13],[783.991,.23,.13],[880,.345,.17],[1046.502,.48,.30]];
+    for (const [freq, delay, duration] of notes) {
+      this.toneAt(at + delay, freq, duration, 'triangle', .035, 1, .015);
+      this.toneAt(at + delay, freq * 2, duration, 'sine', .008, 1, .02);
+    }
+  }
+  toneAt(at, freq, duration, type, volume, slide, attack = .003) {
+    const c = this.context;
+    if (!this.enabled || this.hidden || !this.sfxVolume || !c || c.state !== 'running') return;
+    const osc = c.createOscillator(), gain = c.createGain();
     osc.type = type; osc.frequency.setValueAtTime(freq, at);
     osc.frequency.exponentialRampToValueAtTime(Math.max(20, freq * slide), at + duration);
     gain.gain.setValueAtTime(0, at);
-    gain.gain.linearRampToValueAtTime(volume, at + .003);
+    gain.gain.linearRampToValueAtTime(volume, at + attack);
     gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
     osc.connect(gain); gain.connect(this.effects); this.voices.add(osc);
     osc.onended = () => { osc.disconnect(); gain.disconnect(); this.voices.delete(osc); };

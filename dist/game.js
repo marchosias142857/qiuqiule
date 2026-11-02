@@ -1,4 +1,4 @@
-import {World, BUFFS, clamp, ease} from './physics.js';
+import {World, BUFFS, clamp, ease, lerp} from './physics.js';
 import {CampaignWorld,normalizeProgress,progressPercent} from './campaign.js';
 import {LevelSelector,trackPath} from './levels.js';
 import {displayMetrics, pointerPosition} from './display.js';
@@ -6,6 +6,12 @@ import {HomeWorld} from './home.js';
 import {drawFunctionalBall,iconMarkup} from './icons.js';
 import {smooth,pullBallPoint,faceTarget,pointerFaceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline,usesStrainedEyes,playerVisualState,relaxedEyeOutline} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
+import {crownOutline,crownVisual,bossFacePose,bossAngryEyeOutline,bossSpiralEye,bossHornOutline} from './boss-visuals.js';
+import {skinContour,morphSkinContour,normalizeSkins,unlockSkin,selectSkin,toggleSkins} from './skins.js';
+import {projectSkinContour,paintRadiance,createRadianceCanvas,fitCrownToSkin} from './skin-render.js';
+import {PhotoRenderer} from './photo-renderer.js';
+import {initWardrobe,loadAppearance,saveAppearance} from './wardrobe.js';
+import {unlockPose,unlockLeavePose,createUnlockPanel} from './skin-unlock.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -30,11 +36,17 @@ let transfer=null,uiAnchor=null,settingsOrigin='home',homeReveal=1,pauseOnArriva
 let result=null,controlFlight=null,menuTransition=null,selector=null,trackPointer=null,levelsReveal=1;
 let levelPointer=null;
 let campaignProgress=normalizeProgress(storage.read('qiuqiule-campaign',null));
+let skins=normalizeSkins(storage.read('qiuqiule-skins',null),campaignProgress.completed);
+let playerContour=skinContour(skins.enabled?skins.sides:0),skinTween=null,skinOverride=null;
+let wardrobeUi=null,wardrobeTime=0,skinUnlock=null,appearance=null,appearanceUrl=null;
+let photoCanvas=null,photoRenderer=null,glowCanvas=null,glowContext=null,lastUiPose=null;
+let appearanceRevision=0;
 let selectedMode=storage.read('qiuqiule-mode','campaign')==='endless'?'endless':'campaign';
 let currentLevel=1;
 const strainedEyes=[-1,1].map(strainedEyeOutline);
 const relaxedEyes=strainedEyes.map(relaxedEyeOutline);
 const playerVisuals=new WeakMap();
+const crownPoints=crownOutline();
 let viewport = displayMetrics(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
 let home = new HomeWorld(viewport.width, viewport.height,selectedMode);
 let lastScore = -1, lastPhase = '';
@@ -87,6 +99,61 @@ function unlockAudio(){sound.unlock();}
 function tone(...args){sound.tone(...args);}
 function vibrate(duration){if(settings.haptic&&navigator.vibrate)navigator.vibrate(duration);}
 function cancelDrag(){drag=null;levelPointer=null;world?.cancelPull();if(trackPointer!==null){trackPointer=null;selector?.cancelTrack();}}
+function setSkinState(next){
+  skins=next;storage.write('qiuqiule-skins',skins);
+  skinTween={from:playerContour,to:skinContour(skins.enabled?skins.sides:0),elapsed:0};
+  wardrobeUi?.refresh();
+}
+function activeContour(){return skinOverride||playerContour;}
+function usesSkinContour(){return !!(appearance||skins.enabled||skinTween||skinOverride);}
+function updateSkin(dt){
+  if(!skinTween)return;
+  skinTween.elapsed+=dt;
+  const t=clamp(skinTween.elapsed/(reducedMotion?.12:.3),0,1);
+  playerContour=morphSkinContour(skinTween.from,skinTween.to,smooth(t));
+  if(t===1)skinTween=null;
+}
+function clearPhoto(){
+  photoRenderer?.hide();
+  if(glowCanvas)glowCanvas.hidden=true;
+}
+function drawPlayerPhoto(contour,pose,ui=false){
+  if(!appearance||!photoRenderer||wardrobeUi?.isCropping?.())return;
+  photoCanvas.style.zIndex=ui?'40':'3';
+  const clip=ui&&uiAnchor==='wardrobe'&&!transfer
+    ?$('#wardrobe-panel .wardrobe-body').getBoundingClientRect():null;
+  photoRenderer.draw(contour,pose,{scale:Math.min(viewport.scale,3),clip});
+}
+async function setAppearance(url,persist=false,revision=++appearanceRevision){
+  let image=null;
+  if(url){image=new Image();image.src=url;await image.decode();}
+  if(revision!==appearanceRevision)return;
+  if(persist)await saveAppearance(url);
+  if(revision!==appearanceRevision)return;
+  appearance=image;appearanceUrl=url;photoRenderer?.setImage(image);
+  if(!image)clearPhoto();
+  wardrobeUi?.refresh();
+}
+function initializeSkins(){
+  const panel=createUnlockPanel(document);$('#modal-layer').append(panel);
+  panel.addEventListener('click',dismissSkinUnlock);
+  photoCanvas=document.createElement('canvas');photoCanvas.id='player-photo';
+  photoCanvas.setAttribute('aria-hidden','true');
+  Object.assign(photoCanvas.style,{position:'fixed',left:'0',top:'0',pointerEvents:'none',zIndex:'3'});
+  photoCanvas.width=photoCanvas.height=1;photoCanvas.hidden=true;
+  document.body.append(photoCanvas);photoRenderer=new PhotoRenderer(photoCanvas);
+  glowCanvas=document.createElement('canvas');glowCanvas.id='skin-radiance';glowCanvas.hidden=true;
+  glowCanvas.setAttribute('aria-hidden','true');
+  Object.assign(glowCanvas.style,{position:'fixed',pointerEvents:'none',zIndex:'35'});
+  document.body.append(glowCanvas);glowContext=glowCanvas.getContext('2d');
+  wardrobeUi=initWardrobe({getState:()=>({...skins,image:appearanceUrl}),
+    onToggle:value=>setSkinState(toggleSkins(skins,value)),
+    onSides:value=>setSkinState(selectSkin(skins,value)),
+    onImage:url=>setAppearance(url,true),onError:message=>toast(message)});
+  storage.write('qiuqiule-skins',skins);
+  const revision=appearanceRevision;
+  loadAppearance().then(url=>{if(revision===appearanceRevision)return setAppearance(url,false,revision);}).catch(()=>toast('图片暂时无法读取，请重新选取'));
+}
 function fitMenuHeight(){
   const panel=$('#settings-panel'),hidden=panel.hidden;
   if(hidden)panel.classList.add('menu-measure');
@@ -138,7 +205,7 @@ function showPanel(name){
   syncInputs();
   requestAnimationFrame(()=>{if(modal===name&&!transfer)$('#'+name+'-panel').querySelector('button')?.focus({preventScroll:true});});
 }
-function hidePanel(){resetMenuTransition();modal=null;$('#modal-layer').hidden=true;syncInputs();}
+function hidePanel(){resetMenuTransition();wardrobeUi?.cancelInteraction();modal=null;$('#modal-layer').hidden=true;syncInputs();}
 function setPanel(name){if(name==='pause')openPause();else showPanel(name);}
 function anchorPose(anchor){
   if(anchor==='levels')return {...selector.player};
@@ -159,22 +226,38 @@ function selectionPlayerPose(){
   }
   return p;
 }
-function currentPlayerPose(){return uiAnchor==='over'?resultBounce(anchorPose('over'),result?.bounceTime||0,reducedMotion):uiAnchor?anchorPose(uiAnchor):screen==='home'?{...home.player}:screen==='levels'?selectionPlayerPose():{...world.player};}
-function detached(){return !!transfer||!!uiAnchor||['pause','settings','help'].includes(modal);}
+function currentPlayerPose(){return skinUnlock&&lastUiPose?{...lastUiPose}:uiAnchor==='wardrobe'?resultBounce(anchorPose('wardrobe'),wardrobeTime,reducedMotion):uiAnchor==='over'?resultBounce(anchorPose('over'),result?.bounceTime||0,reducedMotion):uiAnchor?anchorPose(uiAnchor):screen==='home'?{...home.player}:screen==='levels'?selectionPlayerPose():{...world.player};}
+function detached(){return !!skinUnlock||!!transfer||!!uiAnchor||['pause','settings','help','wardrobe'].includes(modal);}
 function paintUiBall(p){
+  lastUiPose={...p};
   const el=$('#ui-ball'),sq=p.squash||0;
   el.hidden=false;el.style.width=el.style.height=p.r*2+'px';
+  el.style.clipPath='none';
+  if(uiAnchor==='wardrobe'&&!transfer){
+    const box=$('#wardrobe-panel .wardrobe-body').getBoundingClientRect();
+    el.style.clipPath=`inset(${box.top-p.y+p.r}px ${p.x+p.r-box.right}px ${p.y+p.r-box.bottom}px ${box.left-p.x+p.r}px)`;
+  }
   el.style.transform=`translate3d(${p.x-p.r}px,${p.y-p.r}px,0) scale(${1-sq},${1+sq*.7})`;
   const body=el.querySelector('.ui-body'),contour=el.querySelector('.ui-pull-outline');
   const amount=p.visualPull?.amount||0,angle=p.visualPull?.angle||0;
-  body.style.display=amount>0?'none':'';contour.style.display=amount>0?'':'none';
-  if(amount>0){
+  const skinned=usesSkinContour();
+  body.style.display=skinned||amount>0?'none':'';contour.style.display=skinned||amount>0?'':'none';
+  if(skinned){
+    el.style.transform=`translate3d(${p.x-p.r}px,${p.y-p.r}px,0)`;
+    const points=projectSkinContour(activeContour(),{x:50,y:50,r:50,pullAmount:amount,deformAngle:angle,roll:p.roll||0,squash:sq});
+    contour.setAttribute('d',points.map((q,i)=>`${i?'L':'M'}${q.x} ${q.y}`).join(' ')+' Z');
+  }else if(amount>0){
     const cos=Math.cos(angle),sin=Math.sin(angle),points=[];
     for(let i=0;i<=192;i++){
-      const t=i/192*Math.PI*2,point=pullBallPoint(Math.cos(t),Math.sin(t),amount);
-      points.push(`${i?'L':'M'}${50+50*(point.x*cos-point.y*sin)} ${50+50*(point.x*sin+point.y*cos)}`);
+      const t=i/192*Math.PI*2,q=pullBallPoint(Math.cos(t),Math.sin(t),amount);
+      points.push(`${i?'L':'M'}${50+50*(q.x*cos-q.y*sin)} ${50+50*(q.x*sin+q.y*cos)}`);
     }
     contour.setAttribute('d',points.join(' ')+' Z');
+  }
+  if(appearance){
+    // The photo and outline share the same nonlinear pull; the photo is never
+    // a rigid image hidden behind a separately stretching mask.
+    drawPlayerPhoto(activeContour(),{x:p.x,y:p.y,r:p.r,squash:sq,pullAmount:amount,deformAngle:angle,roll:p.roll||0},true);
   }
   const eyes=el.querySelector('.ui-eyes'),normal=el.querySelector('.ui-normal-eyes'),paths=el.querySelector('.ui-eye-paths');
   const mix=clamp(p.visualEyeMix||0,0,1),visual=p.visualEyeMix!==undefined;
@@ -190,8 +273,10 @@ function paintUiBall(p){
   }
   // Canvas breathing deforms the body only. Cancel the overlay body's scale
   // for captured selection eyes, then retain the existing gaze/roll transform.
-  eyes.style.transform=`${visual?`scale(${1/(1-sq)},${1/(1+sq*.7)}) `:''}translate(${(p.lookX||0)*50}px,${(p.lookY||0)*50}px) rotate(${p.roll||0}rad)`;
+  eyes.style.transform=`${visual&&!skinned?`scale(${1/(1-sq)},${1/(1+sq*.7)}) `:skinned&&!visual?`scale(${1-sq},${1+sq*.7}) `:''}translate(${(p.lookX||0)*50}px,${(p.lookY||0)*50}px) rotate(${p.roll||0}rad)`;
   eyes.style.opacity=visual?'.9':'';
+  eyes.style.display=appearance?'none':'';
+  if(wardrobeUi?.isCropping?.())el.hidden=true;
 }
 function movePlayer(from,target,duration,done){
   cancelDrag();transfer={from:{...from},target,duration:reducedMotion?Math.min(duration,.25):duration,elapsed:0,done,revealHome:screen==='home'&&homeReveal<1&&target==='home'};
@@ -200,6 +285,7 @@ function movePlayer(from,target,duration,done){
 function updateUiBall(dt){
   updateMenuTransition(dt);
   $('#result-shadow').hidden=true;
+  if(skinUnlock){updateSkinUnlock(dt);return;}
   if(result){
     result.clock+=dt;
     if(result.campaign){
@@ -220,7 +306,7 @@ function updateUiBall(dt){
     paintUiBall(pose);$('#ui-ball').dataset.state='moving';
     if(move.revealHome)homeReveal=smooth(progress);
     if(progress===1){
-      transfer=null;uiAnchor=['pause','settings','over'].includes(move.target)?move.target:null;
+      transfer=null;uiAnchor=['pause','settings','over','wardrobe'].includes(move.target)?move.target:null;
       move.done?.();if(!uiAnchor&&!transfer)releaseOverlay=1;syncInputs();
       if(modal&&!transfer)$('#'+modal+'-panel').querySelector('button')?.focus({preventScroll:true});
     }
@@ -229,14 +315,15 @@ function updateUiBall(dt){
     $('#ui-ball').dataset.state=uiAnchor||'hidden';
     if(uiAnchor){
       const pose=anchorPose(uiAnchor),panel=$('#'+uiAnchor+'-panel').getBoundingClientRect();
-      if(uiAnchor==='over'&&result){
-        result.bounceTime+=dt;
-        const bouncing=resultBounce(pose,result.bounceTime,reducedMotion);
+      if(uiAnchor==='over'&&result||uiAnchor==='wardrobe'){
+        if(uiAnchor==='wardrobe')wardrobeTime+=dt;else result.bounceTime+=dt;
+        const bouncing=resultBounce(pose,uiAnchor==='wardrobe'?wardrobeTime:result.bounceTime,reducedMotion);
         paintUiBall(bouncing);
         const shadow=$('#result-shadow');shadow.hidden=false;
         shadow.style.width=pose.r*1.75+'px';shadow.style.height=pose.r*.25+'px';
         shadow.style.transform=`translate3d(${pose.x-pose.r*.875}px,${bouncing.shadowY}px,0) scale(${bouncing.shadowScale},${bouncing.shadowScale})`;
         shadow.style.opacity=bouncing.shadowOpacity;shadow.style.filter=`blur(${bouncing.shadowBlur}px)`;
+        if(wardrobeUi?.isCropping?.())shadow.hidden=true;
       }else if(pose.y-pose.r>=panel.top&&pose.y+pose.r<=panel.bottom)paintUiBall(pose);else $('#ui-ball').hidden=true;
     }
     else if(releaseOverlay>0)releaseOverlay--;
@@ -278,7 +365,7 @@ function updateControlFlight(dt){
   if(progress===1){controlFlight=null;flight.done?.();$('#control-transfers').replaceChildren();syncInputs();}
 }
 function openResult(){
-  if(!world||result)return;
+  if(!world||result||skinUnlock)return;
   const fromPause=modal==='pause',from=currentPlayerPose();
   const sources=fromPause?['restart','home'].map(id=>{
     const box=$('#pause-panel .'+id+'-ball').getBoundingClientRect();
@@ -288,9 +375,16 @@ function openResult(){
   const campaign=world.mode==='campaign';
   if(!campaign){best=Math.max(best,world.score);storage.write('qiuqiule-best',best);}
   if(campaign&&world.completed){
+    const unlocked=unlockSkin(skins,world.level);
+    skins=unlocked.state;storage.write('qiuqiule-skins',skins);wardrobeUi?.refresh();
     campaignProgress=normalizeProgress({completed:Math.max(campaignProgress.completed,world.level),unlocked:Math.max(campaignProgress.unlocked,Math.min(100,world.level+1))});
     storage.write('qiuqiule-campaign',campaignProgress);
+    if(unlocked.rewardSides){beginSkinUnlock(from,sources,unlocked.rewardSides);return;}
   }
+  presentResult(from,fromPause,sources);
+}
+function presentResult(from,fromPause,sources,duration=.82){
+  const campaign=world.mode==='campaign';
   $('#over-panel').classList.toggle('campaign',campaign);
   const levelsWrap=$('.result-levels-wrap');levelsWrap.hidden=!campaign;
   $('#final-score').style.transform='scale(1)';
@@ -298,13 +392,63 @@ function openResult(){
   result={clock:0,bounceTime:0,campaign,percent:campaign?progressPercent(world.kills,world.totalEnemies):0,completed:!!world.completed,displayed:0,lastTone:0,sourceIds:fromPause?[]:sources.map(b=>b.id)};
   $('#hud').hidden=true;
   showPanel('over');$('.result-actions').classList.add('arriving');
-  movePlayer(from,'over',.82);
+  movePlayer(from,'over',duration);
   flyControls(['restart','home'].map((id,i)=>({
     from:sources[i]||from,to:()=>controlPose(id),icon:id,
     fromColor:fromPause?(i?'#91b8c7':'#e88c72'):settings.enemy,
     toColor:i?'#91b8c7':'#e88c72',appear:!fromPause,persist:fromPause
-  })),.82,()=>$('.result-actions').classList.remove('arriving'),
+  })),duration,()=>$('.result-actions').classList.remove('arriving'),
     campaign?opacity=>{levelsWrap.style.opacity=opacity;}:null);
+}
+
+function unlockAnchor(){
+  const panel=$('#skin-unlock-panel'),previous=panel.style.transform;
+  panel.style.transform='translate(-50%,-50%)';
+  const pose=anchorPose('skin-unlock');panel.style.transform=previous;return pose;
+}
+function beginSkinUnlock(from,sources,sides){
+  cancelDrag();transfer=null;uiAnchor=null;paused=true;
+  skinUnlock={elapsed:0,phase:'enter',from:{...from},sources,sides,original:playerContour,ready:false};
+  $('#hud').hidden=true;showPanel('skin-unlock');
+  $('#skin-unlock-continue').disabled=true;
+  updateSkinUnlock(0);
+}
+function dismissSkinUnlock(){
+  if(!skinUnlock?.ready||skinUnlock.phase==='leave')return;
+  const reward=skinUnlock;reward.phase='leave';reward.elapsed=0;reward.from={...lastUiPose};reward.ready=false;
+  presentResult(reward.from,false,reward.sources,reducedMotion?.28:.62);
+  transfer=null;uiAnchor=null;$('#skin-unlock-panel').hidden=false;
+  $('#skin-unlock-continue').disabled=true;syncInputs();
+}
+function updateSkinUnlock(dt){
+  const reward=skinUnlock;reward.elapsed+=dt;
+  const leaving=reward.phase==='leave';
+  const frame=(leaving?unlockLeavePose:unlockPose)({elapsed:reward.elapsed,from:reward.from,
+    to:leaving?anchorPose('over'):unlockAnchor(),reducedMotion});
+  skinOverride=morphSkinContour(reward.original,reward.sides,frame.morph);
+  const panel=$('#skin-unlock-panel');
+  panel.style.opacity=frame.panelAlpha;
+  panel.style.transform=`translate(-50%,-50%) scale(${frame.panelScale})`;
+  $('#skin-unlock-title').style.opacity=frame.titleAlpha;
+  paintUiBall(frame.pose);
+  if(glowContext&&frame.glowAlpha>0){
+    const r=frame.pose.r,size=Math.ceil(r*7),scale=Math.min(viewport.scale,3);
+    glowCanvas.hidden=false;glowCanvas.width=Math.ceil(size*scale);glowCanvas.height=Math.ceil(size*scale);
+    Object.assign(glowCanvas.style,{width:size+'px',height:size+'px',left:(frame.pose.x-size/2)+'px',top:(frame.pose.y-size/2)+'px'});
+    glowContext.setTransform(scale,0,0,scale,0,0);
+    paintRadiance(glowContext,{x:size/2,y:size/2,r,time:scene?.clock||0,alpha:frame.glowAlpha,reducedMotion});
+  }
+  if(!leaving&&frame.ready&&!reward.ready){
+    reward.ready=true;$('#skin-unlock-continue').disabled=false;
+    $('#skin-unlock-continue').focus({preventScroll:true});tone(880,.3,'sine',.055,1.5);
+  }
+  if(leaving){
+    updateControlFlight(dt);
+    if(frame.done){
+      skinUnlock=null;skinOverride=null;uiAnchor='over';panel.hidden=true;
+      if(glowCanvas)glowCanvas.hidden=true;paintUiBall(anchorPose('over'));syncInputs();
+    }
+  }
 }
 
 function openPause(){
@@ -318,6 +462,11 @@ function openSettings(){
   if(settingsOrigin==='home')home.phase='external';
   showPanel('settings');movePlayer(from,'settings',.5);
 }
+function openWardrobe(){
+  if(transfer||modal)return;
+  const from=currentPlayerPose();home.phase='external';wardrobeTime=0;
+  wardrobeUi?.refresh();showPanel('wardrobe');movePlayer(from,'wardrobe',.5);
+}
 function openHelp(){if(transfer||menuTransition)return;transitionMenu('help');}
 function finishArenaArrival(){
   paused=false;
@@ -330,6 +479,11 @@ function resumeGame(){
 }
 function closePanel(){
   if(transfer)return;
+  if(skinUnlock){dismissSkinUnlock();return;}
+  if(modal==='wardrobe'){
+    const from=currentPlayerPose();from.visualSquash=from.squash||0;
+    wardrobeUi?.cancelInteraction();hidePanel();home.reset();movePlayer(from,'home',.5);return;
+  }
   if(modal==='menu-transition'){menuTransition=null;showPanel('settings');uiAnchor='settings';paintUiBall(anchorPose('settings'));return;}
   if(modal==='help'){transitionMenu('settings');return;}
   if(modal==='pause'){resumeGame();return;}
@@ -343,6 +497,7 @@ function clearEffects(){for(const e of scene.effects)e.label?.destroy();scene.ef
 function prepareGame(){
   // A new run owns no animation, particle, input or clock state from the old run.
   cancelDrag();result=null;transfer=null;controlFlight=null;uiAnchor=null;
+  skinUnlock=null;skinOverride=null;clearPhoto();
   releaseOverlay=0;pauseOnArrival=false;
   $('#control-transfers').replaceChildren();$('#ui-ball').hidden=true;$('#result-shadow').hidden=true;
   $('.result-actions').classList.remove('arriving');
@@ -471,8 +626,46 @@ function drawDragGuide(g,p){
   ring(g,tx,ty,8,color,.17,1);
 }
 
-function drawBall(g,b,color,alpha=1,pull=null){
-  const born=b.isPlayer?1:ease(b.born);
+function drawBoss(g,b,alpha=1){
+  const pose=bossFacePose({entryTime:world.phase==='boss-entry'?world.phaseTime:Infinity,
+    stunned:b.stunned,stunnedTime:b.stunnedTime||0,time:b.stunnedTime||0,reducedMotion});
+  const r=b.r*pose.scale,opacity=alpha*pose.alpha;
+  if(r<.3||opacity<=0)return;
+  const color=hex(settings.enemy);
+  // Precompose 40% black over 60% body color so overlapping spiral caps stay uniform.
+  const eyeChannel=shift=>Math.round(((color>>shift)&255)*.6);
+  const face=(eyeChannel(16)<<16)|(eyeChannel(8)<<8)|eyeChannel(0);
+  const cos=Math.cos(b.angle),sin=Math.sin(b.angle),squash=b.squash||0;
+  // Keep the face upright while sharing the body's impact deformation.
+  const project=point=>{
+    const lx=(point.x*cos+point.y*sin)*(1-squash);
+    const ly=(-point.x*sin+point.y*cos)*(1+squash*.7);
+    return {x:b.x+(lx*cos-ly*sin)*r,y:b.y+(lx*sin+ly*cos)*r};
+  };
+  const path=(points,fillColor,pathAlpha,stroke=0)=>{
+    if(pathAlpha<=0||points.length<2)return;
+    if(stroke)g.lineStyle(stroke,fillColor,pathAlpha);else g.fillStyle(fillColor,pathAlpha);
+    g.beginPath();
+    points.forEach((point,i)=>{const p=project(point);i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y);});
+    if(stroke){
+      g.strokePath();g.fillStyle(fillColor,pathAlpha);
+      for(const point of [points[0],points[points.length-1]]){const p=project(point);g.fillCircle(p.x,p.y,stroke/2);}
+    }else{g.closePath();g.fillPath();}
+  };
+  for(const side of [-1,1])path(bossHornOutline(side,pose.hornScale),color,opacity);
+  drawBall(g,b,color,alpha,null,{scale:pose.scale,alpha:pose.alpha});
+  const eyeScale=1.2;
+  for(const side of [-1,1]){
+    const scaleEye=(point,scale)=>({x:side*.29+(point.x-side*.29)*scale,
+      y:-.08+(point.y+.08)*scale});
+    const eye=bossAngryEyeOutline(side,pose.eyeOpen,pose.anger).map(point=>scaleEye(point,eyeScale*pose.angryScale));
+    path(eye,face,opacity*pose.angryAlpha);
+    path(bossSpiralEye(side,pose.spiralTurn).map(point=>scaleEye(point,eyeScale)),face,opacity*pose.spiralAlpha,Math.max(.8,r*.025)*eyeScale);
+  }
+}
+
+function drawBall(g,b,color,alpha=1,pull=null,birth=null){
+  const born=birth?.scale??(b.isPlayer?1:ease(b.born));
   const r=b.r*born;
   if(r<.3)return;
   const angle=pull?Math.atan2(pull.dy,pull.dx):b.angle;
@@ -496,9 +689,14 @@ function drawBall(g,b,color,alpha=1,pull=null){
     visual.renderedSquash=squash;
     visual.renderedPull=pull?{amount,angle}:null;
   }
-  g.fillStyle(color,alpha*born);g.beginPath();
+  g.fillStyle(color,alpha*(birth?.alpha??born));g.beginPath();
   const segments=192;
-  for(let i=0;i<=segments;i++){
+  const roll=b.roll??(world?.phase==='transition'?Math.PI*2*ease(world.phaseTime/1.45):0);
+  const skinPose={x:b.x,y:b.y,r,squash,deformAngle:angle,pullAmount:amount,roll};
+  if(b.isPlayer&&usesSkinContour()){
+    const points=projectSkinContour(activeContour(),skinPose);
+    [...points,points[0]].forEach((point,i)=>i?g.lineTo(point.x,point.y):g.moveTo(point.x,point.y));
+  }else for(let i=0;i<=segments;i++){
     const t=i/segments*Math.PI*2,ct=Math.cos(t),st=Math.sin(t);
     // Home, selection, both battle modes and rebound share the same smooth join.
     const point=pullBallPoint(ct,st,amount);
@@ -508,6 +706,7 @@ function drawBall(g,b,color,alpha=1,pull=null){
   }
   g.closePath();g.fillPath();
   if(b.isPlayer){
+    if(appearance){drawPlayerPhoto(activeContour(),skinPose);return;}
     const face=isDark(settings.player)?0xf4f3eb:0x252720;
     const onScreen=levelPointer&&levelPointer.x>=0&&levelPointer.x<=viewport.width&&levelPointer.y>=0&&levelPointer.y<=viewport.height;
     const target=screen==='levels'?pointerFaceTarget(b,onScreen?levelPointer:null)
@@ -516,7 +715,6 @@ function drawBall(g,b,color,alpha=1,pull=null){
     b.lookX=faceOffset.x;b.lookY=faceOffset.y;
     const lookX=faceOffset.x*r,lookY=faceOffset.y*r;
     g.fillStyle(face,alpha*.9);
-    const roll=b.roll??(world?.phase==='transition'?Math.PI*2*ease(world.phaseTime/1.45):0);
     const rc=Math.cos(roll),rs=Math.sin(roll);
     for(const [i,eye] of [-1,1].entries()){
       const ex=eye*r*.17+lookX,ey=-r*.07+lookY;
@@ -611,11 +809,16 @@ function boot(){
   class BallScene extends Phaser.Scene {
     constructor(){super('BallScene');this.accumulator=0;this.effects=[];this.clock=0;this.hitSoundAt=0;}
     create(){
-      scene=this;this.g=this.add.graphics();this.cameras.main.setBackgroundColor(settings.bg);bindInput(this.game.canvas);
+      scene=this;
+      initializeSkins();
+      this.textures.addCanvas('skin-radiance',createRadianceCanvas(document));
+      this.radiance=this.add.image(0,0,'skin-radiance').setVisible(false);
+      this.g=this.add.graphics();this.cameras.main.setBackgroundColor(settings.bg);bindInput(this.game.canvas);
       const resize=()=>{
         const next=displayMetrics(window.innerWidth,window.innerHeight,window.devicePixelRatio||1);
         const geometryChanged=next.width!==viewport.width||next.height!==viewport.height;
         if(transfer&&geometryChanged){transfer.from.x*=next.width/viewport.width;transfer.from.y*=next.height/viewport.height;transfer.from.r*=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);}
+        if(skinUnlock&&geometryChanged){skinUnlock.from.x*=next.width/viewport.width;skinUnlock.from.y*=next.height/viewport.height;skinUnlock.from.r*=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);}
         if(controlFlight&&geometryChanged)for(const item of controlFlight.items){item.from.x*=next.width/viewport.width;item.from.y*=next.height/viewport.height;item.from.r*=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);}
         viewport=next;
         this.scale.setZoom(1/viewport.scale);
@@ -630,7 +833,7 @@ function boot(){
       };
       resize();
       window.addEventListener('resize',resize);
-      this.events.once('shutdown',()=>window.removeEventListener('resize',resize));
+      this.events.once('shutdown',()=>{window.removeEventListener('resize',resize);photoRenderer?.dispose();});
     }
 
     particles(e,color,count=7){
@@ -656,6 +859,20 @@ function boot(){
           tone(500+Math.random()*120,.13,'sine',.06,1.5);vibrate(15);
         }
         if(e.type==='shatter')this.particles(e,hex(settings.enemy),5);
+        if(e.type==='bossEntry'){cancelDrag();tone(260,.35,'sine',.045,1.5);}
+        if(e.type==='bossReady')tone(520,.14,'triangle',.035,1.15);
+        if(e.type==='bossHit'){
+          tone(260+Math.min(1,e.power||0)*220,.095,'triangle',.045,1.3);vibrate(9);
+        }
+        if(e.type==='bossScore'||e.type==='bossDefeated'){
+          if(world.score>best){best=world.score;storage.write('qiuqiule-best',best);}
+          const label=this.add.text(e.x,e.y,'+'+e.value,{fontFamily:'GameSans, sans-serif',fontSize:e.type==='bossDefeated'?'22px':'18px',color:settings.player,fontStyle:'bold'}).setOrigin(.5).setScale(viewport.scale);
+          const labelY=e.type==='bossDefeated'?e.y+(e.r||world.player.r)+24:e.y-(e.r||world.player.r)-12;
+          this.effects.push({type:'label',label,life:0,total:1,x:e.x,y:labelY});
+          if(e.type==='bossScore'){tone(600+(e.segment||0)*90,.13,'sine',.045,1.25);vibrate(10);}
+          else{cancelDrag();this.particles(e,hex(settings.enemy),12);vibrate([12,25,18]);}
+        }
+        if(e.type==='bossCelebrate')sound.bossVictory();
         if(e.type==='upgrade'){cancelDrag();tone(480,.25,'sine',.05,1.5);}
         if(e.type==='choiceReady')tone(660,.13,'sine',.035,1.2);
         if(e.type==='buff'){
@@ -672,10 +889,14 @@ function boot(){
         }
       }
     }
-    drawBorder(){
+    drawBorder(bounds=null){
       const g=this.g,w=viewport.width,h=viewport.height;
       const border=isDark(settings.bg)?0x636f64:0xc8ccbd;
-      g.lineStyle(1,border,.65);g.strokeRoundedRect(15,15,w-30,h-30,22);
+      const full={left:16,top:16,right:w-16,bottom:h-16};
+      const frame=bounds||full,returning=result?smooth(result.clock/.65):0;
+      const x=lerp(frame.left,full.left,returning)-1,y=lerp(frame.top,full.top,returning)-1;
+      const right=lerp(frame.right,full.right,returning)+1,bottom=lerp(frame.bottom,full.bottom,returning)+1;
+      g.lineStyle(1,border,.65);g.strokeRoundedRect(x,y,right-x,bottom-y,22);
     }
     drawHome(){
       const g=this.g,fade=home.fade*homeReveal,t=reducedMotion?0:home.clock;
@@ -690,7 +911,7 @@ function boot(){
         g.fillStyle(line,(.18+u*.35)*fade);g.fillCircle(px,py,1.5+u*.5);
       }
 
-      const colors={play:homePlayColor,sound:homeSoundColor,settings:0xc4dc86,mode:0xb4ced4};
+      const colors={play:homePlayColor,sound:homeSoundColor,settings:0xc4dc86,wardrobe:0xe5c684,mode:0xb4ced4};
       for(const c of home.targets){
         if(controlFlight&&['play','settings'].includes(c.id))continue;
         drawFunctionalBall(g,c,colors[c.id],c.id==='mode'?(home.mode==='campaign'?'flag':'infinity'):c.id,fade,c.id==='sound'&&!settings.sound);
@@ -706,6 +927,7 @@ function boot(){
         if(action==='sound'){settings.sound=!settings.sound;applyTheme();tone(540,.09,'sine',.04,1.3);vibrate(10);}
         if(action==='mode'){syncMode();tone(610,.12,'sine',.04,1.3);vibrate(10);}
         if(action==='settings')openSettings();
+        if(action==='wardrobe')openWardrobe();
       }
       layoutHomeControl();
       if(before!=='entering'&&home.phase==='entering'){
@@ -729,8 +951,12 @@ function boot(){
       }else this.drawHome();
     }
     drawArena(){
-      const g=this.g;this.drawBorder();
+      const g=this.g;this.drawBorder(world.arenaBounds);
       const p=world.player;
+      if(world.boss&&!world.boss.defeated){
+        const b=world.boss,alpha=result?1-smooth(result.clock/.65):1;
+        drawBoss(g,b,alpha);
+      }
       for(const b of world.enemies){
         if(result?.sourceIds.includes(b.id))continue;
         const alpha=result?1-smooth(result.clock/.65):1;
@@ -746,6 +972,26 @@ function boot(){
         polygon(g,c.x,c.y+bob,r*.27,c.sides,c.sides===4?Math.PI/4:-Math.PI/2,c.sides===4?0x573d30:0x293629,appear);
       }
       if(!detached()){drawDragGuide(g,p);drawBall(g,p,hex(settings.player),1,drag);}
+      if(!detached()&&world.phase==='boss-celebrate'){
+        const crown=crownVisual(world.phaseTime,reducedMotion);
+        if(this.radiance){
+          this.radiance.setVisible(crown.alpha>0).setPosition(p.x*viewport.scale,p.y*viewport.scale)
+            .setDisplaySize(p.r*7*viewport.scale,p.r*7*viewport.scale)
+            .setRotation(reducedMotion?0:this.clock*.19).setAlpha(crown.alpha*(reducedMotion?1:.88+.12*Math.sin(this.clock*2.5)));
+        }
+        if(crown.alpha>0){
+          g.fillStyle(hex(settings.player),crown.alpha);g.beginPath();
+          const rotated=projectSkinContour(activeContour(),{roll:p.roll||0});
+          fitCrownToSkin(crownPoints,rotated).forEach((point,i)=>{
+            const x=p.x+point.x*p.r*crown.scale;
+            // Scale around an anchor above the head so the small entering crown
+            // keeps a gap instead of growing through the player's body.
+            const y=p.y+((point.y+1.45)*crown.scale-1.45)*p.r;
+            i?g.lineTo(x,y):g.moveTo(x,y);
+          });
+          g.closePath();g.fillPath();
+        }
+      }
       if(!detached()&&world.mode==='campaign'&&p.hit>.01){g.fillStyle(isDark(settings.player)?0xffffff:0xf9f8f0,p.hit*.5);g.fillEllipse(p.x,p.y,p.r*1.7,p.r*1.7,128);}
       for(const e of this.effects){
         if(e.type==='label'){e.label.setVisible(!modal).setPosition(e.x*viewport.scale,(e.y-e.life*32)*viewport.scale).setAlpha(1-e.life/e.total);continue;}
@@ -755,6 +1001,7 @@ function boot(){
     }
     update(_,delta){
       const dt=Math.min(delta/1000,.05);this.frameDt=dt;this.clock+=dt;this.g.clear();
+      clearPhoto();updateSkin(dt);this.radiance?.setVisible(false);
       if(screen==='home'||screen==='entering'){this.updateHome(dt);updateUiBall(dt);return;}
       if(screen==='levels'){
         levelsReveal=Math.min(1,levelsReveal+dt/.5);
@@ -800,6 +1047,7 @@ document.addEventListener('keydown',e=>{
 },{capture:true});
 
 document.addEventListener('click',e=>{
+  if(skinUnlock){if(skinUnlock.ready)dismissSkinUnlock();return;}
   const button=e.target.closest('[data-action]');if(!button||transfer||controlFlight)return;
   unlockAudio();tone(680,.035,'sine',.02,1.15);
   const action=button.dataset.action;
