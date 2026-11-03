@@ -25,7 +25,7 @@
   <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials">
   <link rel="icon" type="image/svg+xml" href="./icon.svg">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
-  <link rel="preload" href="./fonts/fredoka-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="./fonts/qiuqiule-ui.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./skin-unlock.css">
   <script defer src="./vendor/phaser.min.js"></script>
@@ -111,11 +111,11 @@
       <ol class="help-steps"><li><b>01</b><div><strong>慢下来，就能蓄力。</strong><p>小球速度降下来后，按住屏幕任意位置并拖动。拉得越长，力量越大，直到蓄满。速度过高时无法蓄力，稍等片刻即可。第 6、11、16…阶段，可拖拽速度阈值各增加初始阈值的 50%。</p></div></li><li><b>02</b><div><strong>向后拉，向前弹。</strong><p>松手向拖动的反方向弹射，弹射速度会加上按下开始拖拽瞬间的速度；蓄力期间减速不会扣掉已记录的速度。冲击越强，伤害越高；撞墙反弹，撞球互相弹开。</p></div></li><li><b>03</b><div><strong>分数达标，选个强化。</strong><p>敌球持续刷新，实际得分达到阶段目标时，剩余敌球直接碎掉，不计额外分数。首阶段目标为 140 分，后续累计目标依次为 380、670、1010 分，逐阶段提高。小球自动就位后，拉动并撞向两颗奖励球中的一颗，1 秒后进入新阶段。</p></div></li></ol>
       <p class="help-rule"><strong>闯关模式</strong>：撞击主页蓝色小球，在小旗帜与 ∞ 之间切换。旗帜进入 100 关挑战；点击已解锁的数字球进入该关，点击下方返回球回到主页。中央小球可以拉扯，松手只会原地回弹。沿圆环拖动或快速滑动浏览关卡，通关后解锁下一关。关卡内按击杀数自动强化，击破全部敌球即通关。∞ 保留原有无尽玩法。</p>
       <p class="help-rule"><strong>换装</strong>：通过第10、20…100关，依次解锁圆润的正6至15边形皮肤。可在换装中开关皮肤、调节已解锁的边数，或选取图片裁剪为自定义外观。换装只改变外观，碰撞和玩法不变。</p>
-      <div class="buff-legend"><span><b>△</b> 密度</span><span><b>□</b> 能量</span><span><b>⬠</b> 特殊能力</span></div>
+      <div class="buff-legend"><span><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12,3 22,21 2,21"/></svg> 密度</span><span><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="3,3 21,3 21,21 3,21"/></svg> 能量</span><span><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12,2 22,9 18,21 6,21 2,9"/></svg> 特殊能力</span></div>
       <p>无尽模式每5阶段会进入正方形场地，挑战中央不断膨胀的Boss。撞击让它缩小；缩到奖励球大小后，它会停止膨胀、露出眩晕表情，此时继续撞击造成伤害才能击败。Boss直径达到场地边长的75%会失败。Boss战中，更高速度下也能重新蓄力。打进更小的五个区间时分别加分，击败另有奖励；玩家减速、转圈戴上王冠庆祝后，场地恢复并进入强化选择。</p>
       <div id="buff-guide" class="buff-guide"></div>
       <p class="help-rule">普通战斗中，场上敌球达到 <strong>18 颗</strong>，本局结束。开场 2 颗敌球，基础血量 19。敌球的血量、体型、密度和分值随阶段提高，刷新间隔逐渐缩短；局内经过的时间也会提高血量、密度和刷新速度，暂停时不计时。</p>
-      <p class="game-version">球球了 · 5.1.1</p>
+      <p class="game-version">球球了 · 5.2.1</p>
       </div>
     </section>
     <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-label="本局结算">

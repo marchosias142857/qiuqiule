@@ -5,8 +5,27 @@ export const lerp = (a, b, t) => a + (b - a) * t;
 export const PLAYER_BASE_DENSITY = 1.5;
 export const BREATH_DURATION = 2;
 export const BREATH_SPAWN_RATE = .5;
+export const REGULAR_BUFF_STAGE_INTERVAL = 5;
+export const REGULAR_BUFF_INTERVAL_BONUS = .15;
+export const BLACK_HOLE_GRAVITY = Object.freeze({radius: 5, acceleration: 2.4});
 export const BOSS_TIMING = Object.freeze({entry: .85, brake: .8, spin: .85, hold: 1, fade: .22});
 const smooth = value => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
+
+// New ordinary upgrades gain 15 percentage points after each five completed
+// stages. Existing stacks retain the value they had when they were collected.
+export function regularBuffBonus(id, stage = 1) {
+  if (id !== 'density' && id !== 'energy') return 0;
+  const completed = Math.max(0, (Number.isFinite(stage) ? Math.floor(stage) : 1) - 1);
+  const bands = Math.floor(completed / REGULAR_BUFF_STAGE_INTERVAL);
+  return (id === 'density' ? .35 : .30) + bands * REGULAR_BUFF_INTERVAL_BONUS;
+}
+
+export function buffAtStage(buff, stage = 1) {
+  if (buff.kind === 'special') return {...buff};
+  const bonus = regularBuffBonus(buff.id, stage);
+  const percent = Number((bonus * 100).toFixed(1));
+  return {...buff, bonus, short: `${buff.id === 'density' ? '密度' : '弹射能量'} +${percent}%`};
+}
 
 // Boss difficulty and rewards grow with encounter number, starting at one.
 // Keep this pure: looking up boss difficulty must not consume spawn randomness.
@@ -24,13 +43,14 @@ export function bossConfig(stage, unit, squareSide) {
 
 export const BUFFS = [
   // Growth changes only geometry; mass and all launch/impact tuning stay independent.
-  { id: 'density', kind: 'density', name: '重量级', short: '密度 +35%', detail: '质量更大，撞得更狠。同等能量下，出发稍慢。', color: '#bbd968', sides: 3 },
-  { id: 'energy', kind: 'energy', name: '弹性十足', short: '弹射能量 +30%', detail: '同样的拉伸，释放更多能量。', color: '#ee967b', sides: 4 },
+  { id: 'density', kind: 'density', name: '重量级', short: '初始密度 +35%', detail: '质量更大，撞得更狠。同等能量下，出发稍慢。无尽模式每完成 5 个阶段，新获得的强化额外增加 15 个百分点，从第 6 阶段起首次提升；已获得的数值保持不变。', color: '#bbd968', sides: 3 },
+  { id: 'energy', kind: 'energy', name: '弹性十足', short: '初始弹射能量 +30%', detail: '同样的拉伸，释放更多能量。无尽模式每完成 5 个阶段，新获得的强化额外增加 15 个百分点，从第 6 阶段起首次提升；已获得的数值保持不变。', color: '#ee967b', sides: 4 },
   { id: 'pierce', kind: 'special', name: '一往无前', short: '撞球不改方向', detail: '撞开敌球后保持原方向，仍然损失速度。', color: '#a4c9d8', sides: 5 },
   { id: 'pulse', kind: 'special', name: '连锁反应', short: '重击引发震荡', detail: '强力撞击时，震伤并推开附近的敌球。', color: '#b6ace0', sides: 5 },
   { id: 'bank', kind: 'special', name: '借墙发力', short: '碰墙后伤害 +60%', detail: '每次碰墙会强化下一次撞击，最多叠加 2 层。', color: '#e6c86c', sides: 5 },
   { id: 'growth', kind: 'special', name: '大一圈', short: '直径 1.2 倍 → 1.4 倍', detail: '仅扩大碰撞箱和显示尺寸，不改变质量、密度、速度或伤害公式。首次获得为原始直径的 1.2 倍，第二次为 1.4 倍。每局最多出现两次。', color: '#d5aa7c', sides: 5, maxOffers: 2, maxStacks: 2 },
   { id: 'breath', kind: 'special', name: '喘口气', short: '击破后 2 秒刷新速度减半', detail: '击杀后 2 秒内，敌球刷新计时以 50% 速度推进。连续击杀刷新持续时间，不叠加减速，也不会完全停刷。', color: '#96c9b1', sides: 5 },
+  { id: 'gravity', kind: 'special', name: '黑洞引力', short: '持续吸引附近敌球', detail: '在基础球半径 5 倍的范围内，以恒定强度将敌球缓缓吸向自己。吸力不随距离增强，不影响正在出现的敌球或固定的 Boss。', color: '#9c95ca', sides: 5 },
 ];
 
 export class World {
@@ -96,6 +116,14 @@ export class World {
   cancelPull() { this.pullStartSpeed = null; }
   get maxPull() { return clamp(Math.min(this.width, this.height) * .25, 90, 170); }
   get baseSpeed() { return this.unit * 40; }
+  get gravityRadius() { return this.unit * BLACK_HOLE_GRAVITY.radius; }
+  gravityAcceleration(body) {
+    if (this.phase !== 'battle' || !this.buffs.gravity || body.isPlayer || body.isBoss || !body.solid || body.hp <= 0) return null;
+    const dx = this.player.x - body.x, dy = this.player.y - body.y, distance = Math.hypot(dx, dy);
+    if (distance < 1e-6 || distance > this.gravityRadius) return null;
+    const acceleration = this.unit * BLACK_HOLE_GRAVITY.acceleration;
+    return {x: dx / distance * acceleration, y: dy / distance * acceleration};
+  }
   get spawnInterval() { return Math.max(.52, 2.45 - (this.stage - 1) * .18 - this.time * .002); }
   enemyProfile() {
     return {
@@ -287,7 +315,7 @@ export class World {
     let first = BUFFS[(this.stage - 1) % 2];
     let second = this.stage % 2 === 0 && special.length ? special[Math.floor(this.random() * special.length)] : BUFFS[this.stage % 2];
     if (this.stage % 3 === 0 && special.length) second = special[Math.floor(this.random() * special.length)];
-    this.choices = [first, second].map(buff => ({...buff, x: 0, y: 0, r: this.unit * 2, born: 0}));
+    this.choices = [first, second].map(buff => ({...buffAtStage(buff, this.mode === 'campaign' ? 1 : this.stage), x: 0, y: 0, r: this.unit * 2, born: 0}));
     for (const choice of this.choices) this.buffOffers[choice.id] = (this.buffOffers[choice.id] || 0) + 1;
     this.layoutChoices();
     this.emit('upgrade');
@@ -463,8 +491,9 @@ export class World {
     if (choice.id === 'growth' && (this.buffs.growth || 0) >= 2) return;
     this.buffs[choice.id] = (this.buffs[choice.id] || 0) + 1;
     if (choice.id === 'growth') this.player.r = this.unit * (1 + this.buffs.growth * .2);
-    if (choice.id === 'density') { this.density *= 1.35; this.player.density = PLAYER_BASE_DENSITY * this.density; this.player.mass = this.player.density; }
-    if (choice.id === 'energy') this.energy *= 1.3;
+    const bonus = regularBuffBonus(choice.id, this.mode === 'campaign' ? 1 : this.stage);
+    if (choice.id === 'density') { this.density *= 1 + bonus; this.player.density = PLAYER_BASE_DENSITY * this.density; this.player.mass = this.player.density; }
+    if (choice.id === 'energy') this.energy *= 1 + bonus;
     this.cancelPull();
     this.phase = 'reward'; this.phaseTime = 0;
     this.emit('buff', {buff: choice, x: choice.x, y: choice.y, r: choice.r});
@@ -480,6 +509,9 @@ export class World {
       const sampledSpeed = Math.max(length(this.player), ...this.enemies.map(length));
       const speed = ['boss', 'boss-celebrate'].includes(this.phase) ? sampledSpeed : Math.min(this.maxPhysicsSpeed, sampledSpeed);
       let h = Math.min(remaining, speed > 0 ? this.unit * .5 / speed : remaining);
+      // Attraction can accelerate a resting enemy, which sampledSpeed cannot
+      // predict. Bound those integrations so long frames cannot skip collisions.
+      if (this.phase === 'battle' && this.buffs.gravity) h = Math.min(h, 1 / 120);
       if (this.phase === 'boss-celebrate' && this.phaseTime < BOSS_TIMING.brake) h = Math.min(h, 1 / 120, BOSS_TIMING.brake - this.phaseTime);
       this.advance(h, dragging);
       remaining -= h;
@@ -536,10 +568,17 @@ export class World {
       const drag = b.isPlayer ? (dragging ? 10 : .60) : 1.20;
       const friction = Math.exp(-drag * dt);
       b.vx *= friction; b.vy *= friction;
+      const attraction = this.gravityAcceleration(b);
+      if (attraction) {
+        // Exact damped velocity increment for a constant force during this
+        // substep. Strength is independent of distance, mass and frame rate.
+        const impulseTime = -Math.expm1(-drag * dt) / drag;
+        b.vx += attraction.x * impulseTime; b.vy += attraction.y * impulseTime;
+      }
       // Include the full capture allowance; fast frames are subdivided by step().
       const speed = length(b), cap = this.maxPhysicsSpeed;
       if (speed > cap) { b.vx *= cap / speed; b.vy *= cap / speed; }
-      if (length(b) < 2) b.vx = b.vy = 0;
+      if (!attraction && length(b) < 2) b.vx = b.vy = 0;
       b.x += b.vx * dt; b.y += b.vy * dt;
       b.spin += b.vx * dt / Math.max(1, b.r);
       b.hit = Math.max(0, b.hit - dt * 5);

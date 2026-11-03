@@ -93,6 +93,20 @@ test('UI transfers preserve exact endpoints and ease position and size to rest',
   const almost=transferPose(a,b,.999);assert.ok(Math.hypot(end.x-almost.x,end.y-almost.y)<.0001);assert.ok(Math.abs(end.r-almost.r)<.00001);
 });
 
+test('UI transfers carry gaze continuously to the destination rather than resetting it before handoff',()=>{
+  const from={x:100,y:200,r:40,lookX:.13,lookY:-.08},to={x:300,y:500,r:30,lookX:-.07,lookY:.1};
+  for(const destination of [to,{x:to.x,y:to.y,r:to.r}]){
+    const start=transferPose(from,destination,0),end=transferPose(from,destination,1);
+    near(start.lookX,from.lookX);near(start.lookY,from.lookY);
+    near(end.lookX,destination.lookX||0);near(end.lookY,destination.lookY||0);
+    const almost=transferPose(from,destination,.999);
+    assert.ok(Math.hypot(end.lookX-almost.lookX,end.lookY-almost.lookY)<1e-7);
+    const middle=transferPose(from,destination,.5);
+    near(middle.lookX,(from.lookX+(destination.lookX||0))/2);
+    near(middle.lookY,(from.lookY+(destination.lookY||0))/2);
+  }
+});
+
 test('result bounce preserves its ground anchor and changes squash and shadow with height',async()=>{
   const {resultBounce}=await import('../dist/motion.js');const anchor={x:120,y:280,r:36};
   const ground=resultBounce(anchor,0),apex=resultBounce(anchor,.57),landing=resultBounce(anchor,1.18);

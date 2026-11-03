@@ -283,11 +283,12 @@ test('horns taper from a broad root to a lightly outward tip without curling bac
   }
 });
 
-test('spiral eyes use smooth open paths centered at the former angry eyes',()=>{
+test('spiral eyes share winding with the right eye flipped about its own center',()=>{
   for(const angle of [0,.7,2.5,Math.PI*2]){
     const left=bossSpiralEye(-1,angle),right=bossSpiralEye(1,angle);
     assert.equal(left.length,81);
-    for(let i=0;i<left.length;i++){near(left[i].x,-right[i].x);near(left[i].y,right[i].y);}
+    for(let i=0;i<left.length;i++){near(left[i].x+.58,right[i].x);near(left[i].y,right[i].y);}
+    assert.ok(left.some((p,i)=>Math.abs(p.x+right[i].x)>.01),'the stunned face must not be axially symmetric');
     for(const side of [-1,1]){
       const points=bossSpiralEye(side,angle),center={x:side*.29,y:-.08};
       near(distance(points[0],center),.012);near(distance(points.at(-1),center),.136);

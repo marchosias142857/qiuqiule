@@ -51,7 +51,9 @@ test('reduced motion removes spin and overshoot but still reveals then restores 
   assert.equal(leave.done,true);assert.equal(leave.rotation,end.pose.roll);assert.equal(leave.morph,0);
 });
 
-test('reward heading is original rounded SVG lettering, independent of installed fonts',()=>{
-  const markup=unlockTitleMarkup();assert.equal((markup.match(/<path/g)||[]).length,6);
-  assert.ok(markup.includes('viewBox="0 0 528 100"'));assert.ok(!markup.includes('<text'));
+test('reward heading uses real selected-font text with an ink-fitted responsive frame',()=>{
+  const markup=unlockTitleMarkup();
+  assert.ok(markup.includes('<text x="0" y="0">已解锁皮肤！</text>'));
+  assert.ok(markup.includes('viewBox="113 -797 5151 893"'));
+  assert.ok(!markup.includes('<path'));
 });

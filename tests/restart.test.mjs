@@ -25,6 +25,7 @@ globalThis.localStorage={getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(
 globalThis.Phaser={AUTO:0,Scale:{NONE:0},Scene:class{constructor(){this.cameras={main:{setBackgroundColor(){}}};}},Game:class{constructor(config){this.scene=new config.scene();}}};
 window.Phaser=globalThis.Phaser;
 globalThis.matchMedia=()=>({matches:false});
+globalThis.getComputedStyle=()=>({paddingTop:'0',paddingBottom:'0',borderTopWidth:'0',borderBottomWidth:'0',marginBottom:'0'});
 globalThis.requestAnimationFrame=fn=>fn();
 let createdElementCount=0;
 globalThis.document={readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(`created-${tag}-${++createdElementCount}`),
@@ -115,6 +116,9 @@ export function bindPhotoRenderer(renderer){photoRenderer=renderer;}
 export const applyAppearance=setAppearance;
 export const hidePhotoForFrame=clearPhoto;
 export function readAppearance(){return {appearance,appearanceUrl};}
+export const startWithFont=bootWithFont;
+export const renderLevelNumber=levelNumberMarkup;
+export function setNumberMeasureContext(context){numberMeasureContext=context;numberCenters.clear();}
 `;
 const app=await import('data:text/javascript;base64,'+Buffer.from(source+adapter).toString('base64'));
 
@@ -122,6 +126,43 @@ function clickRestart(){
   for(const fn of listeners.get('click'))fn({target:{closest:()=>({dataset:{action:'restart'}})},detail:1});
 }
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-6,`${a} != ${b}`);
+test('public bootstrap waits for the normal UI font before creating the first game scene',async t=>{
+  const oldFonts=document.fonts,OriginalGame=Phaser.Game;let created=0,finishLoad,finishReady;
+  Phaser.Game=class extends OriginalGame{constructor(config){super(config);created++;}};
+  document.fonts={
+    load(font,text){
+      assert.equal(font,'400 16px GameSans');assert.match(text,/球/);assert.match(text,/0123456789/);
+      return new Promise(resolve=>finishLoad=resolve);
+    },
+    ready:new Promise(resolve=>finishReady=resolve)
+  };
+  t.after(()=>{Phaser.Game=OriginalGame;if(oldFonts===undefined)delete document.fonts;else document.fonts=oldFonts;});
+  const starting=app.startWithFont();
+  await Promise.resolve();assert.equal(created,0,'no canvas text can be drawn before the face loads');
+  finishLoad([]);await Promise.resolve();assert.equal(created,0,'layout also waits for the font set to settle');
+  finishReady();await starting;assert.equal(created,1);
+});
+
+test('font loading failure or a WebView without FontFaceSet still starts the game',async t=>{
+  const oldFonts=document.fonts,OriginalGame=Phaser.Game;let created=0;
+  Phaser.Game=class extends OriginalGame{constructor(config){super(config);created++;}};
+  t.after(()=>{Phaser.Game=OriginalGame;if(oldFonts===undefined)delete document.fonts;else document.fonts=oldFonts;});
+  document.fonts={load:()=>Promise.reject(new Error('font unavailable')),ready:Promise.resolve()};
+  await app.startWithFont();assert.equal(created,1);
+  delete document.fonts;
+  await app.startWithFont();assert.equal(created,2);
+});
+
+test('level labels measure the normal UI face and remain centered by its actual glyph bounds',t=>{
+  const context={measureText(text){
+    assert.equal(this.font,'400 1000px GameSans, sans-serif');assert.equal(this.textAlign,'left');assert.equal(this.textBaseline,'alphabetic');
+    assert.equal(text,'100');
+    return {actualBoundingBoxLeft:7,actualBoundingBoxRight:1407,actualBoundingBoxAscent:710,actualBoundingBoxDescent:10};
+  }};
+  app.setNumberMeasureContext(context);t.after(()=>app.setNumberMeasureContext(null));
+  const markup=app.renderLevelNumber(100),position=/<text x="([^"]+)" y="([^"]+)"/.exec(markup);
+  near(Number(position[1]),-.7*.83);near(Number(position[2]),.35*.83);
+});
 test('appearance replacement and removal invalidate cached images while ordinary frames only hide them',async t=>{
   const originalImage=globalThis.Image,calls=[];
   globalThis.Image=class{async decode(){}};
@@ -382,9 +423,15 @@ test('successful home launches and arena shots restore normal eyes on release or
 
 test('expression preference survives reloading the entry module',async()=>{
   saved.set('qiuqiule-settings',JSON.stringify({expressions:true}));
-  const reloaded=await import('data:text/javascript;base64,'+Buffer.from(source+adapter+'\n// reload preference').toString('base64'));
-  assert.equal(reloaded.expressionEnabled(),true);
-  assert.equal(element('#expressions-toggle').attributes['aria-checked'],'true');
+  const originalListeners=new Map([...listeners].map(([type,handlers])=>[type,[...handlers]]));
+  try{
+    const reloaded=await import('data:text/javascript;base64,'+Buffer.from(source+adapter+'\n// reload preference').toString('base64'));
+    assert.equal(reloaded.expressionEnabled(),true);
+    assert.equal(element('#expressions-toggle').attributes['aria-checked'],'true');
+  }finally{
+    // A browser reload replaces the old document and its listeners as well.
+    listeners.clear();for(const [type,handlers] of originalListeners)listeners.set(type,handlers);
+  }
 });
 
 
@@ -829,6 +876,45 @@ function normalizedContours(shape){
   const normalize=points=>points.map(p=>({x:(p.x-shape.center.x)/shape.r,y:(p.y-shape.center.y)/shape.r}));
   return {body:normalize(shape.body),eyes:shape.eyes.map(normalize),eyePathsVisible:shape.eyePathsVisible,pullVisible:shape.pullVisible};
 }
+
+test('all returns home keep the final overlay eyes identical to the resumed canvas face',()=>{
+  try{
+    for(const origin of ['settings','wardrobe','over','levels'])for(const sides of [0,6])for(const [width,height] of [[390,844],[844,390]]){
+      const g=graphicsRecorder();
+      const state=origin==='levels'?app.seedLevelRenderer(g,width,height):app.seedRenderer(g,width,height,origin==='over');
+      app.seedSkins(sides?{enabled:true,sides:6,unlocked:6}:null,sides?10:0);
+      const {scene}=state;
+      if(origin==='settings'||origin==='wardrobe'){
+        state.home.launchTo(origin);
+        for(let i=0;!app.readRestart().modal&&i<240;i++)scene.update(0,1000/120);
+        assert.equal(app.readRestart().modal,origin);
+        assert.ok(Math.hypot(state.home.player.lookX,state.home.player.lookY)>.01,'retain a real non-neutral launch gaze behind the menu');
+        app.advanceUi(.5);clickAction('close');
+      }else if(origin==='over'){
+        clickAction('pause');app.advanceUi(.42);
+        clickAction('home');app.advanceUi(.82);
+        assert.equal(app.readRestart().modal,'over');clickAction('home');
+      }else{
+        state.selector.player.lookX=.07;state.selector.player.lookY=-.05;
+        clickAction('home');
+      }
+      assert.equal(app.readRestart().transfer.target,'home');
+      app.advanceUi(app.readRestart().transfer.duration);
+      const ui=uiContours(),endEyes=ui.eyes.map(points=>outlineBounds({points}));
+      const alpha=Number(uiNode('.ui-eyes').style.opacity);
+      assert.equal(app.readRestart().transfer,null);
+      scene.update(0,0);
+      const canvas=eyeShapes(g);assert.equal(canvas.length,2);
+      canvas.forEach((eye,i)=>{
+        const actual=outlineBounds(eye),expected=endEyes[i];
+        for(const key of ['cx','cy','width','height'])near(actual[key],expected[key]);
+        near(eye.alpha,alpha);
+      });
+      assert.equal(element('#ui-ball').hidden,true,'only the resumed canvas is visible');
+      near(app.readHome().player.lookX,0);near(app.readHome().player.lookY,0);
+    }
+  }finally{app.seedSkins();}
+});
 function assertSameContour(actual,expected,tolerance=1e-5){
   assert.equal(actual.length,expected.length,'retain corresponding contour points');
   for(let i=0;i<actual.length;i++)assert.ok(Math.hypot(actual[i].x-expected[i].x,actual[i].y-expected[i].y)<tolerance,`contour point ${i} changed at the handoff`);
@@ -1097,7 +1183,7 @@ test('the real scene renders the boss, routes its segment and defeat rewards, th
     assert.equal(g.shapes.filter(shape=>shape.type==='path'&&shape.color===0xe88c72&&shape.points.length===193).length,0,'the defeated boss does not remain as a solid or flashing ball');
     assert.equal(world.score-scoreBefore,totalValue);
     assert.deepEqual(scene.testLabels.map(label=>label.text),[...Array(5).fill('+'+segmentValue),'+'+segmentValue*5]);
-    assert.ok(scene.testLabels.every(label=>label.style.fontFamily==='GameSans, sans-serif'));
+    assert.ok(scene.testLabels.every(label=>label.style.fontFamily==='GameSans, sans-serif'&&label.style.fontStyle==='normal'));
     assert.equal(element('#score').textContent,String(world.score).padStart(4,'0'));
     assert.equal(Number(saved.get('qiuqiule-best')),world.score);
     assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');

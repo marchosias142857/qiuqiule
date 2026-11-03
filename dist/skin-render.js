@@ -163,8 +163,8 @@ export function paintRadiance(ctx,{x=0,y=0,r=40,time=0,alpha=1,reducedMotion=fal
   gradient.addColorStop(.5,'rgba(255,244,189,.27)');gradient.addColorStop(.82,'rgba(255,240,168,.08)');
   gradient.addColorStop(1,'rgba(255,245,197,0)');
   ctx.fillStyle=gradient;ctx.shadowColor='rgba(255,244,192,.15)';ctx.shadowBlur=r*.13;
-  for(let i=0;i<18;i++){
-    const turn=i/18*TAU,half=i%2?.044:.075,outer=r*(i%2?2.7:3.12),inner=r*.78;
+  for(let i=0;i<10;i++){
+    const turn=i/10*TAU,half=i%2?.08:.135,outer=r*(i%2?2.7:3.12),inner=r*.78;
     ctx.save();ctx.rotate(turn);ctx.beginPath();ctx.moveTo(inner,-inner*half*.5);
     ctx.lineTo(outer,-outer*half);ctx.quadraticCurveTo(outer*1.025,0,outer,outer*half);
     ctx.lineTo(inner,inner*half*.5);ctx.closePath();ctx.fill();ctx.restore();

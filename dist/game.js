@@ -7,7 +7,7 @@ import {drawFunctionalBall,iconMarkup} from './icons.js';
 import {smooth,pullBallPoint,faceTarget,pointerFaceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline,usesStrainedEyes,playerVisualState,relaxedEyeOutline} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
 import {crownOutline,crownVisual,bossFacePose,bossAngryEyeOutline,bossSpiralEye,bossHornOutline} from './boss-visuals.js';
-import {skinContour,morphSkinContour,normalizeSkins,unlockSkin,selectSkin,toggleSkins} from './skins.js';
+import {skinContour,skinPoint,morphSkinContour,normalizeSkins,unlockSkin,selectSkin,toggleSkins} from './skins.js';
 import {projectSkinContour,paintRadiance,createRadianceCanvas,fitCrownToSkin} from './skin-render.js';
 import {PhotoRenderer} from './photo-renderer.js';
 import {initWardrobe,loadAppearance,saveAppearance} from './wardrobe.js';
@@ -273,8 +273,8 @@ function paintUiBall(p){
   }
   // Canvas breathing deforms the body only. Cancel the overlay body's scale
   // for captured selection eyes, then retain the existing gaze/roll transform.
-  eyes.style.transform=`${visual&&!skinned?`scale(${1/(1-sq)},${1/(1+sq*.7)}) `:skinned&&!visual?`scale(${1-sq},${1+sq*.7}) `:''}translate(${(p.lookX||0)*50}px,${(p.lookY||0)*50}px) rotate(${p.roll||0}rad)`;
-  eyes.style.opacity=visual?'.9':'';
+  eyes.style.transform=`${visual&&!skinned?`scale(${1/(1-sq)},${1/(1+sq*.7)}) `:skinned&&!visual?`scale(${1-sq},${1+sq*.7}) `:''}rotate(${p.roll||0}rad) translate(${(p.lookX||0)*50}px,${(p.lookY||0)*50}px)`;
+  eyes.style.opacity='.9';
   eyes.style.display=appearance?'none':'';
   if(wardrobeUi?.isCropping?.())el.hidden=true;
 }
@@ -302,10 +302,12 @@ function updateUiBall(dt){
   if(transfer){
     const move=transfer;move.elapsed+=dt;
     const progress=clamp(move.elapsed/move.duration,0,1),pose=transferPose(move.from,anchorPose(move.target),progress);
-    pose.lookX=(move.from.lookX||0)*(1-smooth(progress));pose.lookY=(move.from.lookY||0)*(1-smooth(progress));
     paintUiBall(pose);$('#ui-ball').dataset.state='moving';
     if(move.revealHome)homeReveal=smooth(progress);
     if(progress===1){
+      // Home retains the gaze from the launch that opened a menu. The overlay
+      // has eased to its neutral anchor; resume the canvas from that exact gaze.
+      if(move.target==='home')Object.assign(home.player,{lookX:pose.lookX,lookY:pose.lookY});
       transfer=null;uiAnchor=['pause','settings','over','wardrobe'].includes(move.target)?move.target:null;
       move.done?.();if(!uiAnchor&&!transfer)releaseOverlay=1;syncInputs();
       if(modal&&!transfer)$('#'+modal+'-panel').querySelector('button')?.focus({preventScroll:true});
@@ -541,7 +543,7 @@ function levelNumberMarkup(level){
   const size=level===100?.83:.94;
   if(!numberMeasureContext)numberMeasureContext=document.createElement?.('canvas')?.getContext?.('2d');
   if(!numberCenters.has(level)&&numberMeasureContext){
-    numberMeasureContext.font='500 1000px BallScore, sans-serif';
+    numberMeasureContext.font='400 1000px GameSans, sans-serif';
     numberMeasureContext.textAlign='left';numberMeasureContext.textBaseline='alphabetic';
     const m=numberMeasureContext.measureText(String(level));
     numberCenters.set(level,{x:(m.actualBoundingBoxLeft-m.actualBoundingBoxRight)/2000,y:(m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2000});
@@ -549,7 +551,7 @@ function levelNumberMarkup(level){
   const center=numberCenters.get(level)||{x:-String(level).length*.25,y:.34};
   return `<text x="${center.x*size}" y="${center.y*size}" font-size="${size}">${level}</text>`;
 }
-document.fonts?.ready.then(()=>numberCenters.clear());
+document.fonts?.ready?.then(()=>numberCenters.clear());
 function renderLevels(){
   const sphere=(b,content,color)=>`<g transform="translate(${b.x} ${b.y}) scale(${b.r*(b.sx||1)} ${b.r*(b.sy||1)})"><circle r="1" fill="${color}"/>${content}</g>`;
   const icon=type=>iconMarkup(type).replace('<svg ','<svg x="-1" y="-1" width="2" height="2" ');
@@ -866,7 +868,7 @@ function boot(){
         }
         if(e.type==='bossScore'||e.type==='bossDefeated'){
           if(world.score>best){best=world.score;storage.write('qiuqiule-best',best);}
-          const label=this.add.text(e.x,e.y,'+'+e.value,{fontFamily:'GameSans, sans-serif',fontSize:e.type==='bossDefeated'?'22px':'18px',color:settings.player,fontStyle:'bold'}).setOrigin(.5).setScale(viewport.scale);
+          const label=this.add.text(e.x,e.y,'+'+e.value,{fontFamily:'GameSans, sans-serif',fontSize:e.type==='bossDefeated'?'22px':'18px',color:settings.player,fontStyle:'normal'}).setOrigin(.5).setScale(viewport.scale);
           const labelY=e.type==='bossDefeated'?e.y+(e.r||world.player.r)+24:e.y-(e.r||world.player.r)-12;
           this.effects.push({type:'label',label,life:0,total:1,x:e.x,y:labelY});
           if(e.type==='bossScore'){tone(600+(e.segment||0)*90,.13,'sine',.045,1.25);vibrate(10);}
@@ -880,7 +882,7 @@ function boot(){
           tone(700,.3,'sine',.06,1.5);vibrate([12,30,12]);
         }
         if(e.type==='campaignBuff'){
-          const label=this.add.text(e.x??world.player.x,e.y??world.player.y,e.label,{fontFamily:'GameSans, sans-serif',fontSize:'15px',color:settings.player,fontStyle:'bold'}).setOrigin(.5).setScale(viewport.scale);
+          const label=this.add.text(e.x??world.player.x,e.y??world.player.y,e.label,{fontFamily:'GameSans, sans-serif',fontSize:'15px',color:settings.player,fontStyle:'normal'}).setOrigin(.5).setScale(viewport.scale);
           this.effects.push({type:'label',label,life:0,total:1.15,x:e.x??world.player.x,y:(e.y??world.player.y)-world.player.r-10});
           tone(700,.2,'sine',.045,1.4);vibrate(10);
         }
@@ -906,9 +908,18 @@ function boot(){
       const line=isDark(settings.bg)?0x637068:0xb8bead;
       ring(g,orbitCenter.x,orbitCenter.y,orbit,line,.35*fade,1);
       ring(g,orbitCenter.x,orbitCenter.y,orbit*.69,line,.17*fade,1);
-      for(let i=0;i<13;i++){
-        const u=i/12,px=anchor.x-base*2.45+u*base*1.55,py=anchor.y+base*1.3-u*u*base*.87;
-        g.fillStyle(line,(.18+u*.35)*fade);g.fillCircle(px,py,1.5+u*.5);
+      // Preserve the arc; match the last two edge gaps along the tangent to the resting skin.
+      const trailBend=1.3*1.55/(2*2.45-1.55);
+      const trailCount=15,dotRadius=1.5,dotGrowth=.5;
+      const skinEdge=skinPoint(Math.atan2(1.3-trailBend,-.9),activeContour());
+      const playerEdge=anchor.r*Math.hypot(skinEdge.x,skinEdge.y);
+      const tangentLength=base*Math.hypot(1.55,2*trailBend),joinRadius=base*Math.hypot(.9,1.3-trailBend);
+      const trailEnd=(trailCount-1)*(joinRadius+tangentLength-playerEdge+dotRadius)
+        /(trailCount*tangentLength-dotGrowth*(trailCount-2));
+      for(let i=0;i<trailCount;i++){
+        const u=i*trailEnd/(trailCount-1),bend=u<=1?u*u:2*u-1;
+        const px=anchor.x-base*2.45+u*base*1.55,py=anchor.y+base*1.3-bend*base*trailBend;
+        g.fillStyle(line,(.18+u*.35)*fade);g.fillCircle(px,py,dotRadius+u*dotGrowth);
       }
 
       const colors={play:homePlayColor,sound:homeSoundColor,settings:0xc4dc86,wardrobe:0xe5c684,mode:0xb4ced4};
@@ -1094,7 +1105,22 @@ document.addEventListener('visibilitychange',()=>{sound.setHidden(document.hidde
 window.addEventListener('pagehide',()=>sound.setHidden(true));
 window.addEventListener('pageshow',()=>sound.setHidden(document.hidden));
 window.addEventListener('blur',pauseForInterruption);
-$('#buff-guide').innerHTML=BUFFS.map(b=>`<article class="buff-explanation"><span aria-hidden="true">${b.sides===3?'△':b.sides===4?'□':'⬠'}</span><div><h3>${b.name}<small>${b.short}</small></h3><p>${b.detail}${b.id==='growth'?'':b.kind==='special'?' 每种特殊能力只能获得一次。':' 可叠加。'}</p></div></article>`).join('');
+function buffGuideIcon(sides){
+  const points={3:'12,3 22,21 2,21',4:'3,3 21,3 21,21 3,21',5:'12,2 22,9 18,21 6,21 2,9'}[sides];
+  return `<svg viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true" focusable="false"><polygon points="${points}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+$('#buff-guide').innerHTML=BUFFS.map(b=>`<article class="buff-explanation"><span aria-hidden="true">${buffGuideIcon(b.sides)}</span><div><h3>${b.name}<small>${b.short}</small></h3><p>${b.detail}${b.id==='growth'?'':b.kind==='special'?' 每种特殊能力只能获得一次。':' 可叠加。'}</p></div></article>`).join('');
 $$('[data-icon]').forEach(button=>button.innerHTML=iconMarkup(button.dataset.icon));
 applyTheme();syncMode();layoutHomeControl();
-if(document.readyState==='complete')boot();else window.addEventListener('load',boot,{once:true});
+async function bootWithFont(){
+  // Canvas and Phaser retain metrics from the first draw. Load the same face
+  // used by the DOM before creating the scene so numbers never start in a fallback.
+  try{
+    await document.fonts?.load?.('400 16px GameSans','球球了0123456789');
+    await document.fonts?.ready;
+  }catch{
+    // Font failures and older WebViews still get a playable game.
+  }
+  numberCenters.clear();boot();
+}
+if(document.readyState==='complete')bootWithFont();else window.addEventListener('load',bootWithFont,{once:true});

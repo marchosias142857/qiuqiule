@@ -48,7 +48,7 @@ test('core and warmed extras serve from cache with the network unavailable',asyn
     const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example'+path,mode:'navigate'}});
     assert.match(await response.text(),/id="game"/);
   }
-  for(const asset of ['game.js','physics.js','campaign.js','levels.js','home.js','icons.js','motion.js','boss-visuals.js','audio.js','offline.js','audio/light-bounce.mp3','display.js','style.css','fonts/fredoka-latin-500-normal.woff2','vendor/phaser.min.js','icons/icon-192.png']){
+  for(const asset of ['game.js','physics.js','campaign.js','levels.js','home.js','icons.js','motion.js','boss-visuals.js','audio.js','offline.js','audio/light-bounce.mp3','display.js','style.css','fonts/qiuqiule-ui.woff2','vendor/phaser.min.js','icons/icon-192.png']){
     const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example/'+asset,mode:'cors'}});assert.ok((await response.arrayBuffer()).byteLength>0);
   }
   const state=await w.status();assert.equal(state.ready,true);assert.equal(state.musicReady,true);
@@ -72,6 +72,14 @@ test('partial core updates are discarded while the previous offline game survive
   assert.equal(w.skipped,false);assert.equal(w.stores.size,1);
   assert.equal(await w.stores.get('qiuqiule-%2F-v1.4.0').get('https://game.example/').text(),'previous working game');
   assert.ok(w.messages.some(message=>message.type==='CACHE_FAILED'));
+});
+test('missing bundled font prevents replacing a working offline game',async()=>{
+  const w=worker({failed:['/fonts/qiuqiule-ui.woff2']});
+  const previous=new Map([['https://game.example/',new Response('previous working game')]]);
+  w.stores.set('qiuqiule-%2F-v5.2.0-offline-1',previous);
+  await assert.rejects(w.event('install'),/Core cache incomplete/);
+  assert.equal(w.skipped,false);assert.equal(w.stores.size,1);
+  assert.equal(await w.stores.get('qiuqiule-%2F-v5.2.0-offline-1').get('https://game.example/').text(),'previous working game');
 });
 test('HTML sign-in responses are rejected and hosted authentication routes are not intercepted',async()=>{
   for(const path of ['/','/game.js']){

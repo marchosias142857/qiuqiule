@@ -126,10 +126,12 @@ export function bossAngryEyeOutline(side,open=1,anger=1){
 /** Open spiral polyline at the same eye center. Stroke with a roughly .025-unit
  * width and round caps; turn is radians, normally supplied by bossFacePose. */
 export function bossSpiralEye(side,turn=0){
-  const sign=side<0?-1:1,center=eyeCenter(side);
+  const center=eyeCenter(side);
   return Array.from({length:81},(_,i)=>{
     const t=i/80,r=.012+.124*t,angle=t*Math.PI*3.5+turn;
-    return {x:center.x+sign*Math.cos(angle)*r,y:center.y+Math.sin(angle)*r};
+    // Both spirals keep the left eye's winding: the right eye is flipped
+    // horizontally about its own centre instead of mirroring the entire face.
+    return {x:center.x-Math.cos(angle)*r,y:center.y+Math.sin(angle)*r};
   });
 }
 
