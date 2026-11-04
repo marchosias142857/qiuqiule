@@ -1,5 +1,10 @@
 # 球球了
 
+## v7.8.0 边框视觉隆起（2026-11-04）
+
+新增纯绘制模块 `dist/border-bulge.js`，统一轮廓、衰减与圆角/开口处理。Scene 按主球 ID、非分身和真实外墙来源过滤碰撞，首帧峰值与重复撞击采用独立状态；World/CampaignWorld 只增加扣除局部停顿的视觉时钟与事件来源字段，不改变碰撞运算。移除普通撞墙和撞墙触发冲击波的边框闪粗/加深，更新低速外墙音效门槛、离线核心资源和版本号。参数及验证说明见 `docs/V7.8.0.md`。
+
+
 ## v7.6.0 主页冷启动修复（2026-11-04）
 
 用户报告空白后，在实际浏览器捕获drawBall→drawHome→updateHome的flightAt TypeError。v7.5新增的rewardVisuals.world与world比较在二者均undefined时成立，首帧读取不存在的rewardVisuals.flightAt抛错。已有seedRenderer测试把world设为null，未覆盖真实首次启动。修复两处奖励视觉状态访问，要求有效world再比较；保留7.6.0，更新离线缓存。补充未经seedRenderer初始化的bootWithFont→Scene.create→首三帧绘制回归，覆盖campaign/endless和正常/减少动态四种组合。restart/home/motion共272/272通过（21.558秒），game/sw语法和差异检查通过。

@@ -52,6 +52,8 @@ export class World {
     this.inset = 16;
     this.time = 0;
     this.feedbackTime = 0;
+    // Presentation-only world clock; local player hit-stops pause wall deformation.
+    this.borderTime = 0;
     this.stage = 1;
     this.maxStage = 1;
     this.maxCombo = 0;
@@ -769,7 +771,7 @@ export class World {
       b.angle = Math.atan2(ny, nx);
       if (b.isPlayer) {
         if (this.buffs.bank) { if (b.isAuxiliary) b.bank = Math.min(2, (b.bank || 0) + 1); else this.bank = Math.min(2, this.bank + 1); }
-        this.emit('wall', {x: b.x + nx * b.r, y: b.y + ny * b.r, contactX: b.x + nx * b.r, contactY: b.y + ny * b.r,
+        this.emit('wall', {surface: 'arena', x: b.x + nx * b.r, y: b.y + ny * b.r, contactX: b.x + nx * b.r, contactY: b.y + ny * b.r,
           power: speed / this.baseSpeed,
           bodyId: b.id, nx, ny, bank: b.isAuxiliary ? b.bank || 0 : this.bank, auxiliary: !!b.isAuxiliary, impactSpeed: speed});
       }
@@ -1369,6 +1371,7 @@ export class World {
   }
 
   advance(dt, dragging, timeScale = 1) {
+    this.borderTime += Math.max(0, dt - Math.min(dt / timeScale, this.player.feedbackFreeze || 0) * timeScale);
     this.time += dt; this.phaseTime += dt;
     if (this.combatActive) this.elapsed += dt / timeScale;
     // dt is already scaled by the scene. Feedback holds and corpse snapshots

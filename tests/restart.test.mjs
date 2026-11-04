@@ -1806,14 +1806,14 @@ test('v7.2 real ordinary hits dispatch their graded sound and haptic while light
   }
 });
 
-test('v7.2 quiet wall contacts keep their flash and cannot suppress an immediate meaningful hit',t=>{
+test('v7.8 quiet wall contacts have no flash or bulge and cannot suppress an immediate meaningful hit',t=>{
   const {world,scene}=feedbackRun(app,.6),p=world.player,audio=app.recordFeedbackAudio();
   t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
   scene.clock=1;scene.hitSoundAt=0;world.events=[];
   Object.assign(p,{x:world.arenaBounds.left+p.r-.1,y:400,vx:-world.baseSpeed*.249,vy:0});
   world.wall(p);scene.update(0,0);
   assert.equal(audio.calls.filter(call=>call.name==='wall').length,0);
-  near(scene.hitSoundAt,0);assert.equal(scene.wallFlashes.length,1);
+  near(scene.hitSoundAt,0);assert.equal(scene.wallFlashes.length,0);assert.equal(scene.wallBulges.length,0);
   gradedFeedbackContact(world,{maxHp:500});scene.update(0,0);
   assert.equal(audio.calls.filter(call=>call.name==='impact').length,1);
   assert.equal(audio.calls.find(call=>call.name==='impact').args[0].hitTier,'medium');
@@ -1841,7 +1841,7 @@ test('v7.2 direct kills keep old squash blink and default hold while passing the
   }
 });
 
-test('v7.2 leaves archived campaign collision and wall dispatch on the original audio path',t=>{
+test('campaign impacts keep their audio context while exterior walls use the shared low-speed gate',t=>{
   const g=graphicsRecorder(),{world,scene}=app.seedLegacyRenderer(g,390,844,1),audio=app.recordFeedbackAudio();
   app.setFeedbackStrength(.6);scene.clock=1;scene.hitSoundAt=0;
   t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
@@ -1853,7 +1853,10 @@ test('v7.2 leaves archived campaign collision and wall dispatch on the original 
   scene.clock+=.1;world.events=[];const p=world.player;
   Object.assign(p,{x:world.arenaBounds.left+p.r-.1,y:400,vx:-world.baseSpeed*.1,vy:0});
   world.wall(p);scene.update(0,0);
-  const wall=audio.calls.find(call=>call.name==='wall');assert.ok(wall,'campaign quiet walls keep the old sound');
+  assert.equal(audio.calls.filter(call=>call.name==='wall').length,0,'quiet campaign exterior contacts are silent');
+  Object.assign(p,{x:world.arenaBounds.left+p.r-.1,y:400,vx:-world.baseSpeed*.5,vy:0});
+  world.wall(p);scene.update(0,0);
+  const wall=audio.calls.find(call=>call.name==='wall');assert.ok(wall);
   assert.notEqual(wall.args[1]?.endless,true);
 });
 function fireElementInput(selector,value){
@@ -2038,7 +2041,7 @@ test('the settings export action downloads the bounded local aim report without 
   document.body={append:node=>appended.push(node)};
   t.after(()=>{document.createElement=originalCreate;if(originalBody===undefined)delete document.body;else document.body=originalBody;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
   clickAction('export-aim');assert.equal(created.length,1);assert.deepEqual(appended,created);
-  const link=created[0];assert.equal(link.clicked,true);assert.equal(link.removed,true);assert.equal(link.download,'qiuqiule-aim-v7.7.1.json');
+  const link=created[0];assert.equal(link.clicked,true);assert.equal(link.removed,true);assert.equal(link.download,'qiuqiule-aim-v7.8.0.json');
   assert.match(link.href,/^data:application\/json;charset=utf-8,/);
   const report=JSON.parse(decodeURIComponent(link.href.slice(link.href.indexOf(',')+1)));
   assert.equal(report.sampleCount,30);assert.equal(report.medianSeconds,1.05);assert.equal(report.nextHoldSeconds,.9);assert.equal(report.currentRunHoldSeconds,1.2);
@@ -2717,15 +2720,19 @@ test('impact zoom peaks after 80 ms and clears on pause, resume, restart and its
   app.advanceUi(.65);app.setFeedbackStrength(.6);
 });
 
-test('wall feedback highlights only the impact segment and fades out within 120 ms',()=>{
+test('wall feedback deforms one unchanged-color outline and recovers within 180 ms',()=>{
   const {g,world,scene}=feedbackRun();world.enemies=[];
   const p=world.player;p.x=world.arenaBounds.left+p.r-1;p.y=world.height*.5;p.vx=-world.baseSpeed;p.vy=0;
   world.wall(p);p.vx=p.vy=0;scene.update(0,0);
-  assert.equal(scene.wallFlashes.length,1);assert.equal(g.lines.length,1);
-  const line=g.lines[0];near(line.x1,line.x2);near(line.y2-line.y1,world.unit*2);near(line.width,2.5);
-  assert.equal(g.borders.length,1,'wall feedback never adds a full-screen second outline');
-  advanceScene(scene,.06);assert.equal(g.lines.length,1);assert.ok(g.lines[0].width>1&&g.lines[0].width<line.width);
-  advanceScene(scene,.061);assert.equal(scene.wallFlashes.length,0);assert.equal(g.lines.length,0);
+  assert.equal(scene.wallFlashes.length,0);assert.equal(scene.wallBulges.length,1);assert.equal(g.lines.length,0);
+  const borderStrokes=()=>g.shapes.filter(shape=>shape.type==='stroke'&&shape.color===0xc8ccbd);
+  assert.equal(borderStrokes().length,1);const first=borderStrokes()[0];near(first.width,1);near(first.alpha,.65);
+  const peakX=Math.min(...first.points.map(point=>point.x));assert.ok(peakX<scene.lastBorder.left-1);
+  assert.equal(g.borders.length,0,'the bulged outline replaces the original straight outline');
+  advanceScene(scene,.06);assert.equal(scene.wallBulges.length,1);assert.equal(borderStrokes().length,1);
+  const fading=borderStrokes()[0];near(fading.width,1);near(fading.alpha,.65);
+  assert.ok(Math.min(...fading.points.map(point=>point.x))>peakX);
+  advanceScene(scene,.131);assert.ok(world.borderTime>=.18);assert.equal(scene.wallBulges.length,0);assert.equal(g.lines.length,0);assert.equal(g.borders.length,1);
   app.setFeedbackStrength(.6);
 });
 
@@ -2752,7 +2759,7 @@ test('new installs default to expressions and 60% feedback while saved false and
   });
 });
 
-test('reduced-motion real rendering keeps feedback local, motionless and free of zoom or score scaling',async()=>{
+test('reduced-motion real rendering keeps border motion subtle and remains free of zoom or score scaling',async()=>{
   await withReloadedEntry({juice:1,expressions:false},true,fresh=>{
     const {g,world,scene}=feedbackRun(fresh),p=world.player;
     assert.equal(world.feedbackOptions.reducedMotion,true);
@@ -2760,8 +2767,10 @@ test('reduced-motion real rendering keeps feedback local, motionless and free of
     scene.update(0,0);assert.equal(scene.zoomPulse,null);assert.equal(element('#game').style.transform,'none');
     const ghost=scene.impactGhosts[0],frozen={...ghost.body,feedbackFreeze:.05};assert.equal(scene.shakenBody(frozen),frozen,'reduced motion never shakes target positions');
     world.score=25;scene.update(0,0);assert.equal(element('#score').textContent,'0025');assert.equal(element('#score').style.transform,'scale(1)');
-    scene.wallFlashes=[{x:world.arenaBounds.left,y:world.height*.5,nx:-1,ny:0,life:0}];
-    g.clear();scene.drawBorder(world.arenaBounds);assert.equal(g.lines.length,1);assert.equal(g.lines[0].width,1);
+    world.emit('wall',{surface:'arena',bodyId:p.id,power:1,x:world.arenaBounds.left,y:world.height*.5,nx:-1,ny:0});scene.handleEvents();
+    g.clear();scene.drawBorder(world.arenaBounds);assert.equal(g.lines.length,0);assert.equal(g.borders.length,0);
+    const border=g.shapes.find(shape=>shape.type==='stroke'&&shape.color===0xc8ccbd);assert.ok(border);near(border.width,1);near(border.alpha,.65);
+    near(scene.lastBorder.left-Math.min(...border.points.map(point=>point.x)),world.unit*(.14*5/6)*.5,.03);
     const position={x:p.x,y:p.y};p.feedbackFreeze=0;p.vx=world.baseSpeed;p.vy=0;
     advanceScene(scene,.06);assert.equal(scene.feedbackCamera,null);assert.equal(element('#game').style.transform,'none');
     assert.ok(p.x>position.x,'reduced motion retains regular world simulation');

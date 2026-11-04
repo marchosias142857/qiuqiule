@@ -450,6 +450,7 @@ export class CampaignWorld extends World {
     }
   }
   advance(dt, dragging = false, timeScale = 1) {
+    this.borderTime += Math.max(0, dt - Math.min(dt / timeScale, this.player.feedbackFreeze || 0) * timeScale);
     const realDt = dt / timeScale;
     if (this.transientSlow) { this.transientSlow.remaining = Math.max(0, this.transientSlow.remaining - realDt); if (!this.transientSlow.remaining) this.transientSlow = null; }
     this.time += dt; this.feedbackTime += realDt; this.phaseTime += dt;
@@ -520,7 +521,7 @@ export class CampaignWorld extends World {
           if (this.buffs.bank) {
             if (body.isAuxiliary) body.bank = Math.min(2, (body.bank || 0) + 1); else this.bank = Math.min(2, this.bank + 1);
           }
-          this.emit('wall', {x: contact.contactX, y: contact.contactY, ...contact, bodyId: body.id,
+          this.emit('wall', {surface: 'obstacle', x: contact.contactX, y: contact.contactY, ...contact, bodyId: body.id,
             power: contact.normalSpeed / this.baseSpeed, bank: body.isAuxiliary ? body.bank || 0 : this.bank, auxiliary: !!body.isAuxiliary});
         }
         (this.rules.onStaticHit || this.rules.onHit)?.call(this.rules, shape, contact, body);
