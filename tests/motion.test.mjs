@@ -48,7 +48,7 @@ test('pull contour joins the round hemisphere with matching position, tangent an
   }
 });
 
-test('pull keeps the back hemisphere, round rest shape, reach and tip roundness',()=>{
+test('pull keeps the back hemisphere, round rest shape and reach with a three-percent narrower full tip',()=>{
   for(const amount of [0,.25,.5,.75,1]){
     for(let i=0;i<=200;i++){
       const t=Math.PI/2+i/200*Math.PI,p=pullPoint(t,amount);
@@ -57,11 +57,23 @@ test('pull keeps the back hemisphere, round rest shape, reach and tip roundness'
     }
     const tip=pullPoint(0,amount);near(tip.x,1+.95*amount);near(tip.y,0);
   }
-  // Original fully stretched tip radius, measured from the contour rather than
-  // duplicating its weighting polynomial. Rounding the joins must not sharpen it.
+  // The full-pull tangent narrows by exactly 3% while the forward extension
+  // and second derivative stay fixed. Its curvature remains finite and round.
   const h=1e-4,left=pullPoint(-h,1),tip=pullPoint(0,1),right=pullPoint(h,1);
   const dy=(right.y-left.y)/(2*h),ddx=(right.x-2*tip.x+left.x)/(h*h);
-  assert.ok(Math.abs(-ddx/(dy*dy)-4.01384083045)<1e-5);
+  near(dy,.85*.97);
+  assert.ok(Math.abs(-ddx/(dy*dy)-4.01384083045/(.97*.97))<1e-5);
+});
+
+test('full-charge tip narrowing eases in only above eighty percent without a contour jump',()=>{
+  const t=.3,ct=Math.cos(t),st=Math.sin(t),oldY=amount=>st*(1-.15*amount*ct**3);
+  for(const amount of [0,.2,.5,.8])near(pullBallPoint(ct,st,amount).y,oldY(amount));
+  for(const amount of [.85,.9,.95,1])assert.ok(pullBallPoint(ct,st,amount).y<oldY(amount));
+  const h=1e-5;
+  for(const amount of [.8,1]){
+    const before=pullBallPoint(ct,st,amount-h),at=pullBallPoint(ct,st,amount),after=pullBallPoint(ct,st,amount+h);
+    assert.ok(Math.abs((at.y-before.y)/h-(after.y-at.y)/h)<1e-4,'charge boundary has no tangent snap');
+  }
 });
 
 test('the pull outline stays symmetric and strictly convex throughout its range',()=>{

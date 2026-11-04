@@ -4,10 +4,12 @@ export const smooth = t => { t=clamp(t,0,1);return t*t*t*(10+t*(-15+6*t)); };
 // Unit-radius contour in drag-local coordinates. Both weights and their first
 // two derivatives vanish at the hemisphere joins, matching the untouched circle
 // in position, tangent and curvature. The (2-front) factor keeps the original
-// tip's curvature as well as its 95% extension, without making it sharper.
+// tip's 95% extension. Only the final fifth of the pull adds a smooth 3%
+// narrowing near the tip; the round hemisphere and join derivatives stay put.
 export function pullBallPoint(ct,st,amount){
   const front=Math.max(0,ct),weight=front*front*front;
-  return {x:ct+.95*amount*weight*(2-front),y:st*(1-.15*amount*weight)};
+  const full=clamp((amount-.8)/.2,0,1),tip=full*full*(3-2*full);
+  return {x:ct+.95*amount*weight*(2-front),y:st*(1-.15*amount*weight)*(1-.03*tip*weight)};
 }
 
 export function faceTarget(body,pull,maxPull){

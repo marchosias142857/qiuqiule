@@ -15,7 +15,7 @@ args = parser.parse_args()
 assert hashlib.sha256(args.source.read_bytes()).hexdigest() == SOURCE_SHA256, 'Unexpected font version'
 font = TTFont(args.source, recalcTimestamp=False)
 cmap = font.getBestCmap()
-app_files = sorted(p for p in (ROOT/'dist').glob('*') if p.suffix in ('.js', '.html', '.css'))
+app_files = sorted(p for p in (ROOT/'dist').rglob('*') if p.suffix in ('.js', '.html', '.css'))
 text = ''.join(p.read_text() for p in app_files)
 requested = set(map(ord, text))
 for lo, hi in [(0x20, 0x100), (0x2000, 0x2070), (0x3000, 0x3040), (0xff00, 0xfff0)]:

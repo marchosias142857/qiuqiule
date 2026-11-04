@@ -10,15 +10,15 @@
 
 `scripts/prepare-android.mjs` 从 `package.json` 读取版本，写入原生工程：
 
-- `versionName`：例如 `5.2.1`。
-- `versionCode`：`major × 10000 + minor × 100 + patch`，因此 `5.2.1` 为 `50201`；minor 与 patch 必须小于 100。
+- `versionName`：例如 `6.9.0`。
+- `versionCode`：`major × 10000 + minor × 100 + patch`，因此 `6.9.0` 为 `60900`；minor 与 patch 必须小于 100。
 - 启动图标复用 `dist/icons/icon-512.png`，替换 Capacitor 默认图案。
 
 原生 `android/` 工程由脚本生成，并继续作为忽略的构建目录。重复执行准备脚本会同步最新游戏资源与版本信息。
 
-工作流上传名为 **`qiuqiule-v5.2.1-android-unsigned`** 的 artifact，名称随版本变化，包含：
+工作流上传名为 **`qiuqiule-v6.9.0-android-unsigned`** 的 artifact，名称随版本变化，包含：
 
-- `qiuqiule-v5.2.1-unsigned.apk`：已做 16 KB 页面兼容对齐的未签名 release APK。
+- `qiuqiule-v6.9.0-unsigned.apk`：已做 16 KB 页面兼容对齐的未签名 release APK。
 - `apksigner.jar`：来自 Android Build Tools 35.0.0，供本机使用 JDK 签名和验证。
 - `APK-INFO.txt`：由 SDK `aapt dump badging` 导出的应用 ID、版本、最低 SDK 等包信息。
 - `SHA256SUMS.txt`：构建产物校验值。
@@ -52,10 +52,10 @@ java -jar apksigner.jar sign \
   --ks-key-alias "$QIUQIULE_KEY_ALIAS" \
   --ks-pass "file:$QIUQIULE_STORE_PASSWORD_FILE" \
   --key-pass "file:$QIUQIULE_KEY_PASSWORD_FILE" \
-  --out qiuqiule-v5.2.1.apk qiuqiule-v5.2.1-unsigned.apk
+  --out qiuqiule-v6.9.0.apk qiuqiule-v6.9.0-unsigned.apk
 
-java -jar apksigner.jar verify --verbose --print-certs qiuqiule-v5.2.1.apk
-shasum -a 256 qiuqiule-v5.2.1.apk
+java -jar apksigner.jar verify --verbose --print-certs qiuqiule-v6.9.0.apk
+shasum -a 256 qiuqiule-v6.9.0.apk
 ```
 
 验证签名与包内版本后，把最终签名 APK 及其 SHA-256 校验值保存到对应版本的 GitHub Release 或持久文件下载地址，使用可下载链接交付。不要把未签名构建产物当作可安装 APK 发布。首次使用新签名时，不能承诺覆盖安装由其他证书签署的旧 APK。

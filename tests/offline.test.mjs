@@ -48,11 +48,21 @@ test('core and warmed extras serve from cache with the network unavailable',asyn
     const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example'+path,mode:'navigate'}});
     assert.match(await response.text(),/id="game"/);
   }
-  for(const asset of ['game.js','physics.js','campaign.js','levels.js','home.js','icons.js','motion.js','boss-visuals.js','audio.js','offline.js','audio/light-bounce.mp3','display.js','style.css','fonts/qiuqiule-ui.woff2','vendor/phaser.min.js','icons/icon-192.png']){
+  for(const asset of ['game.js','physics.js','campaign.js','campaign-collision.js','campaign-progress.js','campaign-render.js','classes/legacy.js','classes/wall.js','classes/peggle.js','classes/pool.js','classes/golf.js','classes/bowling.js','classes/pinball.js','classes/bricks.js','classes/glass.js','classes/merge.js','classes/chain.js','levels.js','home.js','icons.js','motion.js','boss-visuals.js','audio.js','offline.js','audio/light-bounce.mp3','display.js','style.css','fonts/qiuqiule-ui.woff2','vendor/phaser.min.js','icons/icon-192.png']){
     const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example/'+asset,mode:'cors'}});assert.ok((await response.arrayBuffer()).byteLength>0);
   }
   const state=await w.status();assert.equal(state.ready,true);assert.equal(state.musicReady,true);
   assert.ok(w.requests.every(request=>request.options.credentials==='same-origin'&&request.options.redirect==='error'));
+});
+test('missing any task8–11 module keeps the previous complete offline version',async()=>{
+  for(const module of ['pool','golf','bowling','pinball','bricks','glass','merge','chain']){
+    const w=worker({failed:[`/classes/${module}.js`]});
+    const previous=new Map([['https://game.example/',new Response('v6.6.0 complete')]]);
+    w.stores.set('qiuqiule-%2F-v6.6.0-campaign-batch1-1',previous);
+    await assert.rejects(w.event('install'),/Core cache incomplete/);
+    assert.equal(w.skipped,false);assert.equal(w.stores.size,1);
+    assert.equal(await w.stores.values().next().value.get('https://game.example/').text(),'v6.6.0 complete');
+  }
 });
 test('failed music download cannot block offline game installation and can retry later',async()=>{
   const w=worker({failed:['/audio/light-bounce.mp3']});await w.event('install');await w.event('activate');

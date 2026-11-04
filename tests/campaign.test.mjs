@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World} from '../dist/physics.js';
-import {CampaignWorld, levelConfig, progressPercent, normalizeProgress} from '../dist/campaign.js';
+import {LegacyCampaignWorld as CampaignWorld, legacyLevelConfig as levelConfig, progressPercent, normalizeProgress as normalizeFullProgress} from '../dist/campaign.js';
+
+const normalizeProgress = raw => { const p=normalizeFullProgress(raw); return {completed:p.completed,unlocked:p.unlocked}; };
 
 const step = (world, seconds) => {for (let i = 0; i < Math.ceil(seconds * 120); i++) world.step(1 / 120);};
 const fresh = (level = 1) => new CampaignWorld(900, 700, level, () => .51);
@@ -179,21 +181,29 @@ test('progress is rounded, clamped and normalizes sequential unlocks through 100
   assert.equal(progressPercent(NaN, 20), 0);
   assert.deepEqual(normalizeProgress(null), {completed: 0, unlocked: 1});
   assert.deepEqual(normalizeProgress(7), {completed: 6, unlocked: 7});
-  assert.deepEqual(normalizeProgress({completed: 37, unlocked: 100}), {completed: 37, unlocked: 38});
+  assert.deepEqual(normalizeProgress({completed: 37, unlocked: 100}), {completed: 37, unlocked: 100});
   assert.deepEqual(normalizeProgress({completed: 100, unlocked: 101}), {completed: 100, unlocked: 100});
   assert.deepEqual(normalizeProgress({completed: -4}), {completed: 0, unlocked: 1});
 });
 
-test('shared hooks preserve the original endless opening and escalation', () => {
+test('campaign hooks stay separate from the new endless opening and escalation', () => {
   const world = new World(900, 700, () => .5);
-  assert.equal(world.enemies.length, 2);
+  assert.equal(world.enemies.length, 6);
   assert.equal(world.enemies[0].hp, 19);
-  assert.equal(world.enemies[0].density, .74);
+  assert.equal(world.enemies[0].density, .71);
   assert.equal(world.enemies[0].value, 10);
-  assert.equal(world.spawnTimer, .45);
+  assert.equal(world.limit, 28);
+  assert.equal(world.killTarget, 14);
+  assert.equal(world.spawnInterval, 2);
   world.stage = 8; world.time = 180; world.enemies = []; world.spawnEnemy();
-  assert.equal(world.enemies[0].hp, 69);
-  assert.equal(world.enemies[0].value, 20);
-  world.spawnTimer = 0; world.step(1 / 120);
-  assert.equal(world.spawnTimer, Math.max(.52, 2.45 - 7 * .18 - world.time * .002));
+  assert.equal(world.enemies[0].hp, 19 * 1.16 ** 7 + 8);
+  assert.equal(world.enemies[0].density, .65 + .06 * 8 + .0004 * 180);
+  assert.equal(world.enemies[0].value, 10);
+  assert.equal(world.killTarget, 42);
+  assert.equal(world.spawnInterval, (.65 + 1.35 * .86 ** 7) * 1.15);
+  const campaign = fresh(8);
+  assert.equal(campaign.limit, 18);
+  assert.equal(campaign.enemies.length, 2);
+  assert.equal(campaign.enemies[0].hp, levelConfig(8).enemyHp);
+  assert.equal(campaign.spawnInterval, levelConfig(8).spawnInterval);
 });

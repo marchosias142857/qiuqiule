@@ -1,23 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, BUFFS, length, BREATH_DURATION} from '../dist/physics.js';
+import {LegacyCampaignWorld as CampaignWorld} from '../dist/campaign.js';
 
-function world(){const w=new World(900,700,()=>.5);w.enemies=[];w.spawnTimer=999;w.events=[];return w;}
+function world(){const w=new World(900,700,()=>.5);w.enemies=[];w.spawnTimer=999;w.floorTimer=Infinity;w.introTimer=Infinity;w.events=[];return w;}
+function campaignWorld(){const w=new CampaignWorld(900,700,1,()=>.5);w.enemies=[];w.spawnTimer=999;w.events=[];w.energy=1;return w;}
 function enemy(w,x,y,options={}){const b=w.makeBody(x,y,w.unit,.8);Object.assign(b,{born:1,solid:true,hp:100,maxHp:100},options);w.enemies.push(b);return b;}
 function advance(w,seconds){for(let i=0;i<Math.ceil(seconds*120);i++)w.step(1/120);}
 const near=(a,b,eps=1e-6)=>assert.ok(Math.abs(a-b)<eps,`${a} ≠ ${b}`);
 
-test('slingshot launches opposite to the drag, caps deformation energy, and gates fast re-shots',()=>{
+test('slingshot launches opposite to the drag, caps deformation energy, and allows fast endless re-shots',()=>{
   const w=world();assert.ok(w.shoot(60,80));assert.ok(w.player.vx<0&&w.player.vy<0);near(w.player.vx/w.player.vy,.75);
-  assert.equal(w.shoot(100,0),false);
+  assert.equal(w.shoot(100,0),true);
   w.player.vx=w.player.vy=0;w.shoot(10000,0);near(length(w.player),w.baseSpeed);
 });
 test('energy and density obey v = sqrt(2E/m)',()=>{
   const a=world(),b=world();a.shoot(170,0);b.energy=1.3;b.density=1.35;b.shoot(170,0);
   near(length(b.player)/length(a.player),Math.sqrt(1.3/1.35));
 });
-test('ordinary circle collision conserves momentum and dissipates energy',()=>{
-  const w=world(),a=w.player;Object.assign(a,{x:300,y:300,vx:500,vy:0});const b=enemy(w,300+w.unit*1.9,300);
+test('campaign circle collision preserves momentum and dissipates energy',()=>{
+  const w=campaignWorld(),a=w.player;Object.assign(a,{x:300,y:300,vx:500,vy:0});const b=enemy(w,300+w.unit*1.9,300);
   const p0=a.mass*a.vx+b.mass*b.vx,e0=.5*a.mass*a.vx**2;
   w.collide(a,b);near(a.mass*a.vx+b.mass*b.vx,p0);assert.ok(b.vx>0);assert.ok(.5*a.mass*a.vx**2+.5*b.mass*b.vx**2<e0);assert.ok(b.hp<100);
 });
@@ -35,29 +37,35 @@ test('growing enemies push other enemies but cannot collide with the player',()=
   const a=enemy(w,500,350,{born:.5,solid:false}),b=enemy(w,505,350);const distance=Math.abs(a.x-b.x);w.step(1/120);assert.ok(Math.abs(a.x-b.x)>distance);
 });
 test('wall contact reverses velocity with a smaller speed and visible squash',()=>{
-  const w=world(),p=w.player;Object.assign(p,{x:1,y:300,vx:-500,vy:0});w.wall(p);near(p.vx,460);assert.ok(p.squash>0);assert.ok(p.x>=p.r+w.inset);
+  const w=world(),p=w.player;Object.assign(p,{x:1,y:300,vx:-500,vy:0});w.wall(p);near(p.vx,475);assert.ok(p.squash>0);assert.ok(p.x>=p.r+w.inset);
 });
-test('on-field score never gates new spawns before actual score reaches target',()=>{
-  const w=world();w.score=w.target-10;enemy(w,500,300,{value:10000});w.spawnTimer=0;advance(w,5);assert.ok(w.enemies.length>=3);assert.equal(w.phase,'battle');
+test('neither on-field values nor a high score gate waves or advance the stage',()=>{
+  const w=world();w.score=1e6;enemy(w,500,300,{value:10000});w.spawnTimer=0;advance(w,1);
+  assert.equal(w.enemies.length,5);assert.equal(w.phase,'battle');assert.equal(w.stageKills,0);
 });
 test('kill credit is awarded once even if multiple hits arrive in one frame',()=>{
   const w=world(),b=enemy(w,500,300,{hp:5,value:10});w.damage(b,9);w.damage(b,9);assert.equal(w.score,10);assert.equal(w.events.filter(e=>e.type==='kill').length,1);
 });
 test('clear -> automated placement -> choice -> exactly one buff -> next stage',()=>{
-  const w=world();w.score=w.target;w.step(1/120);assert.equal(w.phase,'transition');assert.equal(w.ready,false);assert.equal(w.choices.length,2);
-  advance(w,1.9);assert.equal(w.phase,'choose');near(w.player.x,w.width*.5);near(w.player.y,w.height*.72);assert.ok(w.choices.every(c=>c.born===1));
+  const w=world();w.stageKills=w.killTarget-1;w.damage(enemy(w,500,300,{hp:1}),1);w.step(1/120);
+  assert.equal(w.phase,'transition');assert.equal(w.ready,false);assert.equal(w.choices.length,3);
+  advance(w,1.9);assert.equal(w.phase,'choose');near(w.player.x,w.width*.5);near(w.player.y,w.choicePlayerY);assert.ok(w.choices.every(c=>c.born===1));
+  assert.ok(w.choices.every(c=>Math.hypot(c.x-w.player.x,c.y-w.player.y)>c.r+w.player.r),'placement cannot auto-select an overlapping reward');
   const choice=w.choices[0];Object.assign(w.player,{x:choice.x,y:choice.y,vx:100,vy:0});w.step(1/120);
-  assert.equal(w.phase,'reward');assert.equal(w.buffs.density,1);assert.equal(w.choices.length,0);assert.ok(w.player.vx>95);
-  advance(w,.9);assert.equal(w.phase,'reward');advance(w,.12);assert.equal(w.phase,'battle');assert.equal(w.stage,2);assert.equal(w.target,380);
+  assert.equal(w.phase,'reward');assert.equal(w.buffs[choice.id],1);assert.equal(w.choices.length,0);assert.ok(w.player.vx>95);
+  advance(w,.9);assert.equal(w.phase,'reward');advance(w,.12);assert.equal(w.phase,'battle');assert.equal(w.stage,2);assert.equal(w.killTarget,18);assert.equal(w.stageKills,0);assert.equal(w.enemies.length,7);
 });
-test('reaching the population threshold ends the game',()=>{
-  const w=world();w.target=9999;for(let i=0;i<18;i++)enemy(w,80+i%6*120,150+Math.floor(i/6)*130);w.step(1/120);assert.equal(w.phase,'over');assert.ok(w.events.some(e=>e.type==='over'));
+test('capacity gives a real-time grace period before spending the one rescue',()=>{
+  const w=world();for(let i=0;i<28;i++)enemy(w,80+i%7*110,150+Math.floor(i/7)*130);
+  advance(w,.79);assert.equal(w.phase,'battle');assert.equal(w.enemies.length,28);assert.equal(w.saveUsed,false);
+  advance(w,.02);assert.equal(w.phase,'battle');assert.equal(w.enemies.length,25);assert.equal(w.saveUsed,true);
+  assert.equal(w.events.filter(e=>e.type==='rescue').length,1);assert.equal(w.events.filter(e=>e.type==='shatter').length,3);assert.equal(w.score,0);assert.equal(w.stageKills,0);
 });
 test('pierce preserves incoming direction but loses speed',()=>{
   const w=world();w.buffs.pierce=1;Object.assign(w.player,{x:300,y:300,vx:600,vy:0});const b=enemy(w,340,320);w.collide(w.player,b);
   near(w.player.vy,0);assert.ok(w.player.vx>0&&w.player.vx<600);assert.ok(length(b)>0);
 });
-test('pulse deals nearby area damage, and breath starts a two-second slowdown',()=>{
+test('pulse deals nearby area damage, and breath starts a 1.5-second slowdown',()=>{
   const w=world();w.buffs.pulse=1;w.buffs.breath=1;Object.assign(w.player,{x:300,y:300,vx:900,vy:0});const b=enemy(w,350,300,{hp:1}),nearby=enemy(w,420,300);w.collide(w.player,b);
   assert.ok(nearby.hp<100);near(w.breathTime,BREATH_DURATION);assert.ok(w.events.some(e=>e.type==='pulse'));
 });
@@ -68,19 +76,18 @@ test('bank charges on walls and is consumed by the next collision',()=>{
 test('rotation keeps all bodies inside the resized playable bounds',()=>{
   const w=world();enemy(w,850,650);w.resize(390,844);for(const b of [w.player,...w.enemies]){assert.ok(b.x>=b.r+w.inset&&b.x<=390-b.r-w.inset);assert.ok(b.y>=b.r+w.inset&&b.y<=844-b.r-w.inset);}
 });
-test('later stages restore the original health, density, size and score progression',()=>{
-  const w=world();w.spawnEnemy();const a=w.enemies[0];w.enemies=[];w.stage=8;w.time=180;w.spawnEnemy();const b=w.enemies[0];assert.equal(b.hp,69);near(b.density,1.496);near(b.r/a.r,(.89+7*.014)/.89);assert.equal(b.value,20);assert.ok(b.hp>a.hp);
+test('later stages use exponential health and new density while ordinary radius stays in its fixed range',()=>{
+  const w=world();w.spawnEnemy();const a=w.enemies[0];w.enemies=[];w.stage=8;w.time=180;w.spawnEnemy();const b=w.enemies[0];
+  near(b.hp,19*1.16**7+8);near(b.density,.65+.06*8+.0004*180);near(b.r/a.r,1);assert.equal(b.value,10);assert.ok(b.hp>a.hp);
 });
 
 test('player can re-aim while moving at speeds previously locked out',()=>{
   const w=world();w.player.vx=w.unit*7;assert.equal(w.ready,true);assert.equal(w.shoot(0,120),true);
-  assert.ok(w.player.vy<0);w.player.vx=w.unit*9;w.player.vy=0;assert.equal(w.ready,false);
+  assert.ok(w.player.vy<0);w.player.vx=w.unit*9;w.player.vy=0;assert.equal(w.ready,true);
 });
-test('head-on enemy hit retains more player speed than the previous tuning without adding energy',()=>{
+test('head-on endless enemy hit retains at least seventy percent of incoming player speed',()=>{
   const w=world(),p=w.player;Object.assign(p,{x:300,y:300,vx:500,vy:0});const b=enemy(w,350,300,{mass:.74});
-  const oldPlayerSpeed=(1-.78*.74)/(1+.74)*500;
-  const energyBefore=.5*p.mass*500**2;w.collide(p,b);
-  assert.ok(length(p)>oldPlayerSpeed*1.4);assert.ok(.5*p.mass*length(p)**2+.5*b.mass*length(b)**2<energyBefore);
+  w.collide(p,b);near(length(p),500*.7);assert.ok(p.vx>0);assert.ok(b.vx>0);
 });
 test('faster maximum shots cannot tunnel through an enemy or wall',()=>{
   const w=world();Object.assign(w.player,{x:180,y:300,vx:w.unit*60,vy:0});const b=enemy(w,300,300,{hp:9999,maxHp:9999});
@@ -89,28 +96,28 @@ test('faster maximum shots cannot tunnel through an enemy or wall',()=>{
   assert.ok(w.player.vx<0);assert.ok(w.player.x<=w.width-w.player.r-w.inset);
 });
 
-test('opening keeps the established initial density, population and launch feel',()=>{
+test('opening supplies six ordinary enemies while preserving the launch scale',()=>{
   const w=new World(900,700,()=>.5);
-  assert.equal(w.enemies.length,2);assert.equal(w.target,140);assert.equal(w.limit,18);
-  assert.equal(w.enemies[0].hp,19);near(w.spawnTimer,.45);near(w.baseSpeed,w.unit*40);
-  advance(w,.46);assert.equal(w.enemies.length,3);assert.ok(w.spawnTimer>2.4&&w.spawnTimer<2.45);
+  assert.equal(w.enemies.length,6);assert.equal(w.killTarget,14);assert.equal(w.limit,28);
+  assert.equal(w.enemies[0].hp,19);near(w.enemies[0].density,.71);near(w.spawnTimer,4);near(w.baseSpeed,w.unit*40);
+  advance(w,.5);assert.equal(w.enemies.length,6);near(w.spawnTimer,3.5);
 });
-test('fresh opening preserves the legacy spawn cadence and full birth protection',()=>{
+test('fresh opening keeps full birth protection and starts its first four-ball wave after four seconds',()=>{
   const w=new World(390,844,()=>.5),initial=w.enemies.slice();
   assert.ok(initial.every(b=>b.born===0&&!b.solid));
-  const spawnedAt=[0,0];w.events=[];
+  const spawnedAt=Array(6).fill(0);w.events=[];
   for(let frame=1;frame<=720;frame++){
     w.step(1/120);
     for(const e of w.events.splice(0))if(e.type==='spawn')spawnedAt.push(frame/120);
-    if(frame===48){assert.equal(w.enemies.length,2);assert.ok(initial.every(b=>!b.solid));}
-    if(frame===60){assert.equal(w.enemies.length,3);assert.ok(w.enemies.every(b=>!b.solid));}
+    if(frame===48){assert.equal(w.enemies.length,6);assert.ok(initial.every(b=>!b.solid));}
+    if(frame===60){assert.equal(w.enemies.length,6);assert.ok(w.enemies.every(b=>!b.solid));}
     if(frame===95)assert.ok(initial.every(b=>!b.solid));
-    if(frame===97){assert.ok(initial.every(b=>b.born===1&&b.solid));assert.equal(w.enemies[2].solid,false);}
-    if(frame===152)assert.ok(w.enemies.slice(0,3).every(b=>b.solid));
+    if(frame===97)assert.ok(initial.every(b=>b.born===1&&b.solid));
+    if(frame===481){assert.equal(w.enemies.length,7);assert.equal(w.enemies[6].solid,false);}
   }
-  const legacy=[0,0,.45,2.90,5.35];
-  assert.equal(spawnedAt.length,legacy.length);
-  spawnedAt.forEach((t,i)=>near(t,legacy[i],1/120+.000001));
+  const expected=[0,0,0,0,0,0,4,4.3,4.6,4.9];
+  assert.equal(spawnedAt.length,expected.length);
+  spawnedAt.forEach((t,i)=>near(t,expected[i],1/120+.000001));
 });
 const growth=BUFFS.find(b=>b.id==='growth');
 function gainGrowth(w){w.phase='choose';w.choose(growth);w.phase='battle';}
@@ -132,62 +139,68 @@ test('growth increases reach without changing equal-normal-impact damage or velo
   const w=world();gainGrowth(w);Object.assign(w.player,{x:300,y:300,vx:500,vy:0});const b=enemy(w,300+w.unit*2.1,300,{hp:999});
   w.collide(w.player,b);assert.ok(b.hp<999);
 });
-test('growth can appear at most twice, including offers the player skips',()=>{
-  const w=world();w.stage=2;w.random=()=>.65;
-  for(let offer=1;offer<=2;offer++){
-    w.phase='battle';w.beginUpgrade();assert.ok(w.choices.some(c=>c.id==='growth'));assert.equal(w.buffOffers.growth,offer);
-    w.phase='choose';w.choose(w.choices.find(c=>c.id!=='growth'));w.stage=2;
+test('growth remains offerable after skips and leaves the pool only after two acquired layers',()=>{
+  const w=world();w.stage=2;
+  // Leave growth as the only available regular upgrade, while real special
+  // alternatives let the player decline it without acquiring a growth layer.
+  for(const buff of BUFFS)if(buff.kind==='regular'&&buff.id!=='growth')w.buffs[buff.id]=buff.maxStacks;
+  for(let offer=1;offer<=3;offer++){
+    w.phase='battle';w.beginUpgrade();assert.ok(w.choices.some(c=>c.id==='growth'));
+    w.phase='choose';w.choose(w.choices.find(c=>c.id!=='growth'));
+    assert.equal(w.buffs.growth,undefined);
   }
-  for(let i=0;i<12;i++){w.phase='battle';w.beginUpgrade();assert.ok(!w.choices.some(c=>c.id==='growth'));w.stage=2;}
-  assert.equal(w.buffs.growth,undefined);
+  gainGrowth(w);gainGrowth(w);assert.equal(w.buffs.growth,2);
+  w.phase='battle';w.beginUpgrade();assert.ok(w.choices.every(c=>c.id!=='growth'));
 });
 
-test('reaching the target shatters all survivors immediately without score or kill credit',()=>{
-  const w=world();w.score=w.target-10;
+test('reaching the kill target sweeps survivors for ten points each without progress credit',()=>{
+  const w=world();w.stageKills=w.killTarget-1;
   const final=enemy(w,500,300,{hp:1,value:10});
   enemy(w,620,300,{hp:300,value:500});enemy(w,700,450,{hp:300,born:.4,solid:false});
   w.damage(final,2);
-  assert.equal(w.phase,'transition');assert.equal(w.enemies.length,0);assert.equal(w.score,140);
-  assert.equal(w.events.filter(e=>e.type==='kill').length,1);assert.equal(w.events.filter(e=>e.type==='shatter').length,2);
+  assert.equal(w.phase,'battle');assert.ok(w.pendingClearing);w.step(1/120);assert.equal(w.phase,'clearing');assert.equal(w.score,10);
+  advance(w,.5);assert.equal(w.phase,'transition');assert.equal(w.enemies.length,0);assert.equal(w.score,30);assert.equal(w.stageKills,14);
+  assert.equal(w.events.filter(e=>e.type==='kill').length,1);assert.equal(w.events.filter(e=>e.type==='clearKill').length,2);assert.equal(w.events.filter(e=>e.type==='shatter').length,0);
   assert.equal(w.events.filter(e=>e.type==='upgrade').length,1);
   w.beginUpgrade();w.damage(final,20);assert.equal(w.events.filter(e=>e.type==='upgrade').length,1);
 });
-test('the winning hit takes priority over a full board, and pulse cannot score cleared survivors',()=>{
-  const w=world();w.score=130;w.buffs.pulse=1;
+test('the winning pulse batch takes priority over capacity and credits real excess kills before clearing',()=>{
+  const w=world();w.stageKills=w.killTarget-1;w.buffs.pulse=1;
   Object.assign(w.player,{x:300,y:300,vx:900,vy:0});
-  enemy(w,350,300,{hp:1});for(let i=0;i<17;i++)enemy(w,380+i*3,300,{hp:1});
+  enemy(w,350,300,{hp:1});for(let i=0;i<27;i++)enemy(w,380+i*3,300,{hp:1});
   w.step(1/120);
-  assert.equal(w.phase,'transition');assert.equal(w.score,140);assert.equal(w.enemies.length,0);
-  assert.equal(w.events.filter(e=>e.type==='over').length,0);assert.equal(w.events.filter(e=>e.type==='kill').length,1);
+  assert.equal(w.stageKills,41);assert.equal(w.score,1960);assert.equal(w.events.filter(e=>e.type==='kill').length,28);
+  assert.equal(w.events.filter(e=>e.type==='over').length,0);assert.equal(w.events.filter(e=>e.type==='rescue').length,0);
+  w.step(1/120);assert.equal(w.phase,'transition');assert.equal(w.enemies.length,0);
 });
-test('overshooting the score target never leaks into a free next-stage upgrade',()=>{
-  const w=world();w.score=135;const b=enemy(w,600,300,{hp:1,value:20});w.damage(b,2);assert.equal(w.score,155);
-  advance(w,1.9);w.choose(w.choices[0]);advance(w,1.02);
-  assert.equal(w.stage,2);assert.equal(w.target,380);assert.equal(w.phase,'battle');
+test('only excess real kills carry into the next stage, independently of accumulated score',()=>{
+  const w=world();w.score=1e6;w.stageKills=w.killTarget-1;
+  for(let i=0;i<3;i++)w.damage(enemy(w,600+i*50,300,{hp:1,value:20000}),2);
+  w.step(1/120);advance(w,1.9);w.choose(w.choices[0]);advance(w,1.02);
+  assert.equal(w.stage,2);assert.equal(w.killTarget,18);assert.equal(w.phase,'battle');assert.equal(w.stageKills,2);assert.equal(w.score,1000060);
 });
-test('breath halves timer progress, still allows spawns, and expires after exactly two battle seconds',()=>{
-  const w=world();w.buffs.breath=1;const b=enemy(w,600,300,{hp:1});w.damage(b,2);w.spawnTimer=.25;
-  advance(w,.4);assert.ok(w.spawnTimer>.049&&w.spawnTimer<.051);assert.equal(w.enemies.length,0);
-  advance(w,.2);assert.equal(w.enemies.length,1);assert.ok(w.breathTime>1.39&&w.breathTime<1.41);
-  w.spawnTimer=100;advance(w,1.9);near(w.breathTime,0);near(w.spawnTimer,98.8,1e-5);
+test('breath makes wave starts 1.5 times farther apart and expires after 1.5 battle seconds',()=>{
+  const w=world();w.buffs.breath=1;const b=enemy(w,600,300,{hp:1});w.damage(b,2);w.spawnTimer=.3;
+  advance(w,.3);near(w.spawnTimer,.1);assert.equal(w.enemies.length,0);
+  advance(w,.15);assert.equal(w.enemies.length,1);near(w.breathTime,1.05);
+  w.spawnTimer=100;advance(w,1.35);near(w.breathTime,0);near(w.spawnTimer,99,1e-5);
 });
-test('consecutive kills refresh breath to two seconds without stacking the reduction',()=>{
+test('consecutive kills refresh breath to 1.5 seconds without stacking the reduction',()=>{
   const w=world();w.buffs.breath=1;w.damage(enemy(w,600,300,{hp:1}),2);advance(w,1);
-  w.damage(enemy(w,600,300,{hp:1}),2);near(w.breathTime,2);w.spawnTimer=100;advance(w,1);near(w.spawnTimer,99.5);
-  w.score=w.target-10;w.damage(enemy(w,600,300,{hp:1}),2);near(w.breathTime,0);
+  w.damage(enemy(w,600,300,{hp:1}),2);near(w.breathTime,1.5);w.spawnTimer=100;advance(w,1);near(w.spawnTimer,100-2/3);
+  w.stageKills=w.killTarget-1;w.damage(enemy(w,600,300,{hp:1}),2);w.step(1/120);near(w.breathTime,0);
 });
-test('elapsed active time restores the original health, density and spawn acceleration',()=>{
+test('elapsed active time increases health and density without accelerating the stage wave schedule',()=>{
   const a=world(),b=world();b.time=180;a.stage=b.stage=3;
   a.spawnEnemy();b.spawnEnemy();
-  assert.equal(b.enemies[0].hp-a.enemies[0].hp,8);
-  near(b.enemies[0].density-a.enemies[0].density,.126);
-  a.spawnTimer=b.spawnTimer=0;a.step(1/120);b.step(1/120);
-  near(a.spawnTimer-b.spawnTimer,.36);
+  near(b.enemies[0].hp-a.enemies[0].hp,8);near(b.enemies[0].density-a.enemies[0].density,.072);
+  a.spawnTimer=b.spawnTimer=0;a.step(1/120);b.step(1/120);near(a.spawnTimer,b.spawnTimer);
 });
-test('spawn cadence restores stage/time scaling and its original minimum interval',()=>{
+test('wave start interval follows stage, wave size, teaching allowance and two-second pre-Boss rest',()=>{
   for(const [stage,time] of [[1,0],[4,60],[8,180],[40,3600]]){
     const w=world();w.stage=stage;w.time=time;w.spawnTimer=0;w.step(1/120);
-    near(w.spawnTimer,Math.max(.52,2.45-(stage-1)*.18-w.time*.002));
+    const interval=(.65+1.35*.86**(stage-1))*([3,6,8,10,12,13,16].includes(stage)?1.15:1),size=Math.min(8,4+Math.floor((stage-1)/3));
+    near(w.spawnInterval,interval);near(w.spawnTimer,size*interval+([3,4].includes(stage%5)?2:0)-1/120);
   }
 });
 function gain(w,id){w.phase='choose';w.choose(BUFFS.find(b=>b.id===id));w.phase='battle';}
@@ -204,7 +217,7 @@ test('energy and density restore multiplicative stacks and physical impact damag
 test('battle remains capped and ends cleanly on both phone and desktop after a long idle run',()=>{
   for(const [width,height] of [[390,844],[844,390],[1440,900]]){
     const w=new World(width,height,()=>.63);for(let i=0;i<120*60&&w.phase!=='over';i++)w.step(1/120);
-    assert.equal(w.phase,'over');assert.equal(w.enemies.length,18);
+    assert.equal(w.phase,'over');assert.equal(w.enemies.length,28);assert.equal(w.saveUsed,true);assert.equal(w.events.filter(e=>e.type==='rescue').length,1);
     for(const b of [w.player,...w.enemies])for(const key of ['x','y','vx','vy','mass'])assert.ok(Number.isFinite(b[key]));
   }
 });
@@ -221,8 +234,8 @@ test('bank restores 60 or 120 percent bonus after one or two walls',()=>{
   assert.ok(Math.abs(hits[1]-hits[0]*1.6)<=1.3);assert.ok(Math.abs(hits[2]-hits[0]*2.2)<=1.6);
 });
 
-test('capture threshold advances only at stages 6, 11, 16 and resets with a new run',()=>{
-  const w=world();
+test('reward-choice capture threshold retains its stage bands and resets with a new run',()=>{
+  const w=world();w.phase='choose';
   for(const [stage,multiple] of [[1,8],[5,8],[6,12],[10,12],[11,16],[15,16],[16,20]]){
     w.stage=stage;near(w.readySpeed/w.unit,multiple);
     w.player.vx=w.readySpeed-.001;assert.equal(w.ready,true);
@@ -233,8 +246,8 @@ test('capture threshold advances only at stages 6, 11, 16 and resets with a new 
   gainGrowth(w);near(w.readySpeed/w.unit,12);
   near(world().readySpeed/world().unit,8);
 });
-test('release adds the captured scalar speed after drag braking and follows only the new aim',()=>{
-  const w=world();Object.assign(w.player,{vx:w.unit*3,vy:w.unit*4});
+test('campaign release still adds captured scalar speed after drag braking and follows the new aim',()=>{
+  const w=campaignWorld();Object.assign(w.player,{vx:w.unit*3,vy:w.unit*4});
   assert.equal(w.beginPull(),true);near(w.pullStartSpeed,w.unit*5);
   for(let i=0;i<36;i++)w.step(1/120,true);
   assert.ok(length(w.player)<w.unit*.3);
@@ -248,20 +261,20 @@ test('cancel, tiny gestures, rotation and stage transitions cannot bank stale sp
   w.beginPull();w.resize(390,844);assert.equal(w.pullStartSpeed,null);
   w.beginPull();w.beginUpgrade();assert.equal(w.pullStartSpeed,null);assert.equal(w.shoot(100,0),false);
 });
-test('an active pull keeps its original speed snapshot when a collision accelerates the ball',()=>{
-  const w=world();w.player.vx=w.unit*2;w.beginPull();w.player.vx=w.unit*20;
+test('campaign active pull keeps its original speed snapshot when a collision accelerates the ball',()=>{
+  const w=campaignWorld();w.player.vx=w.unit*2;w.beginPull();w.player.vx=w.unit*20;
   assert.equal(w.ready,true);w.shoot(-w.maxPull,0);near(length(w.player),w.baseSpeed+w.unit*2);
 });
-test('captured speed sits above the original launch cap and survives the next physics frame',()=>{
-  const w=new World(10000,10000,()=>.5);w.enemies=[];w.spawnTimer=999;w.stage=101;w.energy=100;
+test('campaign captured speed remains above the launch cap and survives the next physics frame',()=>{
+  const w=new CampaignWorld(10000,10000,1,()=>.5);w.enemies=[];w.spawnTimer=999;w.floorTimer=Infinity;w.introTimer=Infinity;w.stage=101;w.energy=100;
   w.player.vx=w.unit*47;assert.ok(w.beginPull());w.player.vx=0;w.shoot(-w.maxPull,0);
   const speed=w.unit*107;near(length(w.player),speed);w.step(1/120);
   near(length(w.player),speed*Math.exp(-.6/120));assert.ok(length(w.player)>w.unit*60);
 });
 test('adaptive steps catch high-speed enemy and wall contacts on phone and desktop',()=>{
   for(const [width,height] of [[390,844],[844,390],[1440,900]]){
-    const w=new World(width,height,()=>.5);w.enemies=[];w.spawnTimer=999;w.stage=101;w.energy=100;
-    Object.assign(w.player,{x:60,y:height/2,vx:w.unit*47,vy:0});w.beginPull();w.shoot(-w.maxPull,0);
+    const w=new World(width,height,()=>.5);w.enemies=[];w.spawnTimer=999;w.floorTimer=Infinity;w.introTimer=Infinity;w.stage=101;w.energy=100;
+    Object.assign(w.player,{x:60,y:height/2,vx:w.unit*107,vy:0});
     const b=enemy(w,180,height/2,{hp:1e9,maxHp:1e9});w.step(.06);assert.ok(b.hp<1e9);
     w.enemies=[];Object.assign(w.player,{x:width-w.inset-w.player.r-1,y:height/2,vx:w.unit*107,vy:0});w.step(.02);
     assert.ok(w.player.vx<0);assert.ok(w.player.x<=width-w.inset-w.player.r);
@@ -270,5 +283,5 @@ test('adaptive steps catch high-speed enemy and wall contacts on phone and deskt
 test('subdivision preserves elapsed time and the partial breath slowdown',()=>{
   const a=world(),b=world();a.stage=b.stage=101;a.breathTime=b.breathTime=.04;a.spawnTimer=b.spawnTimer=100;
   b.player.vx=b.unit*107;a.step(.08);b.step(.08);
-  near(a.time,b.time);near(a.spawnTimer,99.94);near(a.spawnTimer,b.spawnTimer);near(b.breathTime,0);
+  near(a.time,b.time);near(a.spawnTimer,100-.04*2/3-.04);near(a.spawnTimer,b.spawnTimer);near(b.breathTime,0);
 });

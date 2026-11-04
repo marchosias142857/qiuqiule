@@ -52,7 +52,8 @@ function roundedRadius(angle, sides) {
 // the actual rendered polygon, rather than only the ideal curved shape, to π.
 export function skinContour(sides = 0, segments = SKIN_SEGMENTS) {
   const count = clamp(Math.floor(finite(segments, SKIN_SEGMENTS)), 48, 1536);
-  const n = sideCount(sides), key = `${n}:${count}`;
+  const n = sideCount(typeof sides === 'object' ? sides?.sides : sides);
+  const key = `${n}:${count}`;
   if (!contourCache.has(key)) {
     const points = Array.from({length: count}, (_, i) => {
       const angle = TAU * i / count, radius = roundedRadius(angle, n);
@@ -117,16 +118,41 @@ export function unlockedSkinSides(completed) {
   return cleared < 10 ? 0 : Math.floor(cleared / 10) + 5;
 }
 
+// Only campaign-earned polygons are selectable. Retired endless unlock fields
+// are ignored, so they cannot grant a campaign skin during save migration.
+function ownedSkinSides(raw, completed = 0) {
+  const saved = raw && typeof raw === 'object' ? raw : {};
+  const unlocked = Number.isInteger(saved.unlocked) && saved.unlocked >= SKIN_MIN_SIDES
+    ? clamp(saved.unlocked, SKIN_MIN_SIDES, SKIN_MAX_SIDES) : 0;
+  // Before skipping existed, unlocked represented a complete prefix. New
+  // noncontiguous saves carry their exact ownership and never infer that
+  // skipped lower milestones were cleared from the highest owned polygon.
+  const sides = Array.isArray(saved.owned)
+    ? saved.owned.filter(side => Number.isInteger(side) && side >= SKIN_MIN_SIDES && side <= SKIN_MAX_SIDES)
+    : Array.from({length: Math.max(0, unlocked - SKIN_MIN_SIDES + 1)}, (_, i) => SKIN_MIN_SIDES + i);
+  const earned = unlockedSkinSides(completed);
+  for (let side = SKIN_MIN_SIDES; side <= earned; side++) sides.push(side);
+  return [...new Set(sides)].sort((a, b) => a - b);
+}
+
+export function skinOptions(raw) {
+  return ownedSkinSides(raw).map(sides => ({sides}));
+}
+
 export function normalizeSkins(raw, completed = 0) {
   const value = raw && typeof raw === 'object' ? raw : {};
-  const saved = Number.isInteger(value.unlocked) && value.unlocked >= SKIN_MIN_SIDES
-    ? clamp(value.unlocked, SKIN_MIN_SIDES, SKIN_MAX_SIDES) : 0;
-  const unlocked = Math.max(saved, unlockedSkinSides(completed));
-  return {
+  const owned = ownedSkinSides(value, completed), unlocked = owned.at(-1) || 0;
+  const requested = clamp(Math.round(finite(value.sides, SKIN_MIN_SIDES)), SKIN_MIN_SIDES, unlocked || SKIN_MIN_SIDES);
+  // An old active endless shape falls back to an owned polygon of the same or
+  // nearest lower side count, or the original circle when none is unlocked.
+  const state = {
     enabled: unlocked > 0 && value.enabled === true,
-    sides: clamp(Math.round(finite(value.sides, SKIN_MIN_SIDES)), SKIN_MIN_SIDES, unlocked || SKIN_MIN_SIDES),
-    unlocked,
+    sides: owned.filter(side => side <= requested).at(-1) || owned[0] || SKIN_MIN_SIDES, unlocked,
   };
+  // Keep the historic shape unchanged for all contiguous saves. Once a gap is
+  // truly completed, the optional exact-ownership field is no longer needed.
+  if (owned.length && owned.length !== unlocked - SKIN_MIN_SIDES + 1) state.owned = owned;
+  return state;
 }
 
 // Normalize with the OLD completed progress at load time. Award a freshly
@@ -136,16 +162,17 @@ export function unlockSkin(raw, level) {
   const state = normalizeSkins(raw);
   const milestone = Number.isInteger(level) && level >= 10 && level <= 100 && level % 10 === 0;
   const rewardSides = milestone ? level / 10 + 5 : 0;
-  if (rewardSides <= state.unlocked) return {state, rewardSides: null};
-  return {state: {...state, unlocked: rewardSides}, rewardSides};
+  const owned = ownedSkinSides(state);
+  if (!rewardSides || owned.includes(rewardSides)) return {state, rewardSides: null};
+  return {state: normalizeSkins({...state, owned: [...owned, rewardSides]}), rewardSides};
 }
 
 export function selectSkin(raw, sides) {
   const state = normalizeSkins(raw);
-  return {...state, sides: clamp(Math.round(finite(sides, state.sides)), SKIN_MIN_SIDES, state.unlocked || SKIN_MIN_SIDES)};
+  return normalizeSkins({...state, sides: finite(typeof sides === 'object' ? sides?.sides : sides, state.sides)});
 }
 
 export function toggleSkins(raw, enabled) {
   const state = normalizeSkins(raw);
-  return {...state, enabled: state.unlocked > 0 && !!enabled};
+  return {...state, enabled: skinOptions(state).length > 0 && !!enabled};
 }

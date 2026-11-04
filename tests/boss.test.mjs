@@ -1,58 +1,68 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, bossConfig, length, BOSS_TIMING} from '../dist/physics.js';
-import {CampaignWorld} from '../dist/campaign.js';
+import {LegacyCampaignWorld as CampaignWorld} from '../dist/campaign.js';
 
 const near=(a,b,epsilon=1e-6)=>assert.ok(Math.abs(a-b)<epsilon,`${a} != ${b}`);
 const advance=(world,seconds)=>{let left=seconds;while(left>1e-10){const dt=Math.min(left,1/120);world.step(dt);left-=dt;}};
 function entry(stage=5,width=900,height=700){
-  const w=new World(width,height,()=>.5);w.stage=stage;w.score=w.target;w.events=[];w.step(1/120);return w;
+  const w=new World(width,height,()=>.5,{spawnInitial:false});w.stage=stage;w.events=[];
+  if(stage%5===0)w.beginBoss({type:'inflation'});else w.beginUpgrade();return w;
 }
-function ready(stage=5,width=900,height=700){const w=entry(stage,width,height);advance(w,BOSS_TIMING.entry);assert.equal(w.phase,'boss');w.events=[];return w;}
+function ready(stage=5,width=900,height=700,growth=1){let w;if(growth===1)w=entry(stage,width,height);else{w=new World(width,height,()=>.5,{spawnInitial:false});w.stage=stage;w.player.r*=growth;w.beginBoss();}advance(w,BOSS_TIMING.entry);assert.equal(w.phase,'boss');w.events=[];return w;}
 function strike(w,speed=w.baseSpeed*.5){
   const p=w.player,b=w.boss;
+  // Each fixture strike starts a fresh approach, just as a real rebound does.
+  Object.assign(p,{x:b.x,y:b.y+b.r+p.r+w.unit*.03});w.collideBoss();
   Object.assign(p,{x:b.x,y:b.y+b.r+p.r-.01,vx:0,vy:-speed});w.collideBoss();
 }
 function defeat(w){let hits=0;while(w.phase==='boss'&&hits++<200)strike(w,w.baseSpeed);assert.equal(w.phase,'boss-celebrate');return hits;}
 
-test('stages 5 and 10 clear survivors without credit, then place the player before boss attacks',()=>{
-  for(const stage of [5,10]){
-    const w=new World(390,844,()=>.5);w.stage=stage;w.score=w.target;
-    const originalScore=w.score,survivors=w.enemies.length,original={x:w.player.x,y:w.player.y};w.events=[];
-    w.step(1/120);assert.equal(w.phase,'boss-entry');assert.equal(w.enemies.length,0);assert.equal(w.choices.length,0);
-    assert.equal(w.score,originalScore);assert.equal(w.events.filter(e=>e.type==='kill').length,0);
-    assert.equal(w.events.filter(e=>e.type==='shatter').length,survivors);assert.equal(w.events.filter(e=>e.type==='bossEntry').length,1);
-    assert.equal(w.events.filter(e=>e.type==='upgrade').length,0);assert.equal(w.boss.born,0);assert.equal(w.ready,false);
-    near(w.player.x,original.x);near(w.player.y,original.y);
+test('Boss thresholds clear survivors with normal score before keeping input active throughout the square entry',()=>{
+  for(const stage of [5,10,15]){
+    const w=new World(390,844,()=>.5);w.stage=stage;w.stageKills=w.killTarget-1;
+    const final=w.enemies[0],survivors=w.enemies.slice(1);w.events=[];
+    w.damage(final,final.hp);assert.ok(w.pendingClearing);w.step(1/120);
+    assert.equal(w.phase,'clearing');for(let frame=0;w.phase==='clearing'&&frame<1200;frame++)w.step(1/120);assert.equal(w.phase,'boss-entry');assert.deepEqual(w.enemies,[]);assert.equal(w.choices.length,0);
+    assert.equal(w.score,10+survivors.length*10);assert.equal(w.stageKills,w.killTarget);assert.equal(w.events.filter(e=>e.type==='kill').length,1);
+    assert.equal(w.events.filter(e=>e.type==='clearKill').length,survivors.length);assert.equal(w.events.filter(e=>e.type==='shatter').length,0);
+    assert.equal(w.events.filter(e=>e.type==='clearingStart').length,1);assert.equal(w.events.filter(e=>e.type==='bossEntry').length,1);
+    assert.equal(w.events.filter(e=>e.type==='upgrade').length,0);assert.equal(w.boss.bossType,'inflation');assert.equal(w.ready,true);
+    assert.equal(w.totalKills,1,'automatic clearing adds no real kills');
     const initial=w.boss.r;advance(w,.4);assert.ok(w.boss.born>0&&w.boss.born<1);near(w.boss.r,initial);
-    assert.equal(w.shoot(0,100),false);assert.equal(w.damageBoss(w.baseSpeed),false);
+    assert.equal(w.shoot(0,100),true);w.player.vx=w.player.vy=0;
     advance(w,.45);assert.equal(w.phase,'boss');assert.equal(w.boss.born,1);assert.equal(w.boss.solid,true);
-    near(w.player.x,w.width*.5);assert.ok(w.player.y>w.boss.y+w.boss.r+w.player.r);near(w.boss.r,initial);
+    assert.equal(w.enemies.length,0);assert.equal(w.events.filter(e=>e.type==='spawn').length,0);
     near(w.arenaBounds.width,w.arenaBounds.height);near(w.boss.x,w.width*.5);near(w.boss.y,w.height*.5);
+    for(const body of [w.player,...w.enemies]){
+      assert.ok(body.x>=w.arenaBounds.left+body.r&&body.x<=w.arenaBounds.right-body.r);
+      assert.ok(body.y>=w.arenaBounds.top+body.r&&body.y<=w.arenaBounds.bottom-body.r);
+      assert.ok(Math.hypot(body.x-w.boss.x,body.y-w.boss.y)>=body.r+w.boss.r-1e-7);
+    }
     assert.equal(w.ready,true);assert.equal(w.events.filter(e=>e.type==='bossReady').length,1);
     assert.equal(w.stage,stage);assert.equal(w.choices.length,0);
   }
-  for(const stage of [1,4,6,9]){const w=entry(stage);assert.equal(w.phase,'transition');assert.equal(w.boss,null);assert.equal(w.choices.length,2);}
+  for(const stage of [1,4,6,9]){const w=entry(stage);assert.equal(w.phase,'transition');assert.equal(w.boss,null);assert.equal(w.choices.length,3);}
 });
 
-test('a winning stage-five normal collision takes precedence over a full board and cannot damage cleared survivors',()=>{
-  const w=new World(900,700,()=>.5);w.stage=5;w.score=w.target-10;w.enemies=[];w.events=[];w.buffs.pulse=1;
+test('a winning stage-five pulse batch takes precedence over capacity and carries its real kills into the boss route',()=>{
+  const w=new World(900,700,()=>.5);w.stage=5;w.stageKills=w.killTarget-1;w.enemies=[];w.events=[];w.buffs.pulse=1;
   Object.assign(w.player,{x:300,y:300,vx:900,vy:0});
-  for(let i=0;i<18;i++){
+  for(let i=0;i<28;i++){
     const b=w.makeBody(350+i*3,300,w.unit,.8);Object.assign(b,{hp:1,value:10,born:1,solid:true});w.enemies.push(b);
   }
-  w.step(1/120);assert.equal(w.phase,'boss-entry');assert.equal(w.score,w.target);assert.equal(w.enemies.length,0);
-  assert.equal(w.events.filter(e=>e.type==='kill').length,1);assert.equal(w.events.filter(e=>e.type==='over').length,0);
+  w.step(1/120);w.step(1/120);assert.equal(w.phase,'boss-entry');assert.equal(w.score,1960);assert.equal(w.enemies.length,0);assert.equal(w.stageKills,57);
+  assert.equal(w.events.filter(e=>e.type==='kill').length,28);assert.equal(w.events.filter(e=>e.type==='over').length,0);assert.equal(w.events.filter(e=>e.type==='rescue').length,0);
 });
 
-test('boss dimensions match reward-ball minimum and square limits independently of player growth',()=>{
+test('boss dimensions preserve the ordinary minimum and square side limit before corridor fitting',()=>{
   const first=bossConfig(5,20,400),second=bossConfig(10,20,400),fourth=bossConfig(20,20,400);
   near(first.initialRadius,96);near(first.minRadius,40);near(first.maxRadius,150);
   assert.equal(first.segmentValue,100);assert.equal(first.killValue,500);
   assert.equal(second.segmentValue,110);assert.equal(second.killValue,550);
   assert.ok(second.inflationRate>first.inflationRate&&fourth.inflationRate>second.inflationRate);
   assert.ok(second.shrinkDivisor>first.shrinkDivisor&&fourth.shrinkDivisor>second.shrinkDivisor);
-  const w=new World(390,844,()=>.5);w.player.r*=1.4;w.stage=5;w.score=w.target;w.step(1/120);
+  const w=new World(390,844,()=>.5);w.player.r*=1.4;w.stage=5;w.beginBoss();
   near(w.boss.minRadius,w.unit*2);near(w.boss.initialRadius,w.unit*4.8);assert.notEqual(w.boss.minRadius,w.player.r);
   assert.equal(w.boss.thresholds.length,5);near(w.boss.thresholds.at(-1),w.unit*2);
 });
@@ -83,7 +93,7 @@ test('boss collisions ignore ordinary enemy knock-through and area-damage buffs'
   assert.ok(p.vy>0);assert.equal(w.events.filter(e=>e.type==='pulse').length,0);near(b.vx,0);near(b.vy,0);
 });
 
-test('boss flight retains speed with lower drag and adaptive steps catch high speed without a cap',()=>{
+test('boss flight restores low drag and adaptive steps catch high speed without a cap',()=>{
   const w=ready(5,10000,10000),p=w.player;
   Object.assign(p,{x:8000,y:7000,vx:w.maxPhysicsSpeed*2,vy:0});const speed=length(p);
   w.step(.02);near(length(p),speed*Math.exp(-.04*.02));assert.ok(length(p)>w.maxPhysicsSpeed);
@@ -122,7 +132,7 @@ test('ordinary half-speed incoming hits need sustained shrinking followed by a d
   const w=ready(),start=w.boss.r;let hits=0,shrinkHits=null;
   while(w.phase==='boss'&&hits<100){strike(w,w.baseSpeed*.5);hits++;if(w.boss.stunned&&shrinkHits===null)shrinkHits=hits;if(w.phase==='boss'){w.player.vx=w.player.vy=0;advance(w,.6);}}
   assert.equal(w.phase,'boss-celebrate');assert.ok(shrinkHits>=30&&shrinkHits<=40,`shrink hits=${shrinkHits}`);
-  assert.ok(hits-shrinkHits>=2&&hits-shrinkHits<=12,`finishing half-speed hits=${hits-shrinkHits}`);
+  const damage=Math.round(.5*w.player.mass*(w.baseSpeed*.5/w.unit)**2*.31);assert.equal(hits-shrinkHits,Math.ceil(w.boss.maxHp/damage));
   assert.ok(w.boss.r<start);assert.equal(w.events.filter(e=>e.type==='bossHit').length,hits);
 });
 
@@ -138,7 +148,7 @@ test('minimum-size boss locks its radius, becomes stunned, then needs ordinary i
   const incoming=w.baseSpeed,damage=Math.round(.5*w.player.mass*(incoming/w.unit)**2*.31);
   w.damageBoss(incoming);assert.equal(boss.hp,hp-damage);assert.equal(w.phase,'boss');near(boss.r,radius);
   w.damageBoss(incoming);assert.equal(w.phase,'boss');assert.equal(boss.hp,hp-damage*2);
-  w.damageBoss(incoming);assert.equal(w.phase,'boss-celebrate');assert.equal(boss.hp,0);
+  const required=Math.ceil(hp/damage);for(let i=2;i<required;i++){w.damageBoss(incoming);assert.equal(boss.hp,Math.max(0,hp-damage*(i+1)));assert.equal(w.phase,i+1===required?'boss-celebrate':'boss');}assert.equal(boss.hp,0);
   assert.equal(w.events.filter(e=>e.type==='bossDefeated').length,1);
 });
 
@@ -150,11 +160,13 @@ test('defeat preserves velocity, brakes smoothly, then spins and holds before re
   while(w.phase==='boss')w.damageBoss(w.baseSpeed);
   assert.equal(w.phase,'boss-celebrate');near(w.player.x,start.x);near(w.player.y,start.y);
   near(w.player.vx,start.vx);near(w.player.vy,start.vy);assert.equal(w.ready,false);assert.equal(w.choices.length,0);
+  advance(w,.5);near(w.bossVictorySlowTime,0);near(w.phaseTime,0);
+  const brakeStart={x:w.player.x,y:w.player.y,vx:w.player.vx,vy:w.player.vy};
   w.step(1/120);const retained=(1-(1/120)/BOSS_TIMING.brake)**2;
-  near(w.player.vx,start.vx*retained);near(w.player.vy,start.vy*retained);
+  near(w.player.vx,brakeStart.vx*retained);near(w.player.vy,brakeStart.vy*retained);
   assert.ok(length(w.player)>Math.hypot(start.vx,start.vy)*.97,'the first frame does not abruptly stop or reset velocity');
   advance(w,BOSS_TIMING.brake-1/120);assert.equal(w.player.vx,0);assert.equal(w.player.vy,0);
-  near(w.player.x,start.x+start.vx*BOSS_TIMING.brake/3);near(w.player.y,start.y+start.vy*BOSS_TIMING.brake/3);
+  near(w.player.x,brakeStart.x+brakeStart.vx*BOSS_TIMING.brake/3);near(w.player.y,brakeStart.y+brakeStart.vy*BOSS_TIMING.brake/3);
   assert.equal(w.events.filter(e=>e.type==='bossCelebrate').length,1);
   const stop={x:w.player.x,y:w.player.y};
   advance(w,BOSS_TIMING.spin/2);near(w.player.roll,Math.PI);near(w.player.x,stop.x);near(w.player.y,stop.y);
@@ -162,11 +174,13 @@ test('defeat preserves velocity, brakes smoothly, then spins and holds before re
   advance(w,BOSS_TIMING.hold);assert.equal(w.phase,'boss-celebrate');near(w.player.x,stop.x);near(w.player.y,stop.y);
   assert.equal(w.choices.length,0);near(w.arenaBounds.width,w.arenaBounds.height);
   advance(w,BOSS_TIMING.fade);assert.equal(w.phase,'transition');assert.equal(w.player.roll,undefined);assert.equal(w.boss,null);
-  near(w.arenaBounds.width,w.arenaBounds.height);assert.equal(w.stage,5);assert.equal(w.choices.length,2);
-  const square=w.arenaBounds;advance(w,BOSS_TIMING.entry/2);
-  assert.ok(w.arenaBounds.width>square.width&&w.arenaBounds.width<w.width-2*w.inset);
+  near(w.arenaBounds.width,w.arenaBounds.height);assert.equal(w.stage,5);assert.equal(w.choices.length,3);
+  const squareBounds=w.arenaBounds;advance(w,BOSS_TIMING.entry/2);
+  assert.ok(w.arenaBounds.width>squareBounds.width&&w.arenaBounds.width<w.width-2*w.inset);
   advance(w,BOSS_TIMING.entry/2);near(w.arenaBounds.left,w.inset);near(w.arenaBounds.top,w.inset);
   advance(w,1.01);assert.equal(w.phase,'choose');const score=w.score,target=w.target;
+  w.choose(w.choices[0]);advance(w,1.01);assert.equal(w.stage,5);assert.equal(w.phase,'transition');
+  advance(w,1.85);assert.equal(w.phase,'choose');assert.equal(w.choices.length,3);
   w.choose(w.choices[0]);advance(w,1.01);assert.equal(w.stage,6);assert.equal(w.phase,'battle');
   assert.equal(w.score,score);assert.equal(w.target,target+140+6*50);assert.equal(w.boss,null);
 });
@@ -177,7 +191,7 @@ test('braking near a wall uses real rebound without a clamped-endpoint velocity 
   Object.assign(p,{x:bounds.right-p.r-.5,y:w.height*.5,vx:w.unit*30,vy:w.unit*2});
   const velocity=p.vx;while(w.phase==='boss')w.damageBoss(w.baseSpeed);near(p.vx,velocity);
   w.step(.002);assert.ok(p.vx<0);assert.ok(Math.abs(p.vx)>velocity*.9);
-  for(let i=0;i<100;i++){
+  for(let i=0;i<160;i++){
     w.step(1/120);assert.ok(p.x>=bounds.left+p.r&&p.x<=bounds.right-p.r);assert.ok(p.y>=bounds.top+p.r&&p.y<=bounds.bottom-p.r);
   }
   assert.equal(p.vx,0);assert.equal(p.vy,0);const stop={x:p.x,y:p.y};advance(w,.2);near(p.x,stop.x);near(p.y,stop.y);
@@ -191,10 +205,10 @@ test('boss resize preserves entry, square geometry, thresholds, stunned health, 
   const relative={x:w.player.x-w.width/2,y:w.player.y-w.height/2};w.resize(844,390);
   assert.equal(w.phase,'boss');assert.equal(boss.scoredSegments,segments);near(w.arenaBounds.width,w.arenaBounds.height);
   ['r','initialRadius','minRadius','inflationRate'].forEach((key,i)=>near(boss[key]/w.unit,ratios[i]));
-  near(boss.maxRadius,w.arenaBounds.width*.375);near(w.player.x-w.width/2,relative.x);near(w.player.y-w.height/2,relative.y);
+  near(boss.maxRadius,Math.min(w.arenaGeometry.r*.75,w.arenaGeometry.r-2*w.player.r-w.unit*.1));near(w.player.x-w.width/2,relative.x);near(w.player.y-w.height/2,relative.y);
   while(!boss.stunned)strike(w);advance(w,.3);const hp=boss.hp,stunTime=boss.stunnedTime;w.resize(320,568);
-  near(boss.r,w.unit*2);assert.equal(boss.hp,hp);near(boss.stunnedTime,stunTime);near(boss.maxRadius,w.arenaBounds.width*.375);
-  defeat(w);advance(w,BOSS_TIMING.brake+.2);const elapsed=w.phaseTime,roll=w.player.roll;w.resize(390,844);
+  near(boss.r,w.unit*2);assert.equal(boss.hp,hp);near(boss.stunnedTime,stunTime);near(boss.maxRadius,Math.min(w.arenaGeometry.r*.75,w.arenaGeometry.r-2*w.player.r-w.unit*.1));
+  defeat(w);advance(w,.5+BOSS_TIMING.brake+.2);const elapsed=w.phaseTime,roll=w.player.roll;w.resize(390,844);
   near(w.phaseTime,elapsed);near(w.player.roll,roll);assert.equal(w.player.vx,0);assert.equal(w.player.vy,0);
   const stop={x:w.player.x,y:w.player.y};advance(w,.1);near(w.player.x,stop.x);near(w.player.y,stop.y);
   advance(w,BOSS_TIMING.spin+BOSS_TIMING.hold+BOSS_TIMING.fade-.3);assert.equal(w.phase,'transition');
@@ -212,17 +226,16 @@ test('campaign levels never gain boss phases and a fresh endless run has no boss
   const w=new World(390,844,()=>.5);assert.equal(w.boss,null);assert.equal(w.bossCelebration,null);assert.equal(w.player.roll,undefined);
 });
 
-test('near-limit bosses keep grown players outside the boss and inside every square wall',()=>{
+test('near-limit bosses keep grown players outside the boss and inside the square walls',()=>{
   for(const [width,height] of [[320,568],[390,844],[844,390]])for(const side of ['top','bottom','left','right']){
-    const w=ready(5,width,height),boss=w.boss,p=w.player,bounds=w.arenaBounds;p.r=w.unit*1.4;
+    const w=ready(5,width,height,1.4),boss=w.boss,p=w.player,bounds=w.arenaBounds;
     boss.r=boss.maxRadius-.1;
     Object.assign(p,{x:side==='left'?bounds.left+p.r:side==='right'?bounds.right-p.r:boss.x,
       y:side==='top'?bounds.top+p.r:side==='bottom'?bounds.bottom-p.r:boss.y,vx:0,vy:0});
     for(let frame=0;frame<10&&w.phase==='boss';frame++){
       w.step(1/120);
       assert.ok(Math.hypot(p.x-boss.x,p.y-boss.y)>=p.r+boss.r-1e-7);
-      assert.ok(p.x>=bounds.left+p.r&&p.x<=bounds.right-p.r);
-      assert.ok(p.y>=bounds.top+p.r&&p.y<=bounds.bottom-p.r);
+      assert.ok(p.x-p.r>=w.arenaBounds.left-1e-7&&p.x+p.r<=w.arenaBounds.right+1e-7&&p.y-p.r>=w.arenaBounds.top-1e-7&&p.y+p.r<=w.arenaBounds.bottom+1e-7);
     }
     assert.equal(w.events.filter(e=>e.type==='bossHit').length,0);
   }
@@ -230,9 +243,9 @@ test('near-limit bosses keep grown players outside the boss and inside every squ
 
 test('a normal stage-five build wins through real shots and rebounds in under 20 seconds without an instant kill',()=>{
   for(const [width,height] of [[390,844],[844,390]]){
-    const w=new World(width,height,()=>.5);
+    const w=new World(width,height,()=>.5,{spawnInitial:false});
     w.stage=5;w.score=w.target;w.density=1.35**2;w.energy=1.3**2;
-    w.player.density=1.5*w.density;w.player.mass=w.player.density;
+    w.player.density=1.5*w.density;w.player.mass=w.player.density;w.beginBoss();
     while(w.phase!=='boss')w.step(1/120);
     w.events=[];const startScore=w.score;
     let hits=0,shots=0,elapsed=0,pulling=0;
@@ -256,10 +269,10 @@ test('a normal stage-five build wins through real shots and rebounds in under 20
   }
 });
 
-test('arena contraction, physical walls, and the extra re-aim threshold apply only to the boss',()=>{
+test('boss arena becomes a physical square and restores 98.5 percent wall retention',()=>{
   for(const [width,height] of [[390,844],[844,390]]){
-    const w=new World(width,height,()=>.5);w.stage=5;const ordinary=w.readySpeed,full=w.arenaBounds;
-    w.score=w.target;w.step(1/120);assert.deepEqual(w.arenaBounds,full);
+    const w=new World(width,height,()=>.5,{spawnInitial:false});w.stage=5;const ordinary=w.readySpeed,full=w.arenaBounds;
+    w.beginBoss();assert.deepEqual(w.arenaBounds,full);
     advance(w,BOSS_TIMING.entry/2);const halfway=w.arenaBounds;
     assert.ok(halfway.width<full.width||halfway.height<full.height);
     assert.ok(halfway.width!==halfway.height);advance(w,BOSS_TIMING.entry/2);
@@ -273,8 +286,8 @@ test('arena contraction, physical walls, and the extra re-aim threshold apply on
       if(side==='right'){p.x=bounds.right-p.r+1;p.vx=100;}
       if(side==='top'){p.y=bounds.top+p.r-1;p.vy=-100;}
       if(side==='bottom'){p.y=bounds.bottom-p.r+1;p.vy=100;}
-      w.wall(p);assert.ok(p.x>=bounds.left+p.r&&p.x<=bounds.right-p.r&&p.y>=bounds.top+p.r&&p.y<=bounds.bottom-p.r);
-      near(length(p),92);
+      w.wall(p);assert.ok(p.x-p.r>=w.arenaBounds.left-1e-7&&p.x+p.r<=w.arenaBounds.right+1e-7&&p.y-p.r>=w.arenaBounds.top-1e-7&&p.y+p.r<=w.arenaBounds.bottom+1e-7);
+      near(length(p),98.5);
     }
     const campaign=new CampaignWorld(width,height,5,()=>.5);assert.deepEqual(campaign.arenaBounds,full);near(campaign.readySpeed,campaign.unit*8);
   }
@@ -283,9 +296,9 @@ test('arena contraction, physical walls, and the extra re-aim threshold apply on
 test('reward placement stays inside the physically restoring arena on a tall viewport',()=>{
   const w=ready(5,390,1000),boss=w.boss,p=w.player;
   boss.r=boss.minRadius+.001;w.damageBoss(w.baseSpeed);
-  const square=w.arenaBounds;Object.assign(p,{x:square.right-p.r,y:square.bottom-p.r,vx:0,vy:0});
+  const square=w.arenaGeometry;Object.assign(p,{x:square.right-p.r,y:square.bottom-p.r,vx:0,vy:0});
   while(w.phase==='boss')w.damageBoss(w.baseSpeed);
-  advance(w,BOSS_TIMING.brake+BOSS_TIMING.spin+BOSS_TIMING.hold+BOSS_TIMING.fade);
+  advance(w,.5+BOSS_TIMING.brake+BOSS_TIMING.spin+BOSS_TIMING.hold+BOSS_TIMING.fade);
   assert.equal(w.phase,'transition');
   for(let frame=0;frame<230&&w.phase==='transition';frame++){
     w.step(1/120);const bounds=w.arenaBounds;
@@ -300,7 +313,7 @@ test('resizing a swollen boss preserves its remaining growth allowance instead o
   boss.r=boss.initialRadius+.7*(boss.maxRadius-boss.initialRadius);
   w.resize(320,568);
   near((boss.r-boss.initialRadius)/(boss.maxRadius-boss.initialRadius),.7);
-  near(boss.maxRadius,(320-2*w.inset)*.375);assert.ok(boss.r<boss.maxRadius);
+  near(boss.maxRadius,Math.min(w.arenaGeometry.r*.75,w.arenaGeometry.r-2*w.player.r-w.unit*.1));assert.ok(boss.r<boss.maxRadius);
   w.step(1/120);assert.equal(w.phase,'boss');
 });
 
@@ -325,9 +338,9 @@ test('stunned health is a one-time build snapshot and ordinary damage remains un
 test('bank builds retain multiple real finishing impacts without extending the stunned fight beyond a few seconds',()=>{
   for(const [width,height] of [[390,844],[320,568],[1440,900]])for(const stage of [5,10]){
     for(const [densityStacks,energyStacks,growth] of [[2,2,1],[0,4,1],[4,0,1.4]]){
-      const w=new World(width,height,()=>.5);
+      const w=new World(width,height,()=>.5,{spawnInitial:false});
       w.stage=stage;w.score=w.target;w.density=1.35**densityStacks;w.energy=1.3**energyStacks;
-      w.player.mass=w.player.density=1.5*w.density;w.player.r*=growth;w.buffs.bank=1;
+      w.player.mass=w.player.density=1.5*w.density;w.player.r*=growth;w.buffs.bank=1;w.beginBoss({type:'inflation'});
       while(w.phase!=='boss')w.step(1/120);
       w.events=[];const startScore=w.score;
       let elapsed=0,pulling=0,stunAt=null,finishingHits=0,aliveAfterFirst=false;

@@ -1,26 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {CampaignWorld} from '../dist/campaign.js';
+import {CampaignWorld,LegacyCampaignWorld} from '../dist/campaign.js';
+import {levelRecord} from '../dist/campaign-progress.js';
 import {skinContour,contourArea} from '../dist/skins.js';
+import {UPGRADE_DEFINITIONS,UPGRADES} from '../dist/upgrades.js';
+import {impactShards} from '../dist/feedback.js';
 
 // Run the real entry module and scene with DOM/audio/Phaser boundaries stubbed.
-const elements=new Map(),listeners=new Map(),saved=new Map();
+const elements=new Map(),listeners=new Map(),windowListeners=new Map(),saved=new Map();
 function element(selector){
   if(elements.has(selector))return elements.get(selector);
   const classes=new Set();
-  const e={hidden:false,inert:false,children:[],dataset:{},style:{setProperty(){},removeProperty(){}},
-    classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle(x,on){on?classes.add(x):classes.delete(x);}},
-    attributes:{},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},addEventListener(){},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
+  const e={hidden:false,inert:false,children:[],dataset:{},listeners:new Map(),style:{setProperty(){},removeProperty(){}},
+    classList:{add:(...names)=>names.forEach(x=>classes.add(x)),remove:(...names)=>names.forEach(x=>classes.delete(x)),contains:x=>classes.has(x),toggle(x,on){on?classes.add(x):classes.delete(x);}},
+    attributes:{},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},addEventListener(type,fn){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(fn);},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
     firstElementChild:{style:{}},lastElementChild:{style:{}},
     querySelector:child=>element(selector+' '+child),
     getBoundingClientRect(){
+      if(selector==='#feedback-demo'&&classes.has('demo-compact')){
+        const {width,height}=this.testViewport||{width:window.innerWidth,height:window.innerHeight};
+        return {x:width/2-52,y:height-60,left:width/2-52,right:width/2+52,top:height-60,bottom:height-20,width:104,height:40};
+      }
       const [x,y,width,height]=selector==='#over-ball'?[96,320,72,72]:selector==='#pause-ball'?[110,200,64,64]:selector==='#skin-unlock-ball'?[141,370,108,108]:[0,0,390,844];
       return {x,y,width,height,top:y,bottom:y+height,left:x,right:x+width};
     }};
   elements.set(selector,e);return e;
 }
-globalThis.window={innerWidth:390,innerHeight:844,devicePixelRatio:2,addEventListener(){}};
+globalThis.window={innerWidth:390,innerHeight:844,devicePixelRatio:2,
+  addEventListener(type,fn){if(!windowListeners.has(type))windowListeners.set(type,[]);windowListeners.get(type).push(fn);},
+  removeEventListener(type,fn){windowListeners.set(type,(windowListeners.get(type)||[]).filter(handler=>handler!==fn));}};
 globalThis.localStorage={getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(k,v)};
 globalThis.Phaser={AUTO:0,Scale:{NONE:0},Scene:class{constructor(){this.cameras={main:{setBackgroundColor(){}}};}},Game:class{constructor(config){this.scene=new config.scene();}}};
 window.Phaser=globalThis.Phaser;
@@ -38,24 +47,38 @@ const entry=new URL('../dist/game.js',import.meta.url);
 const source=(await readFile(entry,'utf8')).replace(/from '(\.\/[^']+)'/g,(_,path)=>`from '${new URL(path,entry).href}'`);
 // This adapter only exposes state to the test; it is not part of the shipped game.
 const adapter=`
+import {LegacyCampaignWorld as LegacyFixtureWorld} from '${new URL('../dist/classes/legacy.js',import.meta.url).href}';
 export function seedRestart(origin,mode='endless',level=1){
+  campaignOffer=null;pendingCampaignUpgrade=null;campaignAttemptId=null;campaignRecorded=false;
+  aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
+  endlessProgress=normalizeEndless(null,best);runDay=mode==='endless'?createEndlessRun('2030-01-01'):null;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';
   selectedMode=mode;currentLevel=level;selector=null;trackPointer=null;levelPointer=null;
   world=mode==='campaign'?new CampaignWorld(viewport.width,viewport.height,level):new World(viewport.width,viewport.height);
-  if(mode==='campaign'){world.kills=12;world.spawned=20;world.completed=origin==='over';campaignProgress={completed:level,unlocked:Math.min(100,level+1)};}
-  Object.assign(world,{stage:16,time:180,score:7650,target:9000,density:3,energy:4,breathTime:1,bank:2,pullStartSpeed:5});
+  if(mode==='campaign'){
+    world.kills=12;world.spawned=20;world.completed=origin==='over';campaignProgress=normalizeProgress({completed:level,unlocked:Math.min(100,level+1)});
+    if(origin==='over')campaignRecorded=true;
+    else {campaignProgress=recordAttempt(campaignProgress,level);campaignAttemptId=levelRecord(campaignProgress,level).activeAttempt;}
+  }
+  Object.assign(world,{stage:16,time:180,score:7650,stageKills:32,density:3,energy:4,breathTime:1,bank:2,pullStartSpeed:5});
   world.buffs={growth:2,energy:4,density:3,breath:1};world.player.r*=1.4;
   world.enemies.forEach(b=>{b.born=1;b.solid=true;});world.phase=origin==='over'?'over':'battle';
   scene={g:{clear(){this.cleared=true;}},effects:[{type:'old-particle'}],accumulator:.004,clock:180,hitSoundAt:179};
   screen='play';modal=origin;paused=true;result=origin==='over'?{clock:12,bounceTime:.57}:null;
   uiAnchor=origin;releaseOverlay=1;pauseOnArrival=true;drag={dx:50,dy:20};transfer=null;controlFlight=null;
   $('#control-transfers').children=[{}];$('#ui-ball').hidden=false;$('#result-shadow').hidden=false;
-  $('.result-actions').classList.add('arriving');$('#choice-labels').innerHTML='old reward';
+  $('.result-actions').classList.add('arriving');$('#choice-labels').replaceChildren(document.createElement('div'));
   return world;
 }
 export const advanceUi=updateUiBall;
 export const sourcePose=currentPlayerPose;
-export function readRestart(){return {world,scene,screen,modal,paused,result,transfer,controlFlight,uiAnchor,releaseOverlay,pauseOnArrival,drag,selectedMode,currentLevel,campaignProgress,selector,levelPointer};}
+export function readRestart(){return {world,scene,screen,modal,paused,result,transfer,controlFlight,uiAnchor,releaseOverlay,pauseOnArrival,drag,selectedMode,currentLevel,campaignProgress,selector,levelPointer,choicePress,campaignOffer,campaignAttemptId,campaignRecorded};}
 export function seedRenderer(graphics,width=390,height=844,arena=false){
+  campaignOffer=null;pendingCampaignUpgrade=null;campaignAttemptId=null;campaignRecorded=false;$('#campaign-preflight').hidden=true;
+  clearChoicePress();aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
+  $('#feedback-demo').testViewport={width,height};
+  // Legacy rendering fixtures isolate record celebration; the explicit progress
+  // adapter below enables it for the new record and milestone scenarios.
+  endlessProgress=normalizeEndless(null,best);runDay=createEndlessRun('2030-01-01');runBest=Number.MAX_SAFE_INTEGER;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';feedbackDemo=false;
   selectedMode='endless';selector=null;trackPointer=null;levelPointer=null;menuTransition=null;
   viewport=displayMetrics(width,height,1);home=new HomeWorld(width,height,'endless');
   world=arena?new World(width,height):null;screen=arena?'play':'home';
@@ -63,8 +86,10 @@ export function seedRenderer(graphics,width=390,height=844,arena=false){
   settings.expressions=false;boot();scene=game.scene;scene.g=graphics;scene.testLabels=[];
   scene.add={text(x,y,text,style){
     const label={x,y,text,style,visible:true,alpha:1,destroyed:false,
-      setOrigin(){return this;},setScale(){return this;},setDepth(){return this;},
+      setOrigin(x,y=x){this.origin={x,y};return this;},setScale(value){this.scale=value;return this;},setDepth(value){this.depth=value;return this;},
       setVisible(value){this.visible=value;return this;},setAlpha(value){this.alpha=value;return this;},
+      setText(value){this.text=String(value);return this;},setFontSize(value){this.style.fontSize=value;return this;},
+      setColor(value){this.style.color=value;return this;},setStyle(value){Object.assign(this.style,value);return this;},
       setPosition(x,y){this.x=x;this.y=y;return this;},destroy(){this.destroyed=true;}};
     scene.testLabels.push(label);return label;
   }};
@@ -72,15 +97,32 @@ export function seedRenderer(graphics,width=390,height=844,arena=false){
 }
 export function seedLevelRenderer(graphics,width=390,height=844,unlocked=100){
   seedRenderer(graphics,width,height);selectedMode='campaign';
-  campaignProgress={completed:unlocked-1,unlocked};currentLevel=1;
+  campaignProgress=normalizeProgress({completed:unlocked-1,unlocked});currentLevel=1;
   selector=new LevelSelector(width,height,unlocked);screen='levels';levelsReveal=1;
   return {selector,scene};
 }
-export function seedCampaignRenderer(graphics,width=390,height=844,level=23){
+export function seedCampaignRenderer(graphics,width=390,height=844,level=1){
   seedRenderer(graphics,width,height,true);selectedMode='campaign';currentLevel=level;
   world=new CampaignWorld(width,height,level);
+  campaignProgress=recordAttempt(normalizeProgress({completed:level-1,unlocked:level}),level);
+  campaignAttemptId=levelRecord(campaignProgress,level).activeAttempt;
   return {world,scene};
 }
+// Exercise archived finite-enemy behavior explicitly; no registered level uses it.
+export function seedLegacyRenderer(graphics,width=390,height=844,level=25){
+  seedCampaignRenderer(graphics,width,height,level);world=new LegacyFixtureWorld(width,height,level);
+  return {world,scene};
+}
+export function seedCampaignAttempt(raw=campaignProgress){
+  campaignProgress=recordAttempt(normalizeProgress(raw),world.level);campaignAttemptId=levelRecord(campaignProgress,world.level).activeAttempt;campaignRecorded=false;
+}
+export const showCampaignOffer=offerCampaign;
+export const closeCampaignPreflight=closeCampaignOffer;
+export const enterCampaign=enterLevel;
+export const runCampaignTrial=startCampaignDemo;
+export const installCampaignControls=installCampaignDemo;
+export function setCampaignProgress(raw){campaignProgress=normalizeProgress(raw);return campaignProgress;}
+export const saveCampaignCheckpoint=checkpointCampaign;
 export function enterFromHome(){
   home.launchToPlay();while(home.phase==='flight')home.step(1/120);
   screen='entering';home.phaseTime=1.4;home.player.lookX=.1;home.player.lookY=-.08;
@@ -88,6 +130,7 @@ export function enterFromHome(){
 export const bindCanvas=bindInput;
 export const readHome=()=>home;
 export const expressionEnabled=()=>settings.expressions;
+export const setExpressionEnabled=value=>{settings.expressions=value;};
 export const playerInk=()=>hex(settings.player);
 export function setPlayerInk(value){const previous=settings.player;settings.player=value;return previous;}
 export function recordTones(){
@@ -98,13 +141,39 @@ export function recordBossVictory(){
   const calls=[],original=sound.bossVictory;sound.bossVictory=(...args)=>calls.push(args);
   return {calls,restore(){sound.bossVictory=original;}};
 }
+export function recordFeedbackAudio(){
+  const calls=[],originals={};
+  for(const name of ['setCharge','stopCharge','impact','launch','wall','bossDefeat','rewardHit']){
+    originals[name]=sound[name];sound[name]=(...args)=>calls.push({name,args});
+  }
+  return {calls,restore(){Object.assign(sound,originals);}};
+}
+export function recordClearAudio(){
+  const calls=[],originals={};
+  for(const name of ['clearStart','clearEnd']){originals[name]=sound[name];sound[name]=(...args)=>calls.push({name,args});}
+  return {calls,restore(){Object.assign(sound,originals);}};
+}
+export function setFeedbackStrength(value){settings.juice=value;syncFeedbackSettings();}
+export const readFeedbackSettings=()=>({...settings});
+export function resetScoreHud(){lastScore=-1;scoreFeedback.reset(world.score);updateHud();}
+export const updateScoreHud=updateHud;
+export const runFeedbackDemo=startFeedbackDemo;
+export const installDemoControls=installFeedbackDemo;
+export const isFeedbackDemo=()=>feedbackDemo;
+export const prepareNormalGame=prepareGame;
+export const readAimStats=aimStatistics;
+export function seedAimStats(raw,{hold=1.2}={}){aimMetrics=normalizeAimMetrics(raw);runAimHoldDuration=hold;}
+export function seedBest(value){const previous=best;best=value;endlessProgress=normalizeEndless({...endlessProgress,best:value,daily:[]});return previous;}
+export function seedEndless(raw=null,{date='2030-01-01',recordEffects=true}={}){endlessProgress=normalizeEndless(raw);best=endlessProgress.best;runBest=recordEffects?best:Number.MAX_SAFE_INTEGER;runDay=createEndlessRun(date);runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';}
+export function readEndless(){return {progress:endlessProgress,runDay,runBest,runNewRecord,recordPulse,recordCue};}
+export const saveEndless=saveEndlessProgress;
 export function openUnlockedSelection(unlocked,current=1){
   campaignProgress={completed:unlocked-1,unlocked};currentLevel=current;
   openLevels({...home.player});
   return selector;
 }
 export function seedSkins(raw=null,completed=0){
-  skins=normalizeSkins(raw,completed);playerContour=skinContour(skins.enabled?skins.sides:0);
+  skins=normalizeSkins(raw,completed);playerContour=skinContour(skins.enabled?{sides:skins.sides,variant:skins.variant}:0);
   skinTween=null;skinOverride=null;skinUnlock=null;lastUiPose=null;appearance=null;
   campaignProgress=normalizeProgress({completed});
 }
@@ -113,6 +182,29 @@ export function changeSkinEnabled(enabled){setSkinState(toggleSkins(skins,enable
 export function changeSkinSides(sides){setSkinState(selectSkin(skins,sides));}
 export const advanceSkin=updateSkin;
 export function bindPhotoRenderer(renderer){photoRenderer=renderer;}
+export function recordPlayerPhoto(){
+  const previous={appearance,photoCanvas,photoRenderer},calls=[];
+  appearance={};photoCanvas={style:{}};
+  photoRenderer={hide(){},draw(contour,pose,options){calls.push({contour,pose:{...pose},options});}};
+  return {calls,restore(){({appearance,photoCanvas,photoRenderer}=previous);}};
+}
+export function recordCompositePhotos(success){
+  const previous={appearance,photoCanvas,photoRenderer,auxiliaryPhotos},main=[],aux=[],hidden=[],visible=new Set();
+  appearance={};photoCanvas={style:{}};
+  photoRenderer={hide(){visible.delete('main');},draw(contour,pose,options){main.push({contour,pose:{...pose},options});visible.add('main');return success;},setImage(){}};
+  auxiliaryPhotos={hide(){hidden.push(true);for(const slot of visible)if(typeof slot==='number')visible.delete(slot);},draw(slot,contour,pose,options){aux.push({slot,contour,pose:{...pose},options});visible.add(slot);return success;},setImage(){},dispose(){for(const slot of visible)if(typeof slot==='number')visible.delete(slot);}};
+  return {main,aux,hidden,visible,restore(){({appearance,photoCanvas,photoRenderer,auxiliaryPhotos}=previous);}};
+}
+export function mountSceneBoundary(canvas,graphics){
+  const originalSkins=initializeSkins,originalCreate=document.createElement;
+  initializeSkins=()=>{};
+  document.createElement=tag=>tag==='canvas'?{getContext:()=>null}:originalCreate(tag);
+  scene.game={canvas};scene.textures={addCanvas(){}};
+  scene.scale={setZoom(){},resize(){}};scene.events={once(){}};
+  scene.add.graphics=()=>graphics;scene.add.image=()=>({setVisible(){return this;}});
+  scene.cameras.main.setSize=()=>{};
+  try{scene.create();}finally{initializeSkins=originalSkins;document.createElement=originalCreate;}
+}
 export const applyAppearance=setAppearance;
 export const hidePhotoForFrame=clearPhoto;
 export function readAppearance(){return {appearance,appearanceUrl};}
@@ -196,11 +288,12 @@ for(const origin of ['over','pause'])test(`${origin} restart animates only the p
   clickRestart();
   let s=app.readRestart();const w=s.world;
   assert.notEqual(w,previous);assert.equal(previous.pullStartSpeed,null);
-  assert.equal(w.stage,1);assert.equal(w.score,0);assert.equal(w.target,140);assert.equal(w.time,0);
-  assert.equal(w.spawnTimer,.45);assert.equal(w.breathTime,0);assert.equal(w.bank,0);assert.equal(w.pullStartSpeed,null);
-  assert.deepEqual(w.buffs,{});assert.deepEqual(w.choices,[]);assert.equal(w.density,1);assert.equal(w.energy,1);
+  assert.equal(w.stage,1);assert.equal(w.score,0);assert.equal(w.killTarget,14);assert.equal(w.stageKills,0);assert.equal(w.time,0);
+  assert.equal(w.spawnTimer,Infinity);assert.equal(w.breathTime,0);assert.equal(w.bank,0);assert.equal(w.pullStartSpeed,null);
+  assert.equal(w.saveUsed,false);assert.equal(w.overTimer,0);
+  assert.deepEqual(w.buffs,{});assert.equal(w.choices.length,3);assert.ok(w.choices.every(choice=>choice.kind==='regular'));assert.equal(w.density,1);assert.equal(w.energy,1);
   assert.equal(w.player.r,w.unit);assert.equal(w.player.vx,0);assert.equal(w.player.vy,0);
-  assert.equal(w.enemies.length,2);assert.ok(w.enemies.every(b=>b.born===0&&!b.solid));
+  assert.equal(w.enemies.length,0);assert.equal(w.startingUpgrades,true);assert.equal(w.rewardSelectionsRemaining,1);
   for(const key of ['modal','result','controlFlight','uiAnchor','drag'])assert.equal(s[key],null,key);
   assert.equal(s.screen,'play');assert.equal(s.paused,true);assert.equal(s.pauseOnArrival,false);assert.equal(s.releaseOverlay,0);
   assert.equal(s.scene.g.cleared,true);assert.deepEqual(s.scene.effects,[]);
@@ -209,24 +302,24 @@ for(const origin of ['over','pause'])test(`${origin} restart animates only the p
   assert.equal(element('#ui-ball').hidden,false);assert.equal(element('#result-shadow').hidden,true);
   assert.equal(element('.result-actions').classList.contains('arriving'),false);
   assert.equal(element('#modal-layer').hidden,true);assert.equal(element('#hud').hidden,false);assert.equal(element('#hud').inert,true);
-  assert.equal(element('#score').textContent,'0000');assert.equal(element('#choice-labels').innerHTML,'');
-  assert.deepEqual(s.transfer.from,from);assert.equal(s.transfer.target,'arena');assert.equal(s.transfer.duration,.65);
+  assert.equal(element('#score').textContent,'0000');assert.ok(element('#choice-labels').children.some(node=>node.className==='choice-label'));
+  assert.deepEqual(s.transfer.from,from);assert.equal(s.transfer.target,'arena');assert.equal(s.transfer.duration,.4);
   const startTransform=element('#ui-ball').style.transform;
   clickRestart();assert.equal(app.readRestart().world,w);
-  app.advanceUi(.325);s=app.readRestart();
-  assert.equal(s.paused,true);assert.equal(w.time,0);assert.equal(w.spawnTimer,.45);
+  app.advanceUi(.2);s=app.readRestart();
+  assert.equal(s.paused,true);assert.equal(w.time,0);assert.equal(w.spawnTimer,Infinity);
   assert.ok(w.enemies.every(b=>b.born===0&&!b.solid));
   assert.notEqual(element('#ui-ball').style.transform,startTransform);
   const diameter=parseFloat(element('#ui-ball').style.width);
   assert.ok(diameter>2*w.unit&&diameter<2*from.r);
-  app.advanceUi(.325);s=app.readRestart();
+  app.advanceUi(.2);s=app.readRestart();
   assert.equal(s.transfer,null);assert.equal(s.controlFlight,null);assert.equal(s.paused,false);
-  assert.equal(element('#hud').inert,false);assert.equal(w.time,0);assert.equal(w.spawnTimer,.45);
+  assert.equal(element('#hud').inert,false);assert.equal(w.time,0);assert.equal(w.spawnTimer,Infinity);
   near(parseFloat(element('#ui-ball').style.width),2*w.player.r);
   assert.ok(element('#ui-ball').style.transform.startsWith(`translate3d(${w.player.x-w.player.r}px,${w.player.y-w.player.r}px,0)`));
   assert.ok(w.enemies.every(b=>b.born===0&&!b.solid));
   app.advanceUi(1/120);assert.equal(element('#ui-ball').hidden,true);
-  w.step(1/120);assert.ok(w.enemies.every(b=>b.born>0&&b.born<1&&!b.solid));
+  w.step(1/120);assert.equal(w.phase,'transition');assert.equal(w.enemies.length,0);
 });
 
 test('backgrounding during restart keeps the fresh world paused after arrival',()=>{
@@ -234,31 +327,38 @@ test('backgrounding during restart keeps the fresh world paused after arrival',(
   try{
     app.advanceUi(.65);const s=app.readRestart();
     assert.equal(s.paused,true);assert.equal(s.modal,'pause');assert.equal(s.world.time,0);
-    assert.equal(s.world.spawnTimer,.45);assert.ok(s.world.enemies.every(b=>b.born===0&&!b.solid));
+    assert.equal(s.world.spawnTimer,Infinity);assert.ok(s.world.enemies.every(b=>b.born===0&&!b.solid));
     assert.equal(s.transfer.target,'pause');assert.equal(s.controlFlight,null);
   }finally{document.hidden=false;}
 });
 
 function graphicsRecorder(){
   let points=[],color,alpha,strokeColor,strokeAlpha,strokeWidth;
-  const g={shapes:[],borders:[],clear(){this.shapes=[];this.borders=[];},fillStyle(c,a=1){color=c;alpha=a;},beginPath(){points=[];},
+  const g={shapes:[],borders:[],lines:[],clear(){this.shapes=[];this.borders=[];this.lines=[];},fillStyle(c,a=1){color=c;alpha=a;},beginPath(){points=[];},
     lineStyle(width,c,a=1){strokeWidth=width;strokeColor=c;strokeAlpha=a;},
     strokePath(){this.shapes.push({type:'stroke',color:strokeColor,alpha:strokeAlpha,width:strokeWidth,points:[...points]});},
-    strokeRoundedRect(x,y,width,height,r){this.borders.push({x,y,width,height,r});},
+    strokeRoundedRect(x,y,width,height,r){this.borders.push({x,y,width,height,r,strokeWidth,strokeColor,strokeAlpha});},
+    lineBetween(x1,y1,x2,y2){this.lines.push({x1,y1,x2,y2,width:strokeWidth,color:strokeColor,alpha:strokeAlpha});},
     moveTo(x,y){points.push({x,y});},lineTo(x,y){points.push({x,y});},
     fillPath(){this.shapes.push({type:'path',color,alpha,points:[...points]});},
-    fillEllipse(x,y,width,height){this.shapes.push({type:'ellipse',color,alpha,x,y,width,height});}};
+    fillEllipse(x,y,width,height){this.shapes.push({type:'ellipse',color,alpha,x,y,width,height});},
+    fillCircle(x,y,r){this.shapes.push({type:'circle',color,alpha,x,y,r});}};
   return new Proxy(g,{get:(target,key)=>key in target?target[key]:()=>{}});
 }
 const bodyShapes=g=>g.shapes.filter(s=>s.type==='path'&&s.color===0x252720&&s.alpha===1);
 const eyeShapes=g=>g.shapes.filter(s=>s.color===0xf4f3eb&&s.alpha===.9);
-function clickAction(action){for(const fn of listeners.get('click'))fn({target:{closest:()=>({dataset:{action}})},detail:1});}
-function inputCanvas(width=390,height=844){
-  const handlers=new Map();
-  const canvas={addEventListener:(type,fn)=>handlers.set(type,fn),setPointerCapture(){},hasPointerCapture:()=>true,releasePointerCapture(){},
+function clickAction(action,dataset={}){for(const fn of listeners.get('click'))fn({target:{closest:()=>({dataset:{action,...dataset}})},detail:1});}
+function inputCanvas(width=390,height=844,module=app){
+  const handlers=new Map(),captured=new Set(),captures=[],releases=[];
+  const canvas={style:{},addEventListener:(type,fn)=>handlers.set(type,fn),
+    setPointerCapture(id){captured.add(id);captures.push(id);},hasPointerCapture:id=>captured.has(id),releasePointerCapture(id){captured.delete(id);releases.push(id);},
     getBoundingClientRect:()=>({left:0,top:0,width,height})};
-  app.bindCanvas(canvas);
-  return (type,x=0,y=0,options={})=>handlers.get(type)({pointerId:1,isPrimary:true,button:0,clientX:x,clientY:y,timeStamp:0,preventDefault(){},...options});
+  module.bindCanvas(canvas);
+  const pointer=(type,x=0,y=0,options={})=>{
+    if(type==='lostpointercapture')captured.delete(options.pointerId??1);
+    handlers.get(type)({pointerId:1,isPrimary:true,button:0,clientX:x,clientY:y,timeStamp:0,preventDefault(){},...options});
+  };
+  return Object.assign(pointer,{canvas,captured,captures,releases});
 }
 
 test('entering selection focuses the highest unlocked level even after replaying an earlier level',()=>{
@@ -275,7 +375,7 @@ test('entering selection focuses the highest unlocked level even after replaying
   }
 });
 
-test('selection removes every drag guide while both battle modes retain their original guides',()=>{
+test('selection removes every drag guide while both battle modes retain their seven dots and original pull markers',()=>{
   for(const mode of ['levels','endless','campaign']){
     const g=graphicsRecorder(),strokes=[],dots=[],lines=[],rings=[];
     let width;
@@ -289,8 +389,8 @@ test('selection removes every drag guide while both battle modes retain their or
     state.scene.update(0,0);
     assert.equal(dots.filter(d=>d.r===1.7).length,mode==='levels'?0:7);
     assert.equal(strokes.filter(w=>w===1.4).length,mode==='levels'?0:1);
-    assert.equal(lines.length,mode==='levels'?0:1,'selection has no pointer-to-drag line');
-    assert.equal(rings.filter(r=>r===4||r===8).length,mode==='levels'?0:2,'selection has no endpoint rings');
+    assert.equal(lines.length,mode==='levels'?0:1,'both battle modes retain the pointer-to-drag line');
+    assert.equal(rings.filter(r=>r===4||r===8).length,mode==='levels'?0:2,'both battle modes retain the endpoint rings');
     pointer('pointercancel');
   }
 });
@@ -328,7 +428,7 @@ function pullScene(mode,g,width=390,height=844){
     mode==='campaign'?app.seedCampaignRenderer(g,width,height):
     app.seedRenderer(g,width,height,mode==='endless');
   const active=mode==='levels'?state.selector:mode==='home'?state.home:state.world;
-  if(mode==='campaign')assert.ok(active instanceof CampaignWorld,'exercise real campaign rules and renderer');
+  if(mode==='campaign')assert.ok(active instanceof CampaignWorld||active instanceof LegacyCampaignWorld,'exercise real campaign rules and renderer');
   return {scene:state.scene,active,player:active.player,pointer:inputCanvas(width,height)};
 }
 
@@ -383,7 +483,7 @@ test('home arrival paints the arena player on the handoff frame without advancin
     near(Math.min(...body[0].points.map(v=>v.x)),p.x-p.r);
     near(Math.max(...body[0].points.map(v=>v.x)),p.x+p.r);
     assert.equal(eyeShapes(g).length,2);assert.ok(p.lookX>0&&p.lookY<0,'preserve the gaze across the handoff');
-    assert.equal(s.world.time,0);assert.equal(s.world.spawnTimer,.45);
+    assert.equal(s.world.time,0);assert.equal(s.world.spawnTimer,Infinity);
     assert.ok(s.world.enemies.every(b=>b.born===0&&!b.solid));
     scene.update(0,1000/120);assert.equal(bodyShapes(g).length,1);
     assert.ok(s.world.enemies.every(b=>b.born>0&&b.born<1&&!b.solid));
@@ -393,7 +493,7 @@ test('home arrival paints the arena player on the handoff frame without advancin
 test('optional eyes persist through every home rebound frame and relax after rest',()=>{
   const g=graphicsRecorder(),{home,scene}=app.seedRenderer(g),pointer=inputCanvas();
   pointer('pointerdown');pointer('pointermove',100,0);scene.update(0,1);
-  assert.ok(eyeShapes(g).every(e=>e.type==='ellipse'),'disabled by default');
+  assert.ok(eyeShapes(g).every(e=>e.type==='ellipse'),'the fixture explicitly disables expressions');
   clickAction('expressions');assert.equal(app.expressionEnabled(),true);
   assert.equal(element('#expressions-toggle').attributes['aria-checked'],'true');
   assert.equal(JSON.parse(saved.get('qiuqiule-settings')).expressions,true);
@@ -435,35 +535,38 @@ test('expression preference survives reloading the entry module',async()=>{
 });
 
 
-for(const origin of ['over','pause'])test(`campaign ${origin} restart preserves level and unlocks while resetting the attempt`,()=>{
-  const previous=app.seedRestart(origin,'campaign',23),from=app.sourcePose();
-  const unlockedBefore={...app.readRestart().campaignProgress};
+for(const origin of ['over','pause'])test(`campaign ${origin} restart preserves migrated progress and waits for a new local upgrade`,()=>{
+  const previous=app.seedRestart(origin,'campaign',21),from=app.sourcePose();
+  const progressBefore={...app.readRestart().campaignProgress};
   clickRestart();
-  let state=app.readRestart();const w=state.world;
-  assert.notEqual(w,previous);assert.equal(previous.pullStartSpeed,null);
-  assert.equal(state.selectedMode,'campaign');assert.equal(state.currentLevel,23);
-  assert.equal(w.mode,'campaign');assert.equal(w.level,23);
-  assert.equal(w.kills,0);assert.equal(w.spawned,2);assert.equal(w.completed,false);
-  assert.equal(w.time,0);assert.equal(w.score,0);assert.equal(w.stage,1);
-  assert.equal(w.totalEnemies,w.config.totalEnemies);assert.equal(w.spawnTimer,w.config.spawnInterval);
-  assert.equal(w.energy,w.config.playerEnergy);assert.equal(w.density,1);assert.equal(w.upgrades,0);
-  assert.equal(w.player.r,w.unit);assert.equal(w.player.vx,0);assert.equal(w.player.vy,0);
-  assert.deepEqual(w.buffs,{});assert.deepEqual(w.choices,[]);
-  assert.deepEqual(state.campaignProgress,unlockedBefore,'retries retain permanent progress');
-  assert.equal(state.controlFlight,null);assert.equal(state.paused,true);
-  assert.deepEqual(state.transfer.from,from);assert.equal(state.transfer.target,'arena');
+  let state=app.readRestart();
+  assert.equal(state.drag,null);assert.equal(state.world,null);assert.equal(state.screen,'levels');
+  assert.equal(state.selectedMode,'campaign');assert.equal(state.currentLevel,21);
+  assert.deepEqual(state.transfer.from,from);assert.equal(state.transfer.target,'levels');
+  assert.equal(state.controlFlight,null);
+  app.advanceUi(.65);state=app.readRestart();assert.equal(state.campaignOffer.choices.length,2);
+  assert.equal(levelRecord(state.campaignProgress,21).attempts,origin==='pause'?1:0,'preflight itself starts no new attempt');
+  const chosen=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:chosen.id});
+  state=app.readRestart();const w=state.world;
   assert.equal(element('#control-transfers').children.length,0);
+  assert.notEqual(w,previous);assert.equal(w.mode,'campaign');assert.equal(w.level,21);assert.equal(w.config.classId,'wall');
+  assert.equal(w.kills,0);assert.equal(w.completed,false);assert.equal(w.time,0);assert.equal(w.score,0);assert.equal(w.stage,1);
+  assert.equal(w.shotsUsed,0);assert.equal(w.remaining,w.budget);assert.equal(w.upgradeId,chosen.id);
+  assert.equal(w.player.r,w.unit);assert.equal(w.player.vx,0);assert.equal(w.player.vy,0);
+  assert.deepEqual(w.buffs,{[chosen.id]:1});assert.deepEqual(w.choices,[]);
+  assert.equal(state.campaignProgress.completed,progressBefore.completed,'retries retain confirmed historical completion');
+  assert.equal(state.campaignProgress.unlocked,progressBefore.unlocked,'retries retain available levels');
+  const record=levelRecord(state.campaignProgress,21);
+  assert.equal(record.attempts,origin==='pause'?2:1);assert.equal(record.abandoned,origin==='pause'?1:0);
+  assert.equal(record.rating,0,'historical clears cannot manufacture new scoring dots');
+  assert.equal(state.controlFlight,null);assert.equal(state.paused,true);assert.equal(state.transfer.target,'arena');
   assert.equal(element('#hud').classList.contains('campaign'),true);
-  assert.ok(w.enemies.every(b=>b.born===0&&!b.solid));
-  const startTransform=element('#ui-ball').style.transform;
-  app.advanceUi(.325);
-  assert.notEqual(element('#ui-ball').style.transform,startTransform);
-  assert.equal(w.time,0);assert.equal(w.spawnTimer,w.config.spawnInterval);
-  assert.ok(w.enemies.every(b=>b.born===0&&!b.solid));
+  const startTransform=element('#ui-ball').style.transform,geometry=w.statics.map(b=>({x:b.x,y:b.y,hp:b.hp}));
+  app.advanceUi(.325);assert.notEqual(element('#ui-ball').style.transform,startTransform);
+  assert.equal(w.time,0);assert.deepEqual(w.statics.map(b=>({x:b.x,y:b.y,hp:b.hp})),geometry);
   app.advanceUi(.325);state=app.readRestart();
   assert.equal(state.paused,false);assert.equal(state.transfer,null);assert.equal(state.controlFlight,null);
-  assert.equal(w.time,0);assert.ok(w.enemies.every(b=>b.born===0&&!b.solid));
-  w.step(1/120);assert.ok(w.enemies.every(b=>b.born>0&&b.born<1&&!b.solid));
+  assert.equal(w.time,0);w.step(1/120);assert.ok(w.time>0);
 });
 
 test('selection miss stays at its anchor and uses the same uninterrupted rebound expression as home',()=>{
@@ -492,6 +595,12 @@ test('selection miss stays at its anchor and uses the same uninterrupted rebound
 function advanceScene(scene,seconds){
   while(seconds>.05){scene.update(0,50);seconds-=.05;}
   if(seconds>1e-12)scene.update(0,seconds*1000);
+}
+function assertStageProgress(world){
+  const progress=element('#stage-progress');
+  assert.equal((progress.innerHTML.match(/class="stage-dot/g)||[]).length,10);
+  assert.equal((progress.innerHTML.match(/stage-dot filled/g)||[]).length,Math.floor(Math.min(1,world.stageKills/world.killTarget)*10+1e-9));
+  assert.equal(progress.attributes['aria-label'],`本阶段击杀 ${world.stageKills}，目标 ${world.killTarget}`);
 }
 function outlineBounds(shape){
   if(shape.type==='ellipse')return {cx:shape.x,cy:shape.y,width:shape.width,height:shape.height};
@@ -667,7 +776,7 @@ test('selection requires a body-start drag and only rebounds on release while ca
   }
 });
 
-test('tapping an unlocked ball enters its real campaign through the unchanged player arrival animation',()=>{
+test('tapping a modern level offers two local upgrades before the unchanged player arrival animation',()=>{
   for(const [width,height] of [[390,844],[844,390]]){
     const {selector,scene}=app.seedLevelRenderer(graphicsRecorder(),width,height,50),pointer=inputCanvas(width,height);
     const target=selector.visibleBalls.find(b=>b.level===50),from={...selector.player};
@@ -676,19 +785,30 @@ test('tapping an unlocked ball enters its real campaign through the unchanged pl
     pointer('pointerup',target.x,target.y);
     assert.deepEqual(selector.action,{type:'level',level:50});
     scene.update(0,0);
-    let state=app.readRestart();const world=state.world;
+    let state=app.readRestart();
+    assert.equal(state.screen,'levels');assert.equal(state.world,null);
+    assert.equal(state.campaignOffer.level,50);assert.equal(state.campaignOffer.choices.length,2);
+    assert.equal(new Set(state.campaignOffer.choices.map(choice=>choice.id)).size,2);
+    assert.equal(element('#campaign-preflight').hidden,false);
+    assert.equal(levelRecord(state.campaignProgress,50).attempts,0,'viewing the choices is not a formal attempt');
+    const upgrade=state.campaignOffer.choices[0];
+    clickAction('campaign-upgrade',{upgrade:upgrade.id});
+    state=app.readRestart();const world=state.world;
     assert.ok(world instanceof CampaignWorld);assert.equal(world.level,50);
     assert.equal(state.screen,'play');assert.equal(state.currentLevel,50);assert.equal(state.selectedMode,'campaign');
     assert.equal(state.paused,true);assert.equal(state.transfer.target,'arena');assert.equal(state.transfer.duration,.65);
     assert.deepEqual(state.transfer.from,from);assert.equal(state.drag,null);assert.equal(state.levelPointer,null);
-    assert.equal(world.time,0);assert.ok(world.enemies.every(b=>b.born===0&&!b.solid));
+    assert.equal(world.time,0);assert.equal(world.config.r,0);assert.equal(world.shotsUsed,0);
+    assert.equal(state.campaignOffer,null);assert.equal(element('#campaign-preflight').hidden,true);
     app.advanceUi(.325);
     assert.equal(app.readRestart().paused,true);assert.equal(world.time,0);
-    assert.ok(world.enemies.every(b=>b.born===0&&!b.solid));
+    assert.equal(world.shotsUsed,0);
     app.advanceUi(.325);state=app.readRestart();
     assert.equal(state.transfer,null);assert.equal(state.paused,false);assert.equal(world.time,0);
-    assert.deepEqual(state.campaignProgress,{completed:49,unlocked:50});
-    world.step(1/120);assert.ok(world.enemies.every(b=>b.born>0&&!b.solid));
+    assert.equal(state.campaignProgress.completed,49);assert.equal(state.campaignProgress.unlocked,50);
+    assert.equal(levelRecord(state.campaignProgress,50).attempts,1);
+    assert.equal(levelRecord(state.campaignProgress,50).upgradeChoices[upgrade.id],1);
+    world.step(1/120);assert.ok(world.time>0);
   }
 });
 
@@ -714,12 +834,13 @@ test('tapping the return ball carries the selector player home, including during
 
 test('selection taps preserve the visible breathing peak through the first transfer frame and smoothly release it',()=>{
   for(const destination of ['level','home']){
-    const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,50),pointer=inputCanvas();
+    const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,49),pointer=inputCanvas();
     scene.update(0,0);advanceScene(scene,Math.PI/(2*1.3));
     const p=selector.player,before=outlineBounds(bodyShapes(g)[0]);
     near(renderedHomeSquash(g,p),.035);near(p.squash,0,'breathing remains a render-only state');
-    const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===50);
+    const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===49);
     pointer('pointerdown',target.x,target.y);pointer('pointerup',target.x,target.y);scene.update(0,0);
+    if(destination==='level'){assert.equal(app.readRestart().campaignOffer.level,49);clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});}
     const state=app.readRestart();assert.ok(state.transfer);
     assert.equal(state.transfer.target,destination==='home'?'home':'arena');assert.equal(state.transfer.duration,.65);
     near(state.transfer.from.squash,.035);near(state.transfer.from.visualSquash,.035);
@@ -775,7 +896,13 @@ test('selection dispatches the intended tap, entry and locked sounds while orbit
       if(interaction==='swipe'){
         assert.ok(frequencies.length>0,'the real orbit movement emits its scrolling feedback');
         assert.ok(!frequencies.includes(680),'scrolling never emits the activation sound');
-      }else assert.deepEqual(frequencies,interaction==='level'?[680,420]:interaction==='home'?[680]:[150]);
+      }else {
+        assert.deepEqual(frequencies,interaction==='locked'?[150]:[680]);
+        if(interaction==='level'){
+          clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});
+          assert.deepEqual(audio.calls.map(args=>args[0]),[680,680,420],'entry sound waits for the actual upgrade selection');
+        }
+      }
     }finally{audio.restore();}
   }
 });
@@ -802,7 +929,7 @@ test('selection taps require one target and at most eight pixels of movement thr
     const state=app.readRestart();
     assert.equal(state.levelPointer,null);assert.equal(state.drag,null);
     if(gesture==='exact-eight'){
-      assert.equal(state.screen,'play');assert.ok(state.world instanceof CampaignWorld);assert.equal(state.world.level,50);
+      assert.equal(state.screen,'levels');assert.equal(state.world,null);assert.equal(state.campaignOffer?.level,50);
     }else{
       assert.equal(state.screen,'levels',gesture);assert.equal(state.world,null,gesture);assert.equal(state.transfer,null,gesture);
       assert.equal(selector.action,null,gesture);assert.equal(selector.trackDrag,null,gesture);
@@ -922,7 +1049,7 @@ function assertSameContour(actual,expected,tolerance=1e-5){
 
 test('selection clicks preserve rebound contours and relaxing eyes at the canvas-to-SVG handoff in both destinations',()=>{
   for(const destination of ['level','home'])for(const phase of ['positive','negative','relaxing']){
-    const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,50),pointer=inputCanvas();
+    const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,49),pointer=inputCanvas();
     const p=selector.player;clickAction('expressions');scene.update(0,0);
     pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+selector.maxPull,p.y);scene.update(0,0);
     pointer('pointerup',p.x+selector.maxPull,p.y);
@@ -935,8 +1062,9 @@ test('selection clicks preserve rebound contours and relaxing eyes at the canvas
     }
     const body=bodyShapes(g)[0].points,eyes=eyeShapes(g);
     assert.equal(eyes.length,2);assert.ok(eyes.every(e=>e.type==='path'));
-    const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===50);
+    const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===49);
     pointer('pointerdown',target.x,target.y);pointer('pointerup',target.x,target.y);scene.update(0,0);
+    if(destination==='level'){assert.equal(app.readRestart().campaignOffer.level,49);clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});}
     const transfer=app.readRestart().transfer;assert.ok(transfer);assert.equal(transfer.duration,.65);
     if(phase==='relaxing')assert.ok(transfer.from.visualEyeMix>0&&transfer.from.visualEyeMix<1);
     else{
@@ -1050,7 +1178,8 @@ const crownShapes=g=>{
 const playerEyes=(g,p)=>eyeShapes(g).filter(shape=>shape.type==='ellipse'&&Math.hypot(shape.x-p.x,shape.y-p.y)<p.r);
 function bossScene(stage=5,width=390,height=844){
   const g=graphicsRecorder(),{world,scene}=app.seedRenderer(g,width,height,true);
-  world.stage=stage;world.score=world.target;scene.update(0,1000/120);
+  world.stage=stage;world.stageKills=world.killTarget;
+  for(let frame=0;['battle','clearing'].includes(world.phase)&&frame<1200;frame++)scene.update(0,1000/120);
   assert.equal(world.phase,'boss-entry');assert.ok(world.boss?.isBoss);
   return {g,world,scene};
 }
@@ -1074,7 +1203,7 @@ function defeatBoss(world,scene){
 }
 function bossSimulationSnapshot(world,scene){
   const p=world.player;
-  return JSON.stringify({phase:world.phase,phaseTime:world.phaseTime,time:world.time,score:world.score,target:world.target,
+  return JSON.stringify({phase:world.phase,phaseTime:world.phaseTime,time:world.time,score:world.score,killTarget:world.killTarget,stageKills:world.stageKills,
     spawnTimer:world.spawnTimer,arenaBounds:world.arenaBounds,boss:world.boss,bossCelebration:world.bossCelebration,enemies:world.enemies,choices:world.choices,
     player:{x:p.x,y:p.y,vx:p.vx,vy:p.vy,r:p.r,squash:p.squash,angle:p.angle,roll:p.roll},
     effects:scene.effects.map(e=>({life:e.life,x:e.x,y:e.y}))});
@@ -1083,12 +1212,14 @@ const bossSpiralShapes=(g,b)=>g.shapes.filter(shape=>shape.type==='stroke'&&shap
 const bossAngryShapes=(g,b)=>g.shapes.filter(shape=>shape.type==='path'&&shape.color===0x8b5444&&shape.points.every(point=>Math.hypot(point.x-b.x,point.y-b.y)<b.r));
 function assertArenaBorder(g,world){
   assert.equal(g.borders.length,1);const drawn=g.borders[0],bounds=world.arenaBounds;
-  // Preserve the established one-pixel optical outset around the collision box.
-  near(drawn.x,bounds.left-1);near(drawn.y,bounds.top-1);
-  near(drawn.width,bounds.width+2);near(drawn.height,bounds.height+2);
+  // The ordinary optical outset fades away as the Boss frame reaches its square bounds.
+  const margin=1-world.arenaGeometry.blend;
+  near(drawn.x,bounds.left-margin);near(drawn.y,bounds.top-margin);
+  near(drawn.width,bounds.width+2*margin);near(drawn.height,bounds.height+2*margin);
+  near(drawn.r,world.arenaGeometry.visualCornerRadius);
 }
 
-test('boss entry reaches a centered square in 0.85 seconds and its visible border agrees with every collision wall',()=>{
+test('boss entry reaches a centered square in 0.85 seconds and its border agrees with axis-aligned walls',()=>{
   for(const [width,height] of [[390,844],[844,390]]){
     const {g,world,scene}=bossScene(5,width,height),initial={...world.arenaBounds};
     assertArenaBorder(g,world);advanceScene(scene,.4);assert.equal(world.phase,'boss-entry');
@@ -1101,12 +1232,16 @@ test('boss entry reaches a centered square in 0.85 seconds and its visible borde
     near((bounds.left+bounds.right)/2,width/2);near((bounds.top+bounds.bottom)/2,height/2);assertArenaBorder(g,world);
     near(world.boss.initialRadius,world.unit*4.8);near(world.boss.minRadius,world.unit*2);near(world.boss.maxRadius,bounds.width*.375);
     const p=world.player;
-    for(const side of ['left','right','top','bottom']){
-      p.x=bounds.left+p.r+5;p.y=bounds.bottom-p.r-5;p.vx=p.vy=0;
-      const horizontal=side==='left'||side==='right',coordinate=horizontal?'x':'y',velocity=horizontal?'vx':'vy';
-      const inward=side==='left'||side==='top'?1:-1;
-      p[coordinate]=bounds[side]+inward*(p.r-3);p[velocity]=-inward*100;
-      world.wall(p);near(p[coordinate],bounds[side]+inward*p.r);assert.ok(p[velocity]*inward>0);
+    assert.equal(world.arenaGeometry.shape,'square');assert.equal(world.arenaGeometry.cornerRadius,0);
+    const cases=[
+      {x:bounds.left+p.r-3,y:height/2,vx:-100,vy:30,expectedX:bounds.left+p.r,expectedY:height/2,outX:98.5,outY:30},
+      {x:bounds.right-p.r+3,y:height/2,vx:100,vy:30,expectedX:bounds.right-p.r,expectedY:height/2,outX:-98.5,outY:30},
+      {x:width/2,y:bounds.top+p.r-3,vx:30,vy:-100,expectedX:width/2,expectedY:bounds.top+p.r,outX:30,outY:98.5},
+      {x:width/2,y:bounds.bottom-p.r+3,vx:30,vy:100,expectedX:width/2,expectedY:bounds.bottom-p.r,outX:30,outY:-98.5},
+      {x:bounds.left+p.r-3,y:bounds.top+p.r-3,vx:-100,vy:-100,expectedX:bounds.left+p.r,expectedY:bounds.top+p.r,outX:98.5,outY:98.5}
+    ];
+    for(const sample of cases){
+      Object.assign(p,sample);world.wall(p);near(p.x,sample.expectedX);near(p.y,sample.expectedY);near(p.vx,sample.outX);near(p.vy,sample.outY);
       scene.update(0,0);assertArenaBorder(g,world);
     }
     p.x=width/2;p.y=bounds.bottom-p.r-5;p.vx=world.unit*19;p.vy=0;
@@ -1133,8 +1268,8 @@ test('reaching the boss minimum radius leaves a living stunned boss whose angry 
   advanceScene(scene,.13);const complete=bossSpiralShapes(g,b);assert.equal(complete.length,2);
   assert.ok(complete.every(eye=>Math.abs(eye.alpha-1)<1e-6));assert.equal(b.hp,hp);near(b.r,world.unit*2);
   assert.equal(bossAngryShapes(g,b).length,0,'the angry eyes fully disappear after the smooth handoff');
-  let followupHits=0;
-  while(world.phase==='boss'&&followupHits<3){
+  const expectedHits=Math.ceil(hp/Math.round(.5*world.player.mass*(world.baseSpeed/world.unit)**2*.31));let followupHits=0;
+  while(world.phase==='boss'&&followupHits<expectedHits){
     world.damageBoss(world.baseSpeed);scene.update(0,0);followupHits++;
     if(followupHits===1){
       assert.equal(world.phase,'boss','the first normal follow-up impact must not kill the stunned boss');
@@ -1144,7 +1279,7 @@ test('reaching the boss minimum radius leaves a living stunned boss whose angry 
     }
     assert.ok(!g.shapes.some(shape=>shape.type==='ellipse'&&[0xf9f8f0,0xffffff].includes(shape.color)&&shape.alpha>0),'stunned impacts retain the no-white-flash rendering');
   }
-  assert.equal(followupHits,3,'the first boss takes three unbuffed base-speed follow-up impacts');
+  assert.equal(followupHits,expectedHits,'the fixed stun-health snapshot requires exactly the calculated number of real impacts');
   assert.equal(world.phase,'boss-celebrate');assert.equal(world.score-scoreBefore,1000);
   const labels=scene.testLabels.map(label=>label.text);
   assert.deepEqual(labels,['+100','+100','+100','+100','+100','+500']);
@@ -1152,67 +1287,77 @@ test('reaching the boss minimum radius leaves a living stunned boss whose angry 
   assert.equal(world.score-scoreBefore,1000);assert.deepEqual(scene.testLabels.map(label=>label.text),labels,'segment and kill rewards are each dispatched only once');
 });
 
-test('boss defeat keeps the current velocity and slows smoothly for 0.8 seconds before spinning',()=>{
+test('boss defeat preserves velocity through the new half-second slow segment before its original 0.8-second braking and spin',()=>{
   const {world,scene}=bossScene();advanceToBoss(world,scene);stunBoss(world,scene);
   const p=world.player,bounds=world.arenaBounds;
   p.x=(bounds.left+bounds.right)/2;p.y=(bounds.top+bounds.bottom)/2;p.vx=100;p.vy=-20;
   const initialSpeed=Math.hypot(p.vx,p.vy),initial={x:p.x,y:p.y};
   defeatBoss(world,scene);
   near(Math.hypot(p.vx,p.vy),initialSpeed);near(p.x,initial.x);near(p.y,initial.y);
+  assert.equal(world.bossVictorySlowTime,.5);
+  while(world.bossVictorySlowTime>1e-8)scene.update(0,1000/120);
+  assert.equal(world.bossVictorySlowTime,0,'the slow segment must end exactly so the scene cannot retain quarter speed');
+  const brakingStart={x:p.x,y:p.y};near(p.vx,100);near(p.vy,-20);near(world.phaseTime,0);
   let previous=initialSpeed;
   for(let frame=1;frame<=96;frame++){
     scene.update(0,1000/120);const speed=Math.hypot(p.vx,p.vy);
     assert.ok(speed<=previous+1e-8,'braking never adds speed');
-    if(frame===1){assert.ok(speed>initialSpeed*.9,'the first frame does not abruptly cut velocity');assert.ok(p.x>initial.x&&p.y<initial.y);}
+    if(frame===1){assert.ok(speed>initialSpeed*.9,'the first braking frame does not abruptly cut velocity');assert.ok(p.x>brakingStart.x&&p.y<brakingStart.y);}
     if(frame<96)assert.ok(speed>0,'braking continues until its full duration');
     previous=speed;
   }
   near(previous,0);near(p.roll,0);advanceScene(scene,.05);assert.ok(p.roll>0);
 });
 
-test('the real scene renders the boss, routes its segment and defeat rewards, then offers the ordinary upgrade',()=>{
-  for(const [stage,segmentValue,totalValue] of [[5,100,1000],[10,110,1100]]){
+test('the real scene clears ordinary enemies before each fixed inflation Boss and keeps segment rewards and double offers',()=>{
+  for(const [stage,segmentValue,totalValue,type] of [[5,100,1000,'inflation'],[10,110,1100,'inflation'],[15,120,1200,'inflation']]){
     const {g,world,scene}=bossScene(stage),scoreBefore=world.score;
-    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');assert.equal(crownShapes(g).length,0);
+    const retained=world.enemies.map(body=>body.id);assert.equal(retained.length,0);assert.equal(world.boss.bossType,type);
+    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').children.length,0);assert.equal(crownShapes(g).length,0);
     advanceToBoss(world,scene);
-    assert.deepEqual(world.enemies,[]);assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');
-    assert.equal(g.shapes.filter(shape=>shape.type==='path'&&shape.color===0xe88c72&&shape.points.length===193).length,1,'the separate boss body reaches the real renderer');
+    assert.deepEqual(world.enemies.map(body=>body.id),retained);assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').children.length,0);
+    assert.ok(g.shapes.some(shape=>shape.points?.length>90&&Math.abs(outlineBounds(shape).cx-world.boss.x)<2&&Math.abs(outlineBounds(shape).cy-world.boss.y)<2),'the separate boss body reaches the real renderer');
     const boss=world.boss;world.damageBoss(world.baseSpeed);scene.update(0,0);
     assert.ok(!g.shapes.some(shape=>shape.type==='ellipse'&&[0xf9f8f0,0xffffff].includes(shape.color)&&shape.alpha>0&&Math.abs(shape.x-boss.x)<1e-6),'boss damage never paints a white flash over its body');
     defeatBoss(world,scene);
-    assert.equal(g.shapes.filter(shape=>shape.type==='path'&&shape.color===0xe88c72&&shape.points.length===193).length,0,'the defeated boss does not remain as a solid or flashing ball');
+    assert.equal(world.boss.defeated,true);assert.ok(!g.shapes.some(shape=>shape.color===0xe88c72&&shape.points?.length>90&&outlineBounds(shape).width>world.unit*5),'the defeated boss does not remain as a large solid or flashing ball');
     assert.equal(world.score-scoreBefore,totalValue);
     assert.deepEqual(scene.testLabels.map(label=>label.text),[...Array(5).fill('+'+segmentValue),'+'+segmentValue*5]);
     assert.ok(scene.testLabels.every(label=>label.style.fontFamily==='GameSans, sans-serif'&&label.style.fontStyle==='normal'));
+    // Task 1 intentionally animates the visible score for up to 250 ms while
+    // the canonical score and saved best update on the collision frame.
+    advanceScene(scene,.25);
     assert.equal(element('#score').textContent,String(world.score).padStart(4,'0'));
     assert.equal(Number(saved.get('qiuqiule-best')),world.score);
-    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');
-    advanceScene(scene,2.85);assert.equal(world.phase,'boss-celebrate');
-    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');
-    advanceScene(scene,.03);assert.equal(world.phase,'transition');assert.equal(world.choices.length,2);
-    assert.ok(element('#choice-labels').innerHTML.includes('choice-label'),'the existing upgrade transition becomes visible only after the celebration');
+    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').children.length,0);
+    advanceScene(scene,3.10);assert.equal(world.phase,'boss-celebrate');
+    assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').children.length,0);
+    advanceScene(scene,.03);assert.equal(world.phase,'transition');assert.equal(world.choices.length,3);
+    assert.equal(world.rewardSelectionsRemaining,2);assert.deepEqual(world.enemies,[],'remaining enemies are removed without score before the rewards');
+    assert.ok(element('#choice-labels').children.some(node=>node.className==='choice-label'),'the existing upgrade transition becomes visible only after the celebration');
     assert.equal(crownShapes(g).length,0);
     advanceScene(scene,.86);near(world.arenaBounds.width,world.width-32);near(world.arenaBounds.height,world.height-32);assertArenaBorder(g,world);
     advanceScene(scene,1.04);assert.equal(world.phase,'choose');assert.equal(world.ready,true);
-    assert.ok(element('#choice-labels').innerHTML.includes('opacity:1'));
+    assert.ok(element('#choice-labels').children.length>0&&element('#choice-labels').children.every(node=>node.style.opacity==='1'));
   }
 });
 
 test('boss collisions keep deformation, sound and scoring without white flashes while ordinary enemies retain their hit flash',()=>{
   const {g,world,scene}=bossScene();advanceToBoss(world,scene);
   const boss=world.boss,p=world.player,scoreBefore=world.score,radiusBefore=boss.r;
-  const audio=app.recordTones();
+  const audio=app.recordFeedbackAudio();
   try{
     for(let hit=0;hit<40&&world.score===scoreBefore;hit++){
+      if(hit){Object.assign(p,{x:world.arenaBounds.left+p.r+2,y:world.arenaBounds.bottom-p.r-2,vx:0,vy:0});advanceScene(scene,.16);}
       p.x=boss.x;p.y=boss.y+boss.r+p.r-1;p.vx=0;p.vy=-world.baseSpeed*.5;
       world.collideBoss();scene.update(0,0);
       assert.ok(p.vy>0,'the real collision still rebounds the player');
       assert.ok(boss.squash>0&&p.squash>0,'the normal impact deformation remains active');
-      assert.ok(!g.shapes.some(shape=>shape.type==='ellipse'&&[0xf9f8f0,0xffffff].includes(shape.color)&&shape.alpha>0),'boss hit feedback contains no white overlay');
+      assert.ok(!g.shapes.some(shape=>shape.type==='ellipse'&&[0xf9f8f0,0xffffff].includes(shape.color)&&shape.alpha>0&&Math.hypot(shape.x-boss.x,shape.y-boss.y)<1),'boss hit feedback contains no white overlay');
     }
     assert.ok(boss.r<radiusBefore);assert.equal(world.score-scoreBefore,100);
     assert.ok(scene.testLabels.some(label=>label.text==='+100'));
-    assert.ok(audio.calls.some(args=>args[0]>0&&args[1]>0&&args[2]==='triangle'),'boss impacts still dispatch their sound');
+    assert.ok(audio.calls.some(call=>call.name==='impact'&&call.args[0].kind==='boss'&&call.args[0].power>0),'boss impacts still dispatch their layered sound');
     const body=g.shapes.find(shape=>shape.type==='path'&&shape.color===0xe88c72&&shape.points.length===193);
     assert.ok(body);const bounds=outlineBounds(body);assert.ok(Math.abs(bounds.width-bounds.height)>1,'the renderer keeps the visible collision squash');
   }finally{audio.restore();}
@@ -1268,16 +1413,16 @@ test('restarting from any boss phase removes the boss, celebration, labels and c
   for(const phase of ['boss-entry','boss','stunned','boss-celebrate']){
     const {g,world,scene}=bossScene();
     if(phase!=='boss-entry')advanceToBoss(world,scene);
-    if(phase==='boss-celebrate'){defeatBoss(world,scene);advanceScene(scene,1.1);assert.equal(crownShapes(g).length,1);}
+    if(phase==='boss-celebrate'){defeatBoss(world,scene);advanceScene(scene,1.6);assert.equal(crownShapes(g).length,1);}
     else if(phase==='stunned'){stunBoss(world,scene);advanceScene(scene,.3);}
     const oldLabels=[...scene.testLabels];
     clickAction('pause');app.advanceUi(.42);clickRestart();
     const state=app.readRestart(),fresh=state.world;
-    assert.notEqual(fresh,world);assert.equal(fresh.phase,'battle');assert.equal(fresh.stage,1);assert.equal(fresh.score,0);
-    assert.equal(fresh.boss,null);assert.ok(!fresh.player.roll);assert.deepEqual(fresh.choices,[]);assert.deepEqual(scene.effects,[]);
-    assert.ok(oldLabels.every(label=>label.destroyed));assert.equal(element('#choice-labels').innerHTML,'');
-    assert.equal(state.transfer.duration,.65);assert.equal(state.paused,true);
-    app.advanceUi(.65);scene.update(0,0);
+    assert.notEqual(fresh,world);assert.equal(fresh.phase,'transition');assert.equal(fresh.startingUpgrades,true);assert.equal(fresh.stage,1);assert.equal(fresh.score,0);
+    assert.equal(fresh.boss,null);assert.ok(!fresh.player.roll);assert.equal(fresh.choices.length,3);assert.ok(fresh.choices.every(choice=>choice.kind==='regular'));assert.deepEqual(scene.effects,[]);
+    assert.ok(oldLabels.every(label=>label.destroyed));assert.ok(element('#choice-labels').children.some(node=>node.className==='choice-label'));
+    assert.equal(state.transfer.duration,.4);assert.equal(state.paused,true);
+    app.advanceUi(.4);scene.update(0,0);
     assert.equal(app.readRestart().paused,false);assert.equal(crownShapes(g).length,0);assert.equal(fresh.time,0);
     near(fresh.arenaBounds.width,fresh.width-32);near(fresh.arenaBounds.height,fresh.height-32);assertArenaBorder(g,fresh);
   }
@@ -1288,9 +1433,10 @@ test('boss celebration renders an upright crown and player spin, with one fanfar
   const audio=app.recordBossVictory();
   try{
     defeatBoss(world,scene);assert.equal(crownShapes(g).length,0);assert.equal(audio.calls.length,0);
+    advanceScene(scene,.5);assert.equal(crownShapes(g).length,0);assert.equal(audio.calls.length,0);near(world.bossVictorySlowTime,0);
     advanceScene(scene,.79);assert.equal(crownShapes(g).length,0);assert.equal(audio.calls.length,0);
     advanceScene(scene,.31);assert.equal(world.phase,'boss-celebrate');assert.equal(audio.calls.length,1);
-    assert.equal(world.ready,false);assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').innerHTML,'');
+    assert.equal(world.ready,false);assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').children.length,0);
     const crown=crownShapes(g);assert.equal(crown.length,1);assert.ok(crown[0].points.length>50);
     const p=world.player,firstRoll=p.roll;assert.ok(firstRoll>0&&firstRoll<Math.PI*2);
     const bounds=outlineBounds(crown[0]);near(bounds.cx,p.x);assert.ok(bounds.cy<p.y-p.r);assert.ok(bounds.width>p.r&&bounds.width<2*p.r,'the narrower crown fits within the player diameter');
@@ -1314,16 +1460,16 @@ test('boss celebration renders an upright crown and player spin, with one fanfar
     for(let frame=0;frame<20;frame++){
       advanceScene(scene,.05);assert.equal(world.phase,'boss-celebrate');near(p.roll,Math.PI*2);
       const holding=crownShapes(g);assert.equal(holding.length,1);near(holding[0].alpha,1);
-      assertSameContour(holding[0].points,held.points);assert.equal(element('#choice-labels').innerHTML,'');
+      assertSameContour(holding[0].points,held.points);assert.equal(element('#choice-labels').children.length,0);
     }
     advanceScene(scene,.05);assert.equal(world.phase,'boss-celebrate');assert.ok(crownShapes(g)[0].alpha<1&&crownShapes(g)[0].alpha>0);
     advanceScene(scene,.2);assert.equal(world.phase,'transition');assert.equal(crownShapes(g).length,0);assert.equal(audio.calls.length,1);
   }finally{audio.restore();}
 });
 
-test('campaign levels retain finite enemies and direct attribute upgrades without boss or crown scenes',()=>{
-  for(const level of [5,10,50]){
-    const g=graphicsRecorder(),{world,scene}=app.seedCampaignRenderer(g,390,844,level);
+test('archived LegacyCampaignWorld retains finite enemies and direct attribute upgrades without boss or crown scenes',()=>{
+  for(const level of [5,9,49]){
+    const g=graphicsRecorder(),{world,scene}=app.seedLegacyRenderer(g,390,844,level);
     world.stage=5;
     for(let kill=0;kill<world.config.upgradeEvery;kill++){
       let enemy=world.enemies.find(body=>body.hp>0);
@@ -1333,12 +1479,27 @@ test('campaign levels retain finite enemies and direct attribute upgrades withou
     assert.equal(world.mode,'campaign');assert.equal(world.phase,'battle');assert.equal(world.boss,null);
     assert.equal(world.kills,world.config.upgradeEvery);assert.equal(world.upgrades,1);assert.equal(world.score,0);
     assert.equal(world.totalEnemies,world.config.totalEnemies);assert.deepEqual(world.choices,[]);
-    assert.equal(crownShapes(g).length,0);assert.equal(element('#choice-labels').innerHTML,'');
+    assert.equal(crownShapes(g).length,0);assert.equal(element('#choice-labels').children.length,0);
     assert.deepEqual(scene.testLabels.map(label=>label.text),['弹力 +14%']);
   }
 });
 
 function finishCampaign(world,scene){
+  if(world.config.implemented){
+    assert.equal(world.config.r,0,'this milestone helper exercises the real Peggle flow');
+    assert.equal(world.shoot(-world.maxPull,0),true);
+    const targets=world.statics.filter(pin=>pin.target),last=targets.at(-1);
+    for(const target of targets.slice(0,-1))world.rules.onStaticHit(target,{normalSpeed:world.baseSpeed});
+    Object.assign(world.player,{x:last.x,y:last.y+last.r+world.player.r+.5,vx:0,vy:-world.unit*20,feedbackFreeze:0});
+    world.step(1/120);scene.update(0,0);
+    assert.equal(world.phase,'campaign-celebrate','last target collision starts frenzy before any settlement');
+    assert.equal(app.readRestart().result,null);assert.equal(app.readSkins().skinUnlock,null);
+    advanceScene(scene,1);
+    assert.equal(world.phase,'campaign-celebrate');assert.equal(app.readSkins().skinUnlock,null,'skin must wait for the full frenzy and remaining-ball count');
+    for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
+    assert.equal(world.phase,'over');assert.equal(world.targetsRemaining,0);
+    assert.equal(world.celebration.bonusRemaining,0);return;
+  }
   while(!world.completed){
     let enemy=world.enemies.find(body=>body.hp>0);
     if(!enemy){world.spawnEnemy();enemy=world.enemies.find(body=>body.hp>0);}
@@ -1354,6 +1515,7 @@ test('real milestone wins save progress before the unlock scene, gate dismissal,
   try{
     let g=graphicsRecorder(),run=app.seedCampaignRenderer(g,390,844,10);
     app.seedSkins(null,9);
+    app.seedCampaignAttempt();
     const original=app.readSkins().playerContour;
     finishCampaign(run.world,run.scene);
     let state=app.readRestart(),skin=app.readSkins();
@@ -1361,7 +1523,9 @@ test('real milestone wins save progress before the unlock scene, gate dismissal,
     assert.equal(state.modal,'skin-unlock');assert.equal(state.paused,true);
     assert.equal(skin.skinUnlock.sides,6);assert.equal(skin.skinUnlock.ready,false);
     assert.equal(skin.skinUnlock.phase,'enter');assert.equal(element('#skin-unlock-continue').disabled,true);
-    assert.deepEqual(JSON.parse(saved.get('qiuqiule-campaign')),{completed:10,unlocked:11});
+    let storedCampaign=JSON.parse(saved.get('qiuqiule-campaign'));
+    assert.equal(storedCampaign.completed,10);assert.equal(storedCampaign.unlocked,11);
+    assert.equal(levelRecord(storedCampaign,10).rating,3);assert.equal(levelRecord(storedCampaign,10).wins,1);
     assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:false,sides:6,unlocked:6});
     assertSameContour(skin.active,original);
     clickAction('close');assert.equal(app.readSkins().skinUnlock.phase,'enter');assert.equal(app.readRestart().result,null);
@@ -1396,15 +1560,20 @@ test('real milestone wins save progress before the unlock scene, gate dismissal,
     finishCampaign(run.world,run.scene);
     assert.equal(app.readSkins().skinUnlock,null);assert.ok(app.readRestart().result?.completed);
     assert.equal(app.readRestart().transfer.target,'over');
-    assert.deepEqual(JSON.parse(saved.get('qiuqiule-campaign')),{completed:10,unlocked:11});
+    storedCampaign=JSON.parse(saved.get('qiuqiule-campaign'));
+    assert.equal(storedCampaign.completed,10);assert.equal(storedCampaign.unlocked,11);
+    assert.equal(levelRecord(storedCampaign,10).rating,3);
 
     // Milestone 20 previews seven sides but keeps an equipped six-sided skin.
     run=app.seedCampaignRenderer(graphicsRecorder(),390,844,20);
     app.seedSkins({enabled:true,sides:6,unlocked:6},19);
+    app.seedCampaignAttempt();
     const equipped=app.readSkins().playerContour;
     finishCampaign(run.world,run.scene);
     assert.equal(app.readSkins().skinUnlock.sides,7);assert.equal(app.readRestart().result,null);
-    assert.deepEqual(JSON.parse(saved.get('qiuqiule-campaign')),{completed:20,unlocked:21});
+    storedCampaign=JSON.parse(saved.get('qiuqiule-campaign'));
+    assert.equal(storedCampaign.completed,20);assert.equal(storedCampaign.unlocked,21);
+    assert.equal(levelRecord(storedCampaign,20).rating,3);
     assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:true,sides:6,unlocked:7});
     app.advanceUi(1.66);assertSameContour(app.readSkins().active,skinContour(7));
     clickAction('close');app.advanceUi(.62);
@@ -1441,7 +1610,7 @@ test('the actual renderer uses six-sided skins everywhere without changing colli
 test('six-sided selection skin and rebound deformation stay continuous across the canvas-to-SVG transfer',()=>{
   try{
     for(const destination of ['level','home'])for(const rebound of [false,true]){
-      const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,50),pointer=inputCanvas();
+      const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,49),pointer=inputCanvas();
       app.seedSkins({enabled:true,sides:6,unlocked:6},49);
       const p=selector.player,physical={r:p.r,mass:p.mass};scene.update(0,0);
       if(rebound){
@@ -1450,8 +1619,9 @@ test('six-sided selection skin and rebound deformation stay continuous across th
         assert.equal(selector.phase,'wobble');
       }else advanceScene(scene,.2);
       const rendered=bodyShapes(g)[0].points.slice(0,-1);
-      const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===50);
+      const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===49);
       pointer('pointerdown',target.x,target.y);pointer('pointerup',target.x,target.y);scene.update(0,0);
+    if(destination==='level'){assert.equal(app.readRestart().campaignOffer.level,49);clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});}
       assert.ok(app.readRestart().transfer);
       assertSameContour(uiContours().body,rendered);
       app.advanceUi(0);assertSameContour(uiContours().body,rendered);
@@ -1485,4 +1655,3449 @@ test('actual wardrobe state changes preserve the selected side count while switc
     assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:true,sides:8,unlocked:10});
     assertSameContour(app.readSkins().playerContour,skinContour(8));
   }finally{app.seedSkins();}
+});
+
+function feedbackRun(module=app,strength=1){
+  const g=graphicsRecorder(),run=module.seedRenderer(g,390,844,true);
+  module.setFeedbackStrength(strength);module.resetScoreHud();
+  run.world.spawnTimer=Infinity;run.world.floorTimer=Infinity;run.world.wave=null;run.world.introTimer=Infinity;run.world.fragmentQueue=[];
+  return {g,...run};
+}
+function collideFeedbackEnemy(world){
+  const p=world.player,enemy=world.enemies[0];
+  world.enemies=[enemy];Object.assign(enemy,{born:1,solid:true,hp:1,x:p.x+p.r+enemy.r-.5,y:p.y,vx:0,vy:0});
+  p.vx=world.baseSpeed;p.vy=0;world.step(1/120);
+  const event=world.events.find(e=>e.type==='kill');assert.ok(event,'the real physics collision must kill the target');
+  return event;
+}
+function fireElementInput(selector,value){
+  const target=element(selector);target.value=value;
+  for(const handler of target.listeners.get('input')||[])handler({target});
+}
+let reloadSerial=0;
+async function withReloadedEntry(config,reduced,callback){
+  const previousSettings=saved.get('qiuqiule-settings'),previousMedia=globalThis.matchMedia;
+  const documentListeners=new Map([...listeners].map(([type,handlers])=>[type,[...handlers]]));
+  const previousWindowListeners=new Map([...windowListeners].map(([type,handlers])=>[type,[...handlers]]));
+  const elementListeners=new Map([...elements].map(([selector,node])=>[selector,new Map([...node.listeners].map(([type,handlers])=>[type,[...handlers]]))]));
+  if(config===null)saved.delete('qiuqiule-settings');else saved.set('qiuqiule-settings',JSON.stringify(config));
+  globalThis.matchMedia=()=>({matches:reduced});
+  try{
+    const fresh=await import('data:text/javascript;base64,'+Buffer.from(source+adapter+'\n// feedback reload '+JSON.stringify(config)+' '+reduced+' '+(++reloadSerial)).toString('base64'));
+    await callback(fresh);
+  }finally{
+    globalThis.matchMedia=previousMedia;
+    if(previousSettings===undefined)saved.delete('qiuqiule-settings');else saved.set('qiuqiule-settings',previousSettings);
+    listeners.clear();for(const [type,handlers] of documentListeners)listeners.set(type,handlers);
+    windowListeners.clear();for(const [type,handlers] of previousWindowListeners)windowListeners.set(type,handlers);
+    for(const [selector,node] of elements)node.listeners=elementListeners.get(selector)||new Map();
+    app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);
+  }
+}
+
+function controlRun(module=app,strength=1){
+  const run=feedbackRun(module,strength);
+  run.world.enemies=[];run.world.events=[];
+  return {...run,pointer:inputCanvas(390,844,module)};
+}
+
+test('endless battle and Boss accept moving input with their distinct redirect and bounded additive release rules',()=>{
+  for(const phase of ['battle','boss']){
+    const {world,scene,pointer}=controlRun(),p=world.player;
+    if(phase==='boss'){world.stage=5;world.beginBoss();world.phase='boss';world.events=[];}
+    p.vx=world.baseSpeed*.8;p.vy=0;
+    const speed=Math.hypot(p.vx,p.vy),start={x:p.x,y:p.y};
+    pointer('pointerdown',start.x,start.y);
+    assert.ok(app.readRestart().drag,'a speed above the old readiness threshold still accepts a gesture');
+    pointer('pointermove',start.x,start.y+world.maxPull*.5);scene.update(0,0);
+    assert.equal(app.readRestart().drag.pending,false);near(scene.timeScale,.3);
+    near(p.vx,speed);near(p.vy,0,'starting the aim does not catch or brake the player');
+    pointer('pointerup',start.x,start.y+world.maxPull*.5);
+    near(p.vx,0);near(p.vy,phase==='boss'?-(world.baseSpeed*.5+Math.min(speed,world.readySpeed)):-speed*.9);
+    assert.equal(world.events.filter(e=>e.type==='shoot').length,1);
+    assert.equal(app.readRestart().drag,null);near(scene.timeScale,1);
+  }
+  app.setFeedbackStrength(.6);
+});
+
+test('pending endless taps do not slow, charge or shoot and exact movement or hold thresholds activate aim',t=>{
+  const audio=app.recordFeedbackAudio();t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
+  {
+    const {world,scene,pointer}=controlRun(),p=world.player;
+    pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+5.9,p.y);
+    advanceScene(scene,.119);near(scene.timeScale,1);assert.equal(app.readRestart().drag.pending,true);
+    assert.equal(audio.calls.filter(c=>c.name==='setCharge').length,0);
+    pointer('pointerup',p.x+5.9,p.y);scene.update(0,0);
+    assert.equal(world.events.filter(e=>e.type==='shoot').length,0);assert.equal(app.readRestart().drag,null);
+    assert.equal(audio.calls.filter(c=>c.name==='launch').length,0);
+  }
+  for(const trigger of ['distance','hold']){
+    const {scene,pointer,world}=controlRun(),p=world.player;
+    pointer('pointerdown',p.x,p.y);
+    if(trigger==='distance')pointer('pointermove',p.x+6,p.y);else advanceScene(scene,.12);
+    scene.update(0,0);assert.equal(app.readRestart().drag.pending,false);near(scene.timeScale,.3);
+    pointer('pointercancel');near(scene.timeScale,1);
+  }
+});
+
+test('one endless pointer owns aim while secondary touches and another primary device cannot replace or cancel it',()=>{
+  const {world,scene,pointer}=controlRun(),p=world.player;
+  pointer('pointerdown',p.x,p.y,{pointerType:'touch'});
+  pointer('pointermove',p.x+30,p.y,{pointerType:'touch'});scene.update(0,0);
+  const active=app.readRestart().drag;
+  for(const options of [{pointerId:2,isPrimary:false,pointerType:'touch'},{pointerId:3,isPrimary:true,pointerType:'mouse'}]){
+    pointer('pointerdown',10,10,options);pointer('pointermove',150,100,options);
+    pointer('pointerup',150,100,options);pointer('pointercancel',0,0,options);pointer('lostpointercapture',0,0,options);
+    assert.equal(app.readRestart().drag,active);assert.equal(active.id,1);near(active.dx,30);near(scene.timeScale,.3);
+  }
+  assert.deepEqual(pointer.captures,[1]);assert.equal(world.events.filter(e=>e.type==='shoot').length,0);
+  pointer('pointerup',p.x+30,p.y,{pointerType:'touch'});
+  assert.equal(world.events.filter(e=>e.type==='shoot').length,1);assert.deepEqual(pointer.releases,[1]);
+  app.setFeedbackStrength(.6);
+});
+
+test('endless slow aim uses real elapsed time and expires after its hold and recovery windows',()=>{
+  for(const [strength,minimum] of [[0,.3],[.6,.3],[1,.3]]){
+    const {world,scene,pointer}=controlRun(app,strength),p=world.player;
+    pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+40,p.y);scene.update(0,0);
+    near(scene.timeScale,minimum);advanceScene(scene,.6);
+    assert.ok(Math.abs(world.time-.6*minimum)<1/120+1e-8,'only simulation time is scaled');
+    near(scene.inputClock,.6);near(scene.clock,.6);
+    pointer('pointermove',p.x+60,p.y+10);advanceScene(scene,.6);near(scene.timeScale,minimum);
+    advanceScene(scene,.25);near(scene.timeScale,(1+minimum)/2);
+    advanceScene(scene,.251);near(scene.timeScale,1);
+    pointer('pointermove',p.x+80,p.y);scene.update(0,0);near(scene.timeScale,1,'moving after expiry does not rearm slow time');
+    assert.ok(app.readRestart().drag,'the expired slow window does not prevent continued aim');
+    pointer('pointercancel');near(scene.timeScale,1);
+  }
+  app.setFeedbackStrength(.6);
+});
+
+test('zero feedback keeps independent 0.3 aim time and reduced motion retains gentler 0.6 aim time',async()=>{
+  for(const [strength,reduced] of [[0,false],[1,true],[0,true]])await withReloadedEntry({juice:strength,expressions:true},reduced,fresh=>{
+    for(const phase of ['battle','boss']){
+      const {world,scene,pointer}=controlRun(fresh,strength),p=world.player,minimum=reduced?.6:.3;
+      if(phase==='boss'){world.stage=5;world.beginBoss();advanceToBoss(world,scene);world.events=[];}
+      p.vx=world.baseSpeed*.8;p.vy=0;
+      const startTime=world.time;
+      pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x,p.y+40);scene.update(0,0);
+      assert.equal(fresh.readRestart().drag.pending,false);near(scene.timeScale,minimum);
+      advanceScene(scene,.1);assert.ok(Math.abs(world.time-startTime-.1*minimum)<1/120+1e-8);
+      const speed=Math.hypot(p.vx,p.vy),drag=fresh.readRestart().drag;
+      pointer('pointerup',drag.x,drag.y+40);near(p.vx,0);
+      if(phase==='battle')near(p.vy,-speed*.9);else assert.ok(p.vy<0,'Boss retains its bounded additive launch rule');
+      near(scene.timeScale,1);
+    }
+  });
+});
+
+test('changing visual feedback strength during an active aim never changes its independent slow-time envelope',t=>{
+  const {world,scene,pointer}=controlRun(app,.6),p=world.player;
+  t.after(()=>{pointer('pointercancel');app.setFeedbackStrength(.6);});
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+40,p.y);advanceScene(scene,.4);near(scene.timeScale,.3);
+  app.setFeedbackStrength(0);scene.update(0,0);near(scene.timeScale,.3);
+  app.setFeedbackStrength(1);advanceScene(scene,.8);near(scene.timeScale,.3);
+  app.setFeedbackStrength(.2);advanceScene(scene,.25);near(scene.timeScale,.65);
+  advanceScene(scene,.251);near(scene.timeScale,1);
+});
+
+test('completed real aiming samples persist locally and median calibration applies only when the next run begins',t=>{
+  const before=saved.get('qiuqiule-aim'),{world,scene,pointer}=controlRun(app,0),p=world.player;
+  t.after(()=>{if(before===undefined)saved.delete('qiuqiule-aim');else saved.set('qiuqiule-aim',before);app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  for(let shot=0;shot<20;shot++){
+    Object.assign(p,{x:195,y:600,vx:0,vy:0,feedbackFreeze:0});
+    pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+40,p.y);advanceScene(scene,1.05);
+    near(scene.timeScale,.3);pointer('pointerup',235,600);
+    assert.equal(app.readAimStats().sampleCount,shot+1);
+  }
+  const report=app.readAimStats(),stored=JSON.parse(saved.get('qiuqiule-aim'));
+  near(report.medianSeconds,1.05);assert.equal(report.completedCount,20);assert.equal(report.samples.length,20);
+  near(report.nextHoldSeconds,.9);near(report.currentRunHoldSeconds,1.2);
+  assert.deepEqual(stored.samples,report.samples);assert.equal(stored.completedCount,20);
+  Object.assign(p,{x:195,y:600,vx:0,vy:0});pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+40,p.y);
+  advanceScene(scene,1.15);near(scene.timeScale,.3,'calibration does not shorten the current run');pointer('pointercancel');
+  app.prepareNormalGame();const next=app.readRestart().world;finishStartingChoice(next,scene);next.enemies=[];next.spawnTimer=next.floorTimer=next.introTimer=Infinity;next.wave=null;
+  near(app.readAimStats().currentRunHoldSeconds,.9);
+  pointer('pointerdown',next.player.x,next.player.y);pointer('pointermove',next.player.x+40,next.player.y);
+  advanceScene(scene,.9);near(scene.timeScale,.3);advanceScene(scene,.25);near(scene.timeScale,.65);advanceScene(scene,.251);near(scene.timeScale,1);
+  pointer('pointercancel');assert.equal(app.readAimStats().sampleCount,20,'cancelled calibration checks are not recorded');
+});
+
+test('tap, cancel, interruption, campaign and acceptance-demo gestures do not contaminate local aim calibration',t=>{
+  const before=saved.get('qiuqiule-aim'),baseline={version:1,completedCount:3,samples:[.3,.4,.5]};
+  t.after(()=>{if(before===undefined)saved.delete('qiuqiule-aim');else saved.set('qiuqiule-aim',before);document.hidden=false;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  for(const kind of ['tap','cancel','pause','background','demo','campaign']){
+    const run=kind==='campaign'?app.seedCampaignRenderer(graphicsRecorder()):controlRun();
+    app.seedAimStats(baseline);saved.set('qiuqiule-aim',JSON.stringify(baseline));
+    if(kind==='demo')app.runFeedbackDemo('steer');
+    const {world,scene}=app.readRestart(),pointer=inputCanvas(),p=world.player;world.enemies=[];world.spawnTimer=world.floorTimer=world.introTimer=Infinity;world.wave=null;
+    p.vx=p.vy=0;const start={x:p.x,y:p.y};pointer('pointerdown',start.x,start.y);
+    if(kind!=='tap')pointer('pointermove',start.x+40,start.y);
+    advanceScene(scene,kind==='tap'?.05:.3);
+    if(kind==='cancel')pointer('pointercancel');
+    else if(kind==='pause')clickAction('pause');
+    else if(kind==='background'){document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();document.hidden=false;}
+    pointer('pointerup',start.x+(kind==='tap'?0:40),start.y);
+    assert.deepEqual(app.readAimStats().samples,baseline.samples,kind);assert.equal(saved.get('qiuqiule-aim'),JSON.stringify(baseline),kind);
+  }
+});
+
+test('the settings export action downloads the bounded local aim report without changing a running window',t=>{
+  controlRun();app.seedAimStats({completedCount:30,samples:Array(30).fill(1.05)});
+  const originalCreate=document.createElement,originalBody=document.body,created=[],appended=[];
+  document.createElement=tag=>{
+    if(tag!=='a')return originalCreate(tag);
+    const anchor={click(){this.clicked=true;},remove(){this.removed=true;}};created.push(anchor);return anchor;
+  };
+  document.body={append:node=>appended.push(node)};
+  t.after(()=>{document.createElement=originalCreate;if(originalBody===undefined)delete document.body;else document.body=originalBody;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  clickAction('export-aim');assert.equal(created.length,1);assert.deepEqual(appended,created);
+  const link=created[0];assert.equal(link.clicked,true);assert.equal(link.removed,true);assert.equal(link.download,'qiuqiule-aim-v6.9.0.json');
+  assert.match(link.href,/^data:application\/json;charset=utf-8,/);
+  const report=JSON.parse(decodeURIComponent(link.href.slice(link.href.indexOf(',')+1)));
+  assert.equal(report.sampleCount,30);assert.equal(report.medianSeconds,1.05);assert.equal(report.nextHoldSeconds,.9);assert.equal(report.currentRunHoldSeconds,1.2);
+  assert.equal(app.readAimStats().currentRunHoldSeconds,1.2,'exporting statistics never applies calibration mid-run');
+});
+
+test('slow aim preserves immediate pointer contours, normal HUD timing and a photo draw on every frame',t=>{
+  const {g,world,scene,pointer}=controlRun(),p=world.player;let photo;
+  t.after(()=>{pointer('pointercancel');photo?.restore();app.setFeedbackStrength(.6);});
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+world.maxPull*.5,p.y);scene.update(0,0);
+  assertSmoothPulledBody(g,p,app.readRestart().drag,world.maxPull);
+  pointer('pointermove',p.x,p.y-world.maxPull);scene.update(0,0);
+  assertSmoothPulledBody(g,p,app.readRestart().drag,world.maxPull);
+  photo=app.recordPlayerPhoto();scene.update(0,0);
+  const previousPhotos=photo.calls.length;
+  pointer('pointermove',p.x-world.maxPull,p.y);scene.update(0,0);
+  assert.equal(photo.calls.length,previousPhotos+1,'a zero-step pointer frame still repaints the photo');
+  const pose=photo.calls.at(-1).pose;near(pose.x,p.x);near(pose.y,p.y);near(pose.pullAmount,1);
+  world.score=40;scene.update(0,0);assert.notEqual(element('#score').textContent,'0040');
+  const simulationStart=world.time;advanceScene(scene,.25);
+  assert.equal(element('#score').textContent,'0040');near(scene.clock,.25);
+  assert.ok(world.time-simulationStart<.1,'HUD completes in real time while the simulation remains slowed');
+  assert.ok(photo.calls.length>=previousPhotos+6);
+});
+
+test('cancelling or interrupting endless aim clears slow time and charge before any delayed release',t=>{
+  const audio=app.recordFeedbackAudio();t.after(()=>{audio.restore();app.setFeedbackStrength(.6);document.hidden=false;});
+  for(const reason of ['pointercancel','lostpointercapture','pause','background','pagehide','blur','phase','restart']){
+    const {world,scene,pointer}=controlRun(),p=world.player,events=observeWorldEvents(world);
+    pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+world.maxPull*.8,p.y);scene.update(0,0);near(scene.timeScale,.3);
+    if(reason==='pause'||reason==='restart'){clickAction('pause');if(reason==='restart'){app.advanceUi(.42);clickRestart();}}
+    else if(reason==='background'){
+      document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();document.hidden=false;
+    }else if(reason==='pagehide'||reason==='blur'){
+      for(const handler of windowListeners.get(reason))handler();
+      if(reason==='pagehide')for(const handler of windowListeners.get('pageshow'))handler();
+    }else if(reason==='phase'){world.beginUpgrade();scene.update(0,0);}
+    else pointer(reason);
+    assert.equal(app.readRestart().drag,null,reason);near(scene.timeScale,1);
+    assert.equal(audio.calls.at(-1).name,'stopCharge',reason);
+    pointer('pointerup',p.x+world.maxPull*.8,p.y);scene.update(0,0);
+    assert.equal(events.filter(e=>e.type==='shoot').length,0,reason);
+  }
+});
+
+test('a real viewport resize cancels endless aim while a pixel-density-only update keeps the gesture',t=>{
+  const {g,world,scene,pointer}=controlRun(),p=world.player;
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;app.setFeedbackStrength(.6);});
+  app.mountSceneBoundary(pointer.canvas,g);assert.equal(typeof resize,'function');
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+40,p.y);scene.update(0,0);near(scene.timeScale,.3);
+  const gesture=app.readRestart().drag;
+  window.devicePixelRatio=3;resize();assert.equal(app.readRestart().drag,gesture);
+  window.innerWidth=844;window.innerHeight=390;resize();
+  assert.equal(app.readRestart().drag,null);near(scene.timeScale,1);assert.equal(world.width,844);assert.equal(world.height,390);
+  pointer('pointerup',p.x+40,p.y);assert.equal(world.events.filter(e=>e.type==='shoot').length,0);
+});
+
+test('archived campaign retains its readiness gate, captured-speed shot and full-speed simulation during drag',()=>{
+  const g=graphicsRecorder(),{world,scene}=app.seedLegacyRenderer(g),pointer=inputCanvas(),p=world.player;
+  world.enemies=[];world.spawnTimer=Infinity;app.setFeedbackStrength(1);
+  p.vx=world.readySpeed*1.5;p.vy=0;pointer('pointerdown',p.x,p.y);assert.equal(app.readRestart().drag,null);
+  p.vx=world.unit*4;const carried=p.vx,start={x:p.x,y:p.y};
+  pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x,start.y+world.maxPull*.5);advanceScene(scene,.2);
+  near(scene.timeScale,1);near(world.time,.2);assert.ok(p.vx<carried*.2,'campaign keeps its original drag brake');
+  pointer('pointerup',start.x,start.y+world.maxPull*.5);
+  const launch=Math.min(world.unit*60,world.baseSpeed*.5*Math.sqrt(world.energy/world.density));
+  near(p.vx,0);near(p.vy,-launch-carried);app.setFeedbackStrength(.6);
+});
+
+test('the actual endless guide keeps seven points and splits only its first three above twenty units per second',()=>{
+  for(const mode of ['endless','campaign'])for(const units of [20,20.01]){
+    const g=graphicsRecorder(),{world,scene}=mode==='campaign'?app.seedCampaignRenderer(g):app.seedRenderer(g,390,844,true);
+    const pointer=inputCanvas(),p=world.player;world.enemies=[];world.spawnTimer=Infinity;app.setFeedbackStrength(1);
+    pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x,p.y+world.maxPull);
+    p.vx=units*world.unit;p.vy=0;scene.update(0,0);
+    const dots=g.shapes.filter(shape=>shape.type==='circle'&&shape.r===1.7);
+    assert.equal(dots.length,7);
+    for(let index=0;index<7;index++){
+      const dot=dots[index],velocity=mode==='endless'&&units>20&&index<3;
+      if(velocity){assert.ok(dot.x>p.x);near(dot.y,p.y);}
+      else{near(dot.x,p.x);assert.ok(dot.y<p.y);}
+      near(dot.alpha,.36*(1-(index+1)/9)*(velocity?.45:1));
+    }
+    const arrow=g.shapes.find(shape=>shape.type==='stroke'&&shape.width===1.4);
+    assert.ok(arrow);near(arrow.points[1].x,p.x);assert.ok(arrow.points[1].y<p.y,'the arrow always points in the new launch direction');
+    pointer('pointercancel');
+  }
+  app.setFeedbackStrength(.6);
+});
+
+test('slow aim expires across a stalled frame while simulation keeps its bounded real-time tick',()=>{
+  const {world,scene,pointer}=controlRun(),p=world.player,calls=[],step=world.step;
+  world.step=function(dt,dragging,options){calls.push({dt,dragging,options});return step.call(this,dt,dragging,options);};
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+30,p.y);scene.update(0,0);
+  advanceScene(scene,.05);assert.equal(calls.length,6);calls.forEach(call=>near(call.dt,.3/120));
+  assert.ok(calls.every(call=>Math.abs(call.options.timeScale-.3)<1e-8));
+  scene.update(0,2000);near(scene.timeScale,1);assert.ok(scene.inputClock>=2.05-1e-8);
+  assert.equal(calls.length,12,'a stalled frame caps catch-up at six real ticks');
+  for(const call of calls){near(call.dt/call.options.timeScale,1/120);assert.ok(call.dt<=1/120+1e-12);}
+  pointer('pointercancel');app.setFeedbackStrength(.6);
+});
+
+test('a kill during slow aim releases its frozen target in real time and emits its shards once',t=>{
+  const {world,scene}=feedbackRun(),pointer=inputCanvas(),p=world.player;
+  const audio=app.recordFeedbackAudio(),shards=[],particles=scene.particles;
+  scene.particles=function(event,...args){shards.push(event);return particles.call(this,event,...args);};
+  t.after(()=>{pointer('pointercancel');audio.restore();app.setFeedbackStrength(.6);});
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x,p.y+40);scene.update(0,0);near(scene.timeScale,.3);
+  const event=collideFeedbackEnemy(world),start=world.time;scene.update(0,0);
+  assert.ok(Number.isFinite(event.feedbackTime));assert.equal(scene.impactGhosts.length,1);
+  advanceScene(scene,.05);assert.equal(scene.impactGhosts.length,1);
+  advanceScene(scene,.05);assert.equal(scene.impactGhosts.length,0);
+  assert.ok(world.time-start<.05,'the hold expires before eighty milliseconds of slowed world time');
+  assert.equal(shards.filter(e=>e===event).length,1);assert.equal(audio.calls.filter(c=>c.name==='impact'&&c.args[0].kind==='kill').length,1);
+  advanceScene(scene,.1);assert.equal(shards.filter(e=>e===event).length,1);
+});
+
+test('normal and reduced-motion slow aim move and paint on every 30, 60 and 120 Hz frame',async()=>{
+  for(const reduced of [false,true])await withReloadedEntry({juice:.6,expressions:false},reduced,fresh=>{
+    for(const hz of [30,60,120])for(const aiming of [false,true]){
+      const {world,scene,pointer,g}=controlRun(fresh,.6),p=world.player;
+      Object.assign(p,{x:100,y:400,vx:world.unit*4,vy:0});
+      const enemy=world.makeBody(250,550,world.unit,.8);
+      Object.assign(enemy,{hp:100,maxHp:100,born:1,solid:true,vx:-world.unit*2,vy:0});world.enemies=[enemy];
+      const auxiliary=world.makeBody(100,680,world.unit*.5,1);
+      Object.assign(auxiliary,{isAuxiliary:true,hp:Infinity,born:1,solid:true,vx:world.unit*12,vy:0});world.auxiliaries=[auxiliary];
+      if(aiming){pointer('pointerdown',100,400);pointer('pointermove',100,440);}
+      const minimum=aiming?(reduced?.6:.3):1,start=world.time,steps=[],step=world.step;
+      world.step=function(dt,dragging,options){steps.push({dt,scale:options.timeScale});return step.call(this,dt,dragging,options);};
+      let previousX=p.x,previousEnemyX=enemy.x,previousAuxX=auxiliary.x,previousPaintX=null;
+      for(let frame=1;frame<=hz;frame++){
+        scene.update(frame*1000/hz,1000/hz);
+        assert.ok(p.x>previousX,`${hz} Hz, ${minimum}x: player cannot repeat a stationary frame`);
+        assert.ok(enemy.x<previousEnemyX,`${hz} Hz, ${minimum}x: enemies must also move every frame`);
+        assert.ok(world.auxiliaries.includes(auxiliary)&&auxiliary.x>previousAuxX,'split balls keep the same continuous cadence');
+        const painted=bodyShapes(g).at(-1);assert.ok(painted?.points.length>10,'the real draw path paints the player');
+        const paintX=(Math.min(...painted.points.map(point=>point.x))+Math.max(...painted.points.map(point=>point.x)))/2;
+        if(previousPaintX!==null)assert.ok(paintX>previousPaintX,'the rendered ball advances with physics');
+        previousX=p.x;previousEnemyX=enemy.x;previousAuxX=auxiliary.x;previousPaintX=paintX;
+      }
+      assert.equal(steps.length,120,'slow motion keeps the same update count as normal speed');
+      near(world.time-start,minimum);near(world.feedbackTime,1);near(scene.accumulator,0);
+      steps.forEach(call=>{near(call.dt,minimum/120);near(call.dt/call.scale,1/120);});
+      pointer('pointercancel');
+    }
+  });
+});
+
+test('real frame remainders conserve feedback time across slow and normal aim, including a freeze across release',t=>{
+  const {world,scene}=feedbackRun(),pointer=inputCanvas(),p=world.player,enemy=world.enemies[0];
+  world.enemies=[enemy];world.events=[];
+  const shards=[],particles=scene.particles;
+  scene.particles=function(event,...args){shards.push(event);return particles.call(this,event,...args);};
+  t.after(()=>{pointer('pointercancel');app.setFeedbackStrength(.6);});
+  let budget=0,kill,shot;
+  const frame=milliseconds=>{
+    budget+=milliseconds/1000;scene.update(0,milliseconds);
+    const pendingReal=scene.timeSlices.reduce((sum,slice)=>sum+slice.world/slice.scale,0);
+    near(scene.accumulator,pendingReal);near(world.feedbackTime+pendingReal,budget);
+    assert.ok(scene.timeSlices.every(slice=>slice.world>0&&slice.scale>0&&Number.isFinite(slice.world/slice.scale)));
+    if(shot)near(p.feedbackFreeze,Math.max(0,shot.freezeDuration-(world.feedbackTime-shot.feedbackTime)));
+    if(kill){
+      const stillHeld=world.feedbackTime-kill.feedbackTime<kill.freezeDuration-1e-10;
+      assert.equal(scene.impactGhosts.some(ghost=>ghost.event===kill),stillHeld,'the held target expires on conserved real feedback time');
+      assert.equal(shards.filter(event=>event===kill).length,stillHeld?0:1);
+    }
+  };
+  const begin=()=>{
+    const start={x:p.x,y:p.y};pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x,start.y+40);
+    near(scene.timeScale,.3);return start;
+  };
+  frame(7);assert.equal(world.feedbackTime,0);assert.ok(scene.timeSlices.some(slice=>slice.scale===1));
+  const start=begin();
+  Object.assign(enemy,{born:1,solid:true,hp:1,x:p.x+p.r+enemy.r-.5,y:p.y,vx:0,vy:0});p.vx=world.baseSpeed;p.vy=0;
+  frame(17);assert.equal(scene.impactGhosts.length,1);kill=scene.impactGhosts[0].event;
+  assert.ok(scene.timeSlices.some(slice=>Math.abs(slice.scale-.3)<1e-8),'a real slowed frame leaves a fraction to cross the release');
+  pointer('pointerup',start.x,start.y+40);near(scene.timeScale,1);shot=world.events.find(event=>event.type==='shoot');assert.ok(shot);
+  frame(6);assert.ok(p.feedbackFreeze>0);frame(11);assert.ok(p.feedbackFreeze>0);
+  begin();frame(23);assert.equal(p.feedbackFreeze,0,'the release hold expires while the next aim is already slow');
+  pointer('pointercancel');frame(8);
+  for(const milliseconds of [4,7,12,9])frame(milliseconds);
+  assert.equal(scene.impactGhosts.length,0);assert.equal(shards.filter(event=>event===kill).length,1);
+  shot=null;
+  for(let cycle=0;cycle<4;cycle++){
+    frame(7);const next=begin();frame(17);
+    pointer('pointerup',next.x,next.y+40);frame(9);
+  }
+  frame(50);
+  assert.ok(scene.timeSlices.every(slice=>slice.scale===1),'normal frames eventually consume every historical slow slice');
+  assert.ok(budget-world.feedbackTime<1/120+1e-8,'only the current unconsumed fixed-step fraction remains');
+});
+
+test('a real slow final kill passes through clearing and restores later steps in its frame to normal transition time',t=>{
+  const {world,scene}=feedbackRun(),pointer=inputCanvas(),p=world.player,enemy=world.enemies[0],steps=[],step=world.step;
+  t.after(()=>{pointer('pointercancel');app.setFeedbackStrength(.6);});
+  world.enemies=[enemy];world.events=[];world.stageKills=world.killTarget-1;world.score=130;
+  world.feedbackFreezeUsed=.25;app.resetScoreHud();
+  world.step=function(dt,dragging,options){
+    const record={before:this.phase,scale:options.timeScale,dt};steps.push(record);
+    const result=step.call(this,dt,dragging,options);record.after=this.phase;record.feedbackAfter=this.feedbackTime;return result;
+  };
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x,p.y+40);scene.update(0,7);
+  assert.equal(steps.length,0);assert.ok(scene.timeSlices.length>0,'the fixture creates its slow remainder through a real frame');
+  Object.assign(enemy,{born:1,solid:true,hp:1,x:p.x+p.r+enemy.r-.5,y:p.y,vx:0,vy:0});p.vx=world.baseSpeed;p.vy=0;
+  scene.update(0,50);
+  assert.ok(steps.some(record=>record.before==='battle'&&record.after==='clearing'));
+  const crossing=steps.findIndex(record=>record.before==='clearing'&&record.after==='transition');
+  assert.ok(crossing>=0);near(steps[crossing].scale,.3);
+  const later=steps.slice(crossing+1);assert.ok(later.length>=1,'the kill frame has budget for further real transition steps');
+  assert.ok(later.every(record=>record.before==='transition'&&Math.abs(record.scale-1)<1e-12&&Math.abs(record.dt-1/120)<1e-12));
+  assert.equal(app.readRestart().drag,null);near(scene.timeScale,1);assert.equal(world.score,140);
+  assert.ok(scene.timeSlices.every(slice=>slice.scale===1));
+  near(world.feedbackTime+scene.timeSlices.reduce((sum,slice)=>sum+slice.world/slice.scale,0),.057);
+  const deadline=steps[crossing].feedbackAfter+1.85;
+  advanceScene(scene,deadline-.057-.002);assert.equal(world.phase,'transition','the ordinary transition finishes before showing choices');
+  advanceScene(scene,1/120+.004);assert.equal(world.phase,'choose');assert.equal(world.choices.length,3);
+  assert.ok(element('#choice-labels').children.length>0&&element('#choice-labels').children.every(node=>node.style.opacity==='1'));
+});
+
+test('charge thresholds vibrate once per drag and cancellation immediately stops the charge sound',t=>{
+  const {world}=feedbackRun(),pointer=inputCanvas(),audio=app.recordFeedbackAudio(),pulses=[];
+  const previousVibrate=navigator.vibrate;
+  navigator.vibrate=value=>pulses.push(value);
+  t.after(()=>{audio.restore();if(previousVibrate===undefined)delete navigator.vibrate;else navigator.vibrate=previousVibrate;app.setFeedbackStrength(.6);});
+  const p=world.player,move=amount=>pointer('pointermove',p.x+world.maxPull*amount,p.y);
+  pointer('pointerdown',p.x,p.y);
+  for(const amount of [.49,.5,.65,.8,.9,1,.4,.8,1])move(amount);
+  assert.deepEqual(pulses,[6,8,12]);
+  assert.equal(audio.calls.filter(c=>c.name==='setCharge').length,9);
+  pointer('pointercancel');assert.equal(app.readRestart().drag,null);assert.equal(audio.calls.at(-1).name,'stopCharge');
+  pointer('pointerdown',p.x,p.y);move(.5);assert.deepEqual(pulses,[6,8,12,6],'a fresh drag rearms the threshold');
+  pointer('lostpointercapture');assert.equal(audio.calls.at(-1).name,'stopCharge');
+  pointer('pointerdown',p.x,p.y);move(.8);pointer('pointerup',p.x+world.maxPull*.8,p.y);
+  assert.equal(audio.calls.at(-1).name,'stopCharge','release stops the sustained tone before the launch event is played');
+  assert.equal(world.events.filter(e=>e.type==='shoot').length,1,'cancellation never launches a ball');
+});
+
+test('real dragging leaves the border, canvas and collision bounds fixed while haptic and charge audio remain active',t=>{
+  const {g,world,scene}=feedbackRun(),pointer=inputCanvas(),p=world.player,audio=app.recordFeedbackAudio(),pulses=[];
+  world.enemies=[];const previousVibrate=navigator.vibrate;navigator.vibrate=value=>pulses.push(value);
+  t.after(()=>{pointer('pointercancel');audio.restore();if(previousVibrate===undefined)delete navigator.vibrate;else navigator.vibrate=previousVibrate;app.setFeedbackStrength(.6);});
+  scene.update(0,0);const resting={...g.borders[0]},bounds={...world.arenaBounds},canvasTransform=element('#game').style.transform;
+  const physical={x:p.x,y:p.y,r:p.r,vx:p.vx,vy:p.vy};
+  pointer('pointerdown',p.x,p.y);
+  for(const amount of [.49,.5,.79,.8,.99,1,.4,1]){
+    pointer('pointermove',p.x+world.maxPull*amount,p.y);advanceScene(scene,.05);
+    assert.equal(g.borders.length,1);assert.deepEqual(g.borders[0],resting,'crossing charge thresholds never moves or duplicates the border');
+    assert.deepEqual(world.arenaBounds,bounds);assert.equal(element('#game').style.transform,canvasTransform);
+    assert.deepEqual({x:p.x,y:p.y,r:p.r,vx:p.vx,vy:p.vy},physical);
+    assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);
+  }
+  assert.deepEqual(pulses,[6,8,12]);assert.equal(audio.calls.filter(c=>c.name==='setCharge').length,8);
+  pointer('pointercancel');assert.equal(audio.calls.at(-1).name,'stopCharge');
+  advanceScene(scene,.2);assert.deepEqual(g.borders[0],resting);
+  p.x=bounds.left+p.r+.25;p.y=world.height*.5;p.vx=-world.unit*5;p.vy=0;world.step(1/120,false);
+  assert.ok(p.vx>0);near(p.x-p.r,bounds.left);assert.deepEqual(world.arenaBounds,bounds);
+});
+
+test('a lethal physics contact plays one kill sound, holds its target, then emits directional shards once',t=>{
+  const {g,world,scene}=feedbackRun(),audio=app.recordFeedbackAudio();
+  t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
+  const event=collideFeedbackEnemy(world);
+  assert.ok(world.events.some(e=>e.type==='hit'&&e.lethal),'the event queue includes the associated lethal hit');
+  scene.update(0,0);
+  assert.deepEqual(audio.calls.filter(c=>c.name==='impact').map(c=>c.args[0].kind),['kill']);
+  assert.equal(scene.impactGhosts.length,1);assert.equal(scene.effects.filter(e=>e.type==='shard').length,0);
+  assert.ok(g.shapes.some(s=>s.type==='path'&&s.color===0xe88c72),'the frozen target is still drawn');
+  advanceScene(scene,event.freezeDuration-.001);
+  assert.equal(scene.impactGhosts.length,1);assert.equal(scene.effects.filter(e=>e.type==='shard').length,0);
+  // The scene ticks every 1/120 real seconds; cross one physical tick rather
+  // than assuming a 2 ms render frame must have advanced the world clock.
+  scene.update(0,1000/120);
+  assert.equal(scene.impactGhosts.length,0);
+  const shards=scene.effects.filter(e=>e.type==='shard');assert.ok(shards.length>=3);
+  for(const shard of shards){near(shard.x,event.contactX);near(shard.y,event.contactY);assert.ok(shard.vx*event.nx+shard.vy*event.ny>0);}
+  scene.update(0,0);assert.equal(scene.effects.filter(e=>e.type==='shard').length,shards.length,'an expired ghost cannot emit twice');
+  assert.deepEqual(audio.calls.filter(c=>c.name==='impact').map(c=>c.args[0].kind),['kill']);
+});
+
+function triggerLastEndlessKill(module=app,{strength=1,exhausted=false}={}){
+  const run=feedbackRun(module,strength),{world,scene}=run;
+  world.stageKills=world.killTarget-1;world.score=130;module.resetScoreHud();
+  if(exhausted){world.feedbackFreezeUsed=.25;world.player.feedbackFreeze=0;}
+  const shardCalls=[],particles=scene.particles;
+  scene.particles=function(event,...args){shardCalls.push(event);return particles.call(this,event,...args);};
+  const event=collideFeedbackEnemy(world);
+  assert.equal(world.phase,'clearing','the real threshold collision begins clearing before scene feedback is handled');
+  assert.equal(world.stageKills,world.killTarget);assert.equal(world.score,140);assert.ok(world.events.some(e=>e.type==='clearingStart'));
+  return {...run,event,shardCalls};
+}
+
+test('the last endless kill keeps its sound and held target while its clear zoom completes through the reward transition',t=>{
+  const audio=app.recordFeedbackAudio(),tones=app.recordTones();
+  t.after(()=>{audio.restore();tones.restore();app.setFeedbackStrength(.6);});
+  const {world,scene,event,shardCalls}=triggerLastEndlessKill();scene.update(0,0);
+  assert.deepEqual(audio.calls.filter(c=>c.name==='impact').map(c=>c.args[0].kind),['kill']);
+  assert.equal(scene.impactGhosts.length,1);assert.equal(shardCalls.length,0);
+  assert.equal(scene.zoomPulse.kind,'clear','the final impact starts the stronger clear envelope');
+  assert.equal(tones.calls.filter(args=>args[0]===480).length,0,'the upgrade tone must not cover the kill attack');
+  advanceScene(scene,.08);near(scene.feedbackCamera.zoom,1.04);
+  assert.equal(world.phase,'clearing');assert.equal(tones.calls.filter(args=>args[0]===480).length,0);
+  scene.update(0,1000/120);
+  assert.equal(world.phase,'transition');assert.equal(scene.impactGhosts.length,0);assert.equal(shardCalls.filter(e=>e===event).length,1);
+  assert.equal(tones.calls.filter(args=>args[0]===480).length,1,'upgrade sound follows only after clearing and the last hold finish');
+  advanceScene(scene,.87);assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);assert.equal(element('#game').style.transform,'none');
+  assert.equal(shardCalls.filter(e=>e===event).length,1);assert.deepEqual(audio.calls.filter(c=>c.name==='impact').map(c=>c.args[0].kind),['kill']);
+  advanceScene(scene,1.85-world.phaseTime+.02);
+  assert.equal(world.phase,'choose');assert.equal(world.ready,true);assert.equal(world.choices.length,3);
+  assert.ok(element('#choice-labels').children.length>0&&element('#choice-labels').children.every(node=>node.style.opacity==='1'));
+  const choice=world.choices[0];world.player.x=choice.x;world.player.y=choice.y;world.player.vx=world.player.vy=0;
+  scene.update(0,1000/120);assert.equal(world.phase,'reward','the visible reward ball is still selectable');
+  advanceScene(scene,1.01);assert.equal(world.phase,'battle');assert.equal(world.stage,2);assert.equal(world.enemies.length,7);assert.equal(world.stageKills,0);
+  assert.equal(tones.calls.filter(args=>args[0]===480).length,1,'leaving the reward transition cannot replay its cue');
+});
+
+test('a final kill with exhausted freeze budget still emits its shards, kill sound and full clear zoom',t=>{
+  const audio=app.recordFeedbackAudio();t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
+  const {world,scene,event,shardCalls}=triggerLastEndlessKill(app,{exhausted:true});
+  assert.equal(event.freezeDuration,0);scene.update(0,0);
+  assert.equal(scene.impactGhosts.length,0);assert.equal(shardCalls.filter(e=>e===event).length,1);
+  assert.deepEqual(audio.calls.filter(c=>c.name==='impact').map(c=>c.args[0].kind),['kill']);
+  advanceScene(scene,.08);near(scene.feedbackCamera.zoom,1.04);assert.equal(world.phase,'transition');
+  advanceScene(scene,.871);assert.equal(scene.zoomPulse,null);assert.equal(shardCalls.filter(e=>e===event).length,1);
+});
+
+test('last-kill reward transitions still suppress zoom at zero strength and under reduced motion',async()=>{
+  for(const reduced of [false,true])await withReloadedEntry({juice:reduced?1:0,expressions:false},reduced,fresh=>{
+    const {world,scene,event,shardCalls}=triggerLastEndlessKill(fresh,{strength:reduced?1:0});scene.update(0,0);
+    assert.equal(scene.zoomPulse,null);advanceScene(scene,.3);
+    assert.equal(scene.feedbackCamera,null);assert.equal(element('#game').style.transform,'none');
+    assert.equal(scene.impactGhosts.length,0);assert.equal(shardCalls.filter(e=>e===event).length,1);
+    advanceScene(scene,1.85-world.phaseTime+.02);assert.equal(world.phase,'choose');assert.equal(world.choices.length,3);
+  });
+});
+
+test('the last-kill clearing pauses its upgrade cue and restarting discards the unfinished clear',t=>{
+  const tones=app.recordTones();t.after(()=>{tones.restore();app.setFeedbackStrength(.6);});
+  let run=triggerLastEndlessKill();run.scene.update(0,0);advanceScene(run.scene,.05);
+  clickAction('pause');advanceScene(run.scene,.5);assert.equal(tones.calls.filter(args=>args[0]===480).length,0);
+  clickAction('resume');app.advanceUi(.42);advanceScene(run.scene,.12);
+  assert.equal(tones.calls.filter(args=>args[0]===480).length,1);
+  run=triggerLastEndlessKill();run.scene.update(0,0);
+  clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);advanceScene(run.scene,.3);
+  assert.equal(tones.calls.filter(args=>args[0]===480).length,2,'only the new starting choice adds a cue; the abandoned clearing cue cannot leak');
+});
+
+function rhythmEnemy(world,x,y,{hp=1000,r=world.unit*.7}={}){
+  const body=world.makeBody(x,y,r,.8);
+  Object.assign(body,{hp,maxHp:hp,born:1,solid:true,vx:0,vy:0});world.enemies.push(body);return body;
+}
+function pressureRun(count,module=app,strength=1){
+  const run=controlRun(module,strength),{world}=run;
+  Object.assign(world.player,{x:world.width/2,y:world.height-70,vx:0,vy:0});
+  for(let i=0;i<count;i++)rhythmEnemy(world,50+i%5*58,100+Math.floor(i/5)*96);
+  return run;
+}
+function clearingRun(module=app,strength=1){
+  const run=controlRun(module,strength),{world,scene}=run;
+  world.stageKills=world.killTarget-1;
+  const last=rhythmEnemy(world,100,250,{hp:1});rhythmEnemy(world,320,730);
+  world.damage(last,2);scene.update(0,1000/120);
+  assert.equal(world.phase,'clearing');return run;
+}
+
+test('a real endless opening has six clustered balls, waits two intervals, then delivers its scheduled wave and floor refills',()=>{
+  let g=graphicsRecorder(),{world,scene}=app.seedRenderer(g,390,844,true);app.setFeedbackStrength(0);
+  const opening=new Set(world.enemies.map(body=>body.id)),events=observeWorldEvents(world);
+  assert.equal(opening.size,6);assert.equal(new Set(world.enemies.map(body=>body.clusterId)).size,1);
+  scene.update(0,0);assertStageProgress(world);assert.equal(element('#stage-progress').hidden,false);
+  advanceScene(scene,3.99);assert.equal(world.enemies.length,6);
+  advanceScene(scene,.02);assert.equal(world.enemies.length,7);
+  advanceScene(scene,.28);assert.equal(world.enemies.length,7);
+  advanceScene(scene,.02);assert.equal(world.enemies.length,8);
+  advanceScene(scene,.61);assert.equal(world.enemies.length,10);
+  const wave=events.filter(event=>event.type==='spawn'&&!opening.has(event.bodyId));
+  assert.equal(wave.length,4);assert.equal(new Set(wave.map(event=>event.clusterId)).size,1);
+  for(const event of wave){const body=world.enemies.find(enemy=>enemy.id===event.bodyId);assert.ok(Math.hypot(event.x-body.clusterX,event.y-body.clusterY)<=world.unit*2.5+1e-6);}
+  g=graphicsRecorder();({world,scene}=app.seedRenderer(g,390,844,true));app.setFeedbackStrength(0);
+  for(const body of world.enemies.slice(0,4))world.damage(body,1000);
+  scene.update(0,1000/120);assert.equal(world.liveCount,3,'the floor starts replenishing immediately');
+  advanceScene(scene,.13);assert.equal(world.liveCount,3);
+  advanceScene(scene,.02);assert.equal(world.liveCount,4);
+  advanceScene(scene,.31);assert.equal(world.liveCount,6);assert.equal(world.stageKills,4);
+  assertStageProgress(world);app.setFeedbackStrength(.6);
+});
+
+test('a complete real kill batch carries its surplus through ordered fixed-score clearing and the ordinary reward flow',t=>{
+  const {world,scene}=controlRun(),audio=app.recordClearAudio(),events=observeWorldEvents(world);
+  t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
+  const targets=Array.from({length:15},()=>rhythmEnemy(world,120,420,{hp:1}));
+  const survivors=[[145,420],[220,420],[300,700]].map(([x,y])=>rhythmEnemy(world,x,y));
+  assert.equal(world.shoot(0,-world.maxPull),true);
+  for(let index=0;index<13;index++)world.damage(targets[index],2);
+  scene.update(0,0);assert.equal(world.phase,'battle');assert.equal(world.stageKills,13);assertStageProgress(world);
+  world.damage(targets[13],2);assert.ok(world.pendingClearing);world.damage(targets[14],2);
+  assert.equal(world.stageKills,15);assert.equal(world.score,920,'single-shot score caps the multiplier at the eighth kill');
+  let budget=0,sawExpiredGhost=false;
+  for(let frame=0;frame<600&&world.phase!=='transition';frame++){
+    scene.update(0,1000/120);budget+=1/120;
+    near(world.feedbackTime+scene.timeSlices.reduce((sum,slice)=>sum+slice.world/slice.scale,0),budget);
+    if(world.phase==='clearing'){
+      assert.equal(world.stageKills,15);assert.equal(world.stageKillCarry,1);assert.equal(world.shotKills,15);
+      assertStageProgress(world);
+      if(budget>.2){assert.equal(scene.impactGhosts.length,0);sawExpiredGhost=true;}
+    }
+  }
+  assert.ok(sawExpiredGhost,'last-hit holds end while the outward wave is still travelling');
+  assert.equal(world.phase,'transition');assert.equal(world.clearing,null);assert.equal(world.score,950);
+  const cleared=events.filter(event=>event.type==='clearKill');
+  assert.deepEqual(cleared.map(event=>event.bodyId),survivors.map(body=>body.id));
+  assert.ok(cleared.every(event=>event.value===10&&event.freezeDuration===0));
+  assert.deepEqual(cleared.map(event=>event.feedbackLevel),[16,17,18]);
+  assert.equal(events.filter(event=>event.type==='clearingStart').length,1);assert.equal(events.filter(event=>event.type==='clearingEnd').length,1);
+  assert.equal(events.filter(event=>event.type==='upgrade').length,1);assert.equal(audio.calls.filter(call=>call.name==='clearStart').length,1);
+  assert.equal(element('#stage-progress').hidden,true);near(scene.timeScale,1);
+  advanceScene(scene,1.84-world.phaseTime);assert.equal(world.phase,'transition');
+  advanceScene(scene,.02);assert.equal(world.phase,'choose');assert.equal(world.choices.length,3);assert.equal(element('#score').textContent,'0950');
+  const choice=world.choices[0];Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);
+  assert.equal(world.phase,'reward');advanceScene(scene,.99);assert.equal(world.phase,'reward');advanceScene(scene,.02);
+  assert.equal(world.phase,'battle');assert.equal(world.stage,2);assert.equal(world.killTarget,18);assert.equal(world.stageKills,1);assert.equal(world.stageKillCarry,0);
+  assert.equal(world.enemies.length,7);assertStageProgress(world);
+  assert.ok(world.spawnTimer>2*world.spawnInterval-.04&&world.spawnTimer<=2*world.spawnInterval);
+});
+
+test('real pressure changes the existing border without moving its collision walls and reduced motion removes breathing',async()=>{
+  const geometry=border=>({x:border.x,y:border.y,width:border.width,height:border.height,r:border.r});
+  for(const [strength,reduced] of [[1,false],[0,false],[1,true]])await withReloadedEntry({juice:strength,expressions:false},reduced,fresh=>{
+    const {world,scene,g}=pressureRun(19,fresh,strength),bounds={...world.arenaBounds};scene.update(0,0);
+    const original=geometry(g.borders[0]),base={...g.borders[0]};
+    for(let count=20;count<=26;count++){
+      rhythmEnemy(world,50+(count-1)%5*58,100+Math.floor((count-1)/5)*96);scene.update(0,0);
+      assert.equal(g.borders.length,1);assert.deepEqual(geometry(g.borders[0]),original);assert.deepEqual(world.arenaBounds,bounds);
+      assert.ok(g.borders[0].strokeAlpha>=.65&&g.borders[0].strokeAlpha<=1);assert.ok(g.borders[0].strokeWidth>=1&&g.borders[0].strokeWidth<=1.5);
+    }
+    const warning={...g.borders[0]};assert.notEqual(warning.strokeColor,base.strokeColor);
+    advanceScene(scene,1/4.8);assert.deepEqual(geometry(g.borders[0]),original);assert.deepEqual(world.arenaBounds,bounds);
+    if(strength===0||reduced)assert.deepEqual(g.borders[0],warning,'static pressure remains visible without breathing');
+    else assert.notEqual(g.borders[0].strokeAlpha,warning.strokeAlpha);
+    if(reduced)assert.equal(g.borders[0].strokeWidth,1);
+    Object.assign(world.player,{x:bounds.left+world.player.r-1,y:world.height-70,vx:-100,vy:0});world.wall(world.player);
+    near(world.player.x-world.player.r,bounds.left);assert.ok(world.player.vx>0);assert.deepEqual(world.arenaBounds,bounds);
+  });
+});
+
+test('capacity grace uses active real time, rescues the oldest three once, and a second timeout ends with only the best-score caption',t=>{
+  const {world,scene,pointer}=pressureRun(28),events=observeWorldEvents(world),oldest=world.enemies.slice(0,3).map(body=>body.id);
+  t.after(()=>{pointer('pointercancel');document.hidden=false;app.setFeedbackStrength(.6);});
+  for(let shot=0;shot<3;shot++){world.shoot(0,-world.maxPull);world.player.vx=world.player.vy=0;}
+  advanceScene(scene,.79);assert.equal(world.saveUsed,false);assert.equal(world.phase,'battle');
+  const p=world.player;pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+40,p.y);advanceScene(scene,.05);
+  assert.equal(world.saveUsed,true);assert.equal(world.liveCount,25);assert.equal(world.score,0);assert.equal(world.stageKills,0);
+  const rescue=events.filter(event=>event.type==='rescue');assert.equal(rescue.length,1);assert.deepEqual(rescue[0].bodyIds,oldest);
+  assert.ok(oldest.every(id=>!world.enemies.some(body=>body.id===id)));assert.ok(scene.rescueUntil>world.feedbackTime);
+  pointer('pointercancel');clickAction('pause');scene.update(0,0);
+  const pausedTime=world.feedbackTime,rescueUntil=scene.rescueUntil;advanceScene(scene,.6);near(world.feedbackTime,pausedTime);near(scene.rescueUntil,rescueUntil);
+  clickAction('resume');app.advanceUi(.42);advanceScene(scene,.41);assert.ok(world.feedbackTime>=scene.rescueUntil);
+  for(let index=0;index<3;index++)rhythmEnemy(world,50+index*58,100);
+  advanceScene(scene,.79);assert.equal(world.phase,'battle');advanceScene(scene,.02);
+  assert.equal(world.phase,'over');assert.equal(world.deathReason,'capacity');assert.equal(events.filter(event=>event.type==='rescue').length,1);
+  assert.ok(scene.ending);assert.equal(app.readRestart().modal,null);advanceScene(scene,.61);
+  assert.equal(app.readRestart().modal,'over');assert.equal(element('#result-reason').hidden,true);
+  assert.equal(element('#result-reason').textContent,'');
+  assert.equal(scene.rescueUntil,0);assert.equal(scene.zoomPulse,null);assert.equal(scene.impactGhosts.length,0);
+});
+
+test('clearing pauses safely through menus and backgrounding, then restart removes all old rhythm state',t=>{
+  const audio=app.recordClearAudio();t.after(()=>{audio.restore();document.hidden=false;app.setFeedbackStrength(.6);});
+  for(const interruption of ['pause','pagehide']){
+    const {world,scene}=clearingRun();advanceScene(scene,.05);
+    if(interruption==='pause')clickAction('pause');else for(const handler of windowListeners.get('pagehide'))handler();
+    scene.update(0,0);const frozen=JSON.stringify({time:world.time,feedbackTime:world.feedbackTime,clearing:world.clearing,score:world.score});
+    advanceScene(scene,.5);assert.equal(JSON.stringify({time:world.time,feedbackTime:world.feedbackTime,clearing:world.clearing,score:world.score}),frozen);
+    assert.equal(scene.zoomPulse,null);assert.equal(element('#game').style.transform,'none');assert.equal(audio.calls.at(-1).name,'clearEnd');
+    clickAction('resume');app.advanceUi(.42);advanceScene(scene,.05);assert.equal(world.phase,'clearing');assert.ok(world.feedbackTime>JSON.parse(frozen).feedbackTime);
+    clickAction('pause');app.advanceUi(.42);clickRestart();const fresh=app.readRestart().world;
+    assert.notEqual(fresh,world);assert.equal(fresh.clearing,null);assert.equal(fresh.pendingClearing,null);assert.equal(fresh.stageKills,0);
+    assert.equal(fresh.saveUsed,false);assert.equal(fresh.overTimer,0);assert.equal(scene.rescueUntil,0);assert.equal(scene.impactGhosts.length,0);
+    assert.deepEqual(scene.timeSlices,[]);assert.equal(element('#stage-progress').hidden,true);
+    app.advanceUi(.65);advanceScene(scene,.1);assert.equal(fresh.score,0);assert.equal(fresh.enemies.length,0);assert.equal(fresh.startingUpgrades,true);assert.equal(fresh.rewardSelectionsRemaining,1);
+    if(interruption==='pagehide')for(const handler of windowListeners.get('pageshow'))handler();
+  }
+});
+
+test('resizing during clearing maps the wave and clears stale feedback without changing the earned score',t=>{
+  const {world,scene,g,pointer}=clearingRun(),previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;app.setFeedbackStrength(.6);});
+  app.mountSceneBoundary(pointer.canvas,g);advanceScene(scene,.04);
+  const before={...world.clearing},score=world.score;assert.ok(scene.zoomPulse);assert.ok(scene.impactGhosts.length>0);
+  window.innerWidth=844;window.innerHeight=390;resize();
+  assert.equal(world.phase,'clearing');near(world.clearing.x,before.x*844/390);near(world.clearing.y,before.y*390/844);
+  near(world.clearing.elapsed,before.elapsed);assert.equal(world.score,score);
+  assert.equal(scene.zoomPulse,null);assert.equal(scene.impactGhosts.length,0);assert.equal(scene.rescueUntil,0);assert.equal(element('#game').style.transform,'none');
+  for(let frame=0;world.phase==='clearing'&&frame<600;frame++)scene.update(0,1000/120);
+  assert.equal(world.phase,'transition');assert.equal(world.score,score+10);
+});
+
+test('injured endless bodies keep their display size through death and result transfers while campaign radii stay original',()=>{
+  for(const mode of ['endless','campaign']){
+    let g=graphicsRecorder(),run=mode==='campaign'?app.seedCampaignRenderer(g):app.seedRenderer(g,390,844,true),{world,scene}=run;
+    app.setFeedbackStrength(1);world.enemies=[];world.spawnTimer=Infinity;world.floorTimer=Infinity;
+    const enemy=rhythmEnemy(world,90,240),r=enemy.r;enemy.hp=enemy.maxHp*.5;scene.update(0,0);
+    const ink=parseInt(app.readFeedbackSettings().enemy.slice(1),16),body=()=>g.shapes.find(shape=>shape.type==='path'&&shape.color===ink&&shape.points.length===193);
+    near(outlineBounds(body()).width,2*r*(mode==='campaign'?1:.91));near(enemy.r,r);
+    if(mode==='campaign')assert.equal(world.shoot(-7,0),true);
+    world.damage(enemy,enemy.hp);world.enemies=[];scene.update(0,0);
+    assert.equal(scene.impactGhosts.length,1);near(outlineBounds(body()).width,2*r*(mode==='campaign'?1:.82));near(enemy.r,r);
+    g=graphicsRecorder();run=mode==='campaign'?app.seedCampaignRenderer(g):app.seedRenderer(g,390,844,true);({world,scene}=run);world.enemies=[];
+    const source=rhythmEnemy(world,90,240);source.hp=source.maxHp*.5;
+    world.phase='over';world.emit('over');scene.update(0,0);if(mode==='endless')scene.advanceEnding(.6);
+    near(app.readRestart().controlFlight.items[0].from.r,source.r*(mode==='campaign'?1:.91));
+    if(mode==='campaign'){assert.equal(element('#hud').hidden,true);assert.equal(element('#result-reason').hidden,false);}
+  }
+  app.setFeedbackStrength(.6);
+});
+
+test('score HUD merges consecutive awards, reaches their exact sum within 250 ms, and resets on restart',()=>{
+  const {world,scene}=feedbackRun();world.enemies=[];
+  world.score=10;scene.update(0,0);assert.equal(element('#score').textContent,'0000');
+  advanceScene(scene,.08);
+  const before=Number(element('#score').textContent);assert.ok(before>0&&before<10);
+  near(Number(/scale\(([^)]+)\)/.exec(element('#score').style.transform)[1]),1.18);
+  world.score=35;scene.update(0,0);assert.equal(Number(element('#score').textContent),before,'a new award continues from the displayed value');
+  advanceScene(scene,.25);assert.equal(element('#score').textContent,'0035');assert.equal(element('#score').style.transform,'scale(1)');
+  clickAction('pause');app.advanceUi(.42);clickRestart();
+  assert.equal(element('#score').textContent,'0000');assert.equal(element('#score').style.transform,'scale(1)');
+  app.advanceUi(.65);advanceScene(scene,.3);assert.equal(element('#score').textContent,'0000','old pending score cannot reappear');
+  app.setFeedbackStrength(.6);
+});
+
+test('a 50 ms frame paints the frozen target before shattering and pause keeps its pose completely still',()=>{
+  const {g,world,scene}=feedbackRun(app,.6),p=world.player,enemy=world.enemies[0];
+  world.enemies=[enemy];Object.assign(enemy,{born:1,solid:true,hp:1,x:p.x+p.r+enemy.r-.5,y:p.y,vx:0,vy:0});
+  p.vx=world.baseSpeed;p.vy=0;scene.update(0,50);
+  assert.equal(scene.impactGhosts.length,1,'a 48 ms hold created during the frame must survive its first draw');
+  assert.equal(scene.effects.filter(e=>e.type==='shard').length,0);
+  assert.ok(g.shapes.some(s=>s.type==='path'&&s.color===0xe88c72));
+  const ghost=scene.impactGhosts[0],body={...ghost.body,feedbackFreeze:.05};
+  assert.notEqual(scene.shakenBody(body),body,'the active hold is allowed to shake before pausing');
+  clickAction('pause');const age=ghost.life;
+  assert.equal(scene.shakenBody(body),body,'pausing suppresses the visual shake immediately');
+  advanceScene(scene,.5);assert.equal(ghost.life,age);assert.equal(scene.shakenBody(body),body);
+  clickAction('resume');app.advanceUi(.42);advanceScene(scene,.02);
+  assert.equal(scene.impactGhosts.length,0);assert.ok(scene.effects.some(e=>e.type==='shard'));
+});
+
+test('the final legacy campaign kill clears its frozen target and zoom before the result transfer',()=>{
+  const {world,scene}=app.seedLegacyRenderer(graphicsRecorder(),390,844,5);
+  app.setFeedbackStrength(1);world.spawnTimer=Infinity;world.spawned=world.totalEnemies;world.kills=world.totalEnemies-1;
+  const event=collideFeedbackEnemy(world);assert.ok(event.freezeDuration>0);
+  assert.ok(world.events.some(e=>e.type==='over'),'the actual final kill emits the campaign completion event');
+  scene.update(0,0);
+  assert.ok(app.readRestart().result?.completed);assert.equal(app.readRestart().transfer.target,'over');
+  assert.equal(scene.impactGhosts.length,0);assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);
+  assert.equal(element('#game').style.transform,'none');
+  app.advanceUi(.82);app.setFeedbackStrength(.6);
+});
+
+test('impact zoom peaks after 80 ms and clears on pause, resume, restart and its normal 280 ms expiry',()=>{
+  const {world,scene}=feedbackRun();world.enemies=[];
+  const event={x:world.player.x,y:world.player.y,contactX:120,contactY:300,feedbackLevel:1};
+  scene.pulseZoom(event);advanceScene(scene,.08);
+  near(scene.feedbackCamera.zoom,1.02);assert.equal(element('#game').style.transformOrigin,'120px 300px');
+  clickAction('pause');scene.update(0,0);
+  assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);assert.equal(element('#game').style.transform,'none');
+  app.advanceUi(.42);clickAction('resume');app.advanceUi(.42);scene.update(0,0);
+  assert.equal(element('#game').style.transform,'none');assert.equal(scene.zoomPulse,null);
+  scene.pulseZoom({...event,feedbackLevel:4});advanceScene(scene,.08);assert.ok(scene.feedbackCamera.zoom>1.029);
+  advanceScene(scene,.201);assert.equal(scene.zoomPulse,null);assert.equal(element('#game').style.transform,'none');
+  scene.pulseZoom(event);advanceScene(scene,.04);clickAction('pause');app.advanceUi(.42);clickRestart();
+  assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);assert.equal(element('#game').style.transform,'none');
+  app.advanceUi(.65);app.setFeedbackStrength(.6);
+});
+
+test('wall feedback highlights only the impact segment and fades out within 120 ms',()=>{
+  const {g,world,scene}=feedbackRun();world.enemies=[];
+  const p=world.player;p.x=world.arenaBounds.left+p.r-1;p.y=world.height*.5;p.vx=-world.baseSpeed;p.vy=0;
+  world.wall(p);p.vx=p.vy=0;scene.update(0,0);
+  assert.equal(scene.wallFlashes.length,1);assert.equal(g.lines.length,1);
+  const line=g.lines[0];near(line.x1,line.x2);near(line.y2-line.y1,world.unit*2);near(line.width,2.5);
+  assert.equal(g.borders.length,1,'wall feedback never adds a full-screen second outline');
+  advanceScene(scene,.06);assert.equal(g.lines.length,1);assert.ok(g.lines[0].width>1&&g.lines[0].width<line.width);
+  advanceScene(scene,.061);assert.equal(scene.wallFlashes.length,0);assert.equal(g.lines.length,0);
+  app.setFeedbackStrength(.6);
+});
+
+test('feedback slider clamps and persists its value while zero immediately clears the active zoom and charge',t=>{
+  const {world,scene}=feedbackRun(),audio=app.recordFeedbackAudio();
+  t.after(()=>{audio.restore();fireElementInput('#feedback-strength','60');});
+  scene.pulseZoom({x:world.player.x,y:world.player.y});scene.updateFeedback(.04);
+  fireElementInput('#feedback-strength','35');
+  assert.equal(app.readFeedbackSettings().juice,.35);assert.equal(world.feedbackOptions.strength,.35);
+  assert.equal(JSON.parse(saved.get('qiuqiule-settings')).juice,.35);assert.equal(element('#feedback-value').value,'35%');
+  fireElementInput('#feedback-strength','200');assert.equal(app.readFeedbackSettings().juice,1);
+  fireElementInput('#feedback-strength','-10');assert.equal(app.readFeedbackSettings().juice,0);
+  assert.equal(world.feedbackOptions.strength,0);assert.equal(scene.zoomPulse,null);assert.equal(element('#game').style.transform,'none');
+  assert.equal(audio.calls.at(-1).name,'stopCharge');
+});
+
+test('new installs default to expressions and 60% feedback while saved false and strength survive reload',async()=>{
+  await withReloadedEntry(null,false,fresh=>{
+    assert.equal(fresh.readFeedbackSettings().expressions,true);assert.equal(fresh.readFeedbackSettings().juice,.6);
+  });
+  await withReloadedEntry({expressions:false,juice:.35},false,fresh=>{
+    assert.equal(fresh.readFeedbackSettings().expressions,false);assert.equal(fresh.readFeedbackSettings().juice,.35);
+    assert.equal(element('#feedback-strength').value,35);assert.equal(element('#expressions-toggle').attributes['aria-checked'],'false');
+  });
+});
+
+test('reduced-motion real rendering keeps feedback local, motionless and free of zoom or score scaling',async()=>{
+  await withReloadedEntry({juice:1,expressions:false},true,fresh=>{
+    const {g,world,scene}=feedbackRun(fresh),p=world.player;
+    assert.equal(world.feedbackOptions.reducedMotion,true);
+    const event=collideFeedbackEnemy(world);assert.ok(event.freezeDuration>0&&event.freezeDuration<=.05);
+    scene.update(0,0);assert.equal(scene.zoomPulse,null);assert.equal(element('#game').style.transform,'none');
+    const ghost=scene.impactGhosts[0],frozen={...ghost.body,feedbackFreeze:.05};assert.equal(scene.shakenBody(frozen),frozen,'reduced motion never shakes target positions');
+    world.score=25;scene.update(0,0);assert.equal(element('#score').textContent,'0025');assert.equal(element('#score').style.transform,'scale(1)');
+    scene.wallFlashes=[{x:world.arenaBounds.left,y:world.height*.5,nx:-1,ny:0,life:0}];
+    g.clear();scene.drawBorder(world.arenaBounds);assert.equal(g.lines.length,1);assert.equal(g.lines[0].width,1);
+    const position={x:p.x,y:p.y};p.feedbackFreeze=0;p.vx=world.baseSpeed;p.vy=0;
+    advanceScene(scene,.06);assert.equal(scene.feedbackCamera,null);assert.equal(element('#game').style.transform,'none');
+    assert.ok(p.x>position.x,'reduced motion retains regular world simulation');
+  });
+});
+
+function observeWorldEvents(world){
+  const events=[...world.events],emit=world.emit;
+  world.emit=function(type,data={}){events.push({type,...data});return emit.call(this,type,data);};
+  return events;
+}
+function assertFiniteDemoFrame(world,scene,g){
+  for(const body of [world.player,...(world.auxiliaries||[]),...world.enemies,world.boss].filter(Boolean)){
+    for(const key of ['x','y','vx','vy','r','angle','squash'])assert.ok(Number.isFinite(body[key]),`body ${body.id} ${key} must remain finite`);
+  }
+  for(const effect of scene.effects)for(const key of ['x','y','life','total'])assert.ok(Number.isFinite(effect[key]),`effect ${key}`);
+  for(const shape of g.shapes){
+    for(const point of shape.points||[])assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y),'rendered contour must remain finite');
+    if(shape.type==='ellipse')for(const key of ['x','y','width','height'])assert.ok(Number.isFinite(shape[key]),`ellipse ${key}`);
+    if(shape.type==='circle')for(const key of ['x','y','r'])assert.ok(Number.isFinite(shape[key]),`circle ${key}`);
+  }
+  assert.doesNotMatch(element('#game').style.transform||'',/NaN|Infinity/);
+  assert.doesNotMatch(element('#score').textContent||'',/NaN|Infinity/);
+}
+
+function typedEnemyRun(type,module=app,strength=1){
+  const run=controlRun(module,strength),{world}=run;world.stage=16;
+  const enemy=world.spawnEnemy(null,type);assert.ok(enemy,`the real spawner creates ${type}`);
+  Object.assign(enemy,{x:90,y:240,born:1,solid:true,vx:0,vy:0,angle:0,squash:0});
+  world.events=[];
+  return {...run,enemy};
+}
+
+function upgradeRun(module=app,{width=390,height=844,strength=1,random=null,count=3}={}){
+  const g=graphicsRecorder(),run=module.seedRenderer(g,width,height,true),{world,scene}=run;
+  module.setFeedbackStrength(strength);world.enemies=[];world.events=[];
+  if(random)world.random=random;
+  world.spawnTimer=world.floorTimer=world.introTimer=Infinity;world.wave=null;world.fragmentQueue=[];
+  world.gamblerRewardPending=count===5;
+  world.beginUpgrade();scene.update(0,0);advanceScene(scene,1.86);
+  assert.equal(world.phase,'choose');
+  return {g,...run,pointer:inputCanvas(width,height,module)};
+}
+
+test('a real reward long press shows its diagram after 300 ms while residual motion waits, then releases without selecting or shooting',t=>{
+  const {world,scene,g,pointer}=upgradeRun(),choice=world.choices[0],p=world.player,events=observeWorldEvents(world);
+  t.after(()=>{pointer('pointercancel');app.setFeedbackStrength(.6);});
+  Object.assign(p,{x:choice.x-choice.r-p.r-8,y:choice.y,vx:200,vy:0});
+  const original={x:p.x,y:p.y,vx:p.vx,time:world.feedbackTime},insideDiagram=shape=>shape.points?.length===96&&shape.color===0x252720&&Math.hypot(outlineBounds(shape).cx-choice.x,outlineBounds(shape).cy-choice.y)<choice.r;
+  pointer('pointerdown',choice.x,choice.y);assert.ok(app.readRestart().choicePress);assert.equal(app.readRestart().drag,null);assert.equal(world.pullStartSpeed,null);
+  advanceScene(scene,.299);assert.equal(app.readRestart().choicePress.active,false);assert.equal(g.shapes.filter(insideDiagram).length,0);
+  advanceScene(scene,.002);assert.equal(app.readRestart().choicePress.active,true);assert.ok(g.shapes.some(insideDiagram));
+  advanceScene(scene,.6);assert.deepEqual({x:p.x,y:p.y,vx:p.vx,time:world.feedbackTime},original);
+  assert.equal(world.phase,'choose');assert.deepEqual(scene.timeSlices,[]);assert.equal(scene.accumulator,0);
+  pointer('pointerup',choice.x,choice.y);assert.equal(app.readRestart().choicePress,null);assert.equal(app.readRestart().drag,null);
+  assert.equal(world.phase,'choose');assert.equal(events.filter(event=>['shoot','buff'].includes(event.type)).length,0);
+  Object.assign(p,{x:world.width*.5,y:world.height*.72,vx:0,vy:0});advanceScene(scene,.05);
+  near(world.feedbackTime-original.time,.05);assert.equal(g.shapes.filter(insideDiagram).length,0,'release removes the preview without replaying its held time');
+  Object.assign(p,{x:choice.x,y:choice.y});scene.update(0,1000/120);
+  assert.equal(world.phase,'reward');assert.equal(events.filter(event=>event.type==='buff').length,1,'normal physical contact remains the selection action');
+});
+
+test('reward preview cancellation swallows delayed releases and preserves the primary gesture boundary',t=>{
+  t.after(()=>{document.hidden=false;app.setFeedbackStrength(.6);});
+  for(const reason of ['move','secondary','pointercancel','lostpointercapture','pause','pagehide','phase']){
+    const {world,scene,pointer}=upgradeRun(),choice=world.choices[0],events=observeWorldEvents(world);
+    pointer('pointerdown',choice.x,choice.y);advanceScene(scene,.31);assert.equal(app.readRestart().choicePress.active,true,reason);
+    if(reason==='move')pointer('pointermove',choice.x+9,choice.y);
+    else if(reason==='secondary')pointer('pointerdown',choice.x,choice.y,{pointerId:2,isPrimary:false});
+    else if(reason==='pause')clickAction('pause');
+    else if(reason==='pagehide')for(const handler of windowListeners.get('pagehide'))handler();
+    else if(reason==='phase'){world.phase='reward';scene.update(0,0);}
+    else pointer(reason,choice.x,choice.y);
+    assert.equal(app.readRestart().choicePress,null,reason);
+    pointer('pointerup',choice.x+40,choice.y);pointer('pointerup',choice.x,choice.y,{pointerId:2,isPrimary:false});
+    assert.equal(app.readRestart().drag,null,reason);assert.equal(events.filter(event=>['shoot','buff'].includes(event.type)).length,0,reason);
+    if(reason==='pause'||reason==='pagehide'){
+      app.advanceUi(.42);clickRestart();app.advanceUi(.65);pointer('pointerup',choice.x+80,choice.y);
+      const fresh=app.readRestart();assert.equal(fresh.choicePress,null);assert.equal(fresh.world.score,0);assert.equal(fresh.world.activeShot,null);
+    }
+    if(reason==='pagehide')for(const handler of windowListeners.get('pageshow'))handler();
+  }
+});
+
+test('reward previews remain available and static at zero strength and with reduced motion',async()=>{
+  for(const [strength,reduced] of [[0,false],[1,true]])await withReloadedEntry({juice:strength,expressions:true},reduced,fresh=>{
+    const {world,scene,g,pointer}=upgradeRun(fresh,{strength}),choice=world.choices[0];
+    pointer('pointerdown',choice.x,choice.y);advanceScene(scene,.31);assert.equal(fresh.readRestart().choicePress.active,true);
+    const diagram=()=>{
+      const body=g.shapes.find(shape=>shape.type==='path'&&shape.points?.length===96&&Math.abs(outlineBounds(shape).cx-choice.x)<1&&outlineBounds(shape).width>choice.r*1.9);
+      const cy=outlineBounds(body).cy;
+      return g.shapes.filter(shape=>shape.points?.length===96&&shape.color===0x252720&&Math.hypot(outlineBounds(shape).cx-choice.x,outlineBounds(shape).cy-choice.y)<choice.r).map(shape=>shape.points.map(point=>({x:point.x-choice.x,y:point.y-cy})));
+    };
+    const original=diagram();assert.ok(original.length>0);advanceScene(scene,.4);const later=diagram();assert.equal(later.length,original.length);
+    later.forEach((contour,index)=>assertSameContour(contour,original[index]));
+    pointer('pointerup',choice.x,choice.y);assert.equal(fresh.readRestart().choicePress,null);assert.equal(world.phase,'choose');
+  });
+});
+
+test('resizing clears a held reward preview and its capture without selecting, shooting or losing the offer',t=>{
+  const {world,scene,g,pointer}=upgradeRun(),previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;app.setFeedbackStrength(.6);});
+  app.mountSceneBoundary(pointer.canvas,g);const choice=world.choices[0],ids=world.choices.map(item=>item.id),events=observeWorldEvents(world);
+  pointer('pointerdown',choice.x,choice.y);advanceScene(scene,.31);assert.equal(app.readRestart().choicePress.active,true);
+  window.innerWidth=844;window.innerHeight=390;resize();
+  assert.equal(app.readRestart().choicePress,null);assert.equal(pointer.captured.size,0);assert.deepEqual(scene.timeSlices,[]);
+  pointer('pointerup',choice.x+50,choice.y);scene.update(0,0);
+  assert.equal(world.phase,'choose');assert.deepEqual(world.choices.map(item=>item.id),ids);assert.equal(world.score,0);
+  assert.equal(events.filter(event=>['shoot','buff'].includes(event.type)).length,0);
+  for(const body of [world.player,...world.choices]){
+    assert.ok(body.x-body.r>=world.arenaBounds.left&&body.x+body.r<=world.arenaBounds.right);
+    assert.ok(body.y-body.r>=world.arenaBounds.top&&body.y+body.r<=world.arenaBounds.bottom);
+  }
+});
+
+test('three and five real reward offers keep distinct eligible balls and select exactly one through physical contact',t=>{
+  t.after(()=>{app.prepareNormalGame();app.setFeedbackStrength(.6);});
+  for(const count of [3,5]){
+    const g=graphicsRecorder();app.seedRenderer(g);app.runFeedbackDemo('choices-'+count);
+    const {world,scene}=app.readRestart(),events=observeWorldEvents(world);scene.update(0,0);
+    assert.equal(world.phase,'choose');assert.equal(world.choices.length,count);assert.equal(new Set(world.choices.map(choice=>choice.id)).size,count);
+    if(count===5){
+      assert.equal(world.choices.filter(choice=>choice.y<world.player.y).length,3,'gambler puts three offers above the actual player');
+      assert.equal(world.choices.filter(choice=>choice.y>world.player.y).length,2,'gambler puts two offers below the actual player');
+    }
+    assert.equal(element('#choice-labels').children.filter(node=>node.className==='choice-label').length,count);
+    assert.ok(world.choices.every(choice=>UPGRADES[choice.id]&&choice.rings==={regular:0,special:1,risk:2}[choice.kind]));
+    const faces=world.choices.map(choice=>g.shapes.find(shape=>shape.type==='path'&&shape.points?.length===96&&Math.abs(outlineBounds(shape).cx-choice.x)<1&&Math.abs(outlineBounds(shape).cy-choice.y)<3&&outlineBounds(shape).width>choice.r*1.9));
+    assert.ok(faces.every(Boolean));assert.equal(new Set(faces.map(shape=>shape.color)).size,1,'rarity uses outlines, not different reward colors');
+    const choice=world.choices[0],before=world.buffs[choice.id]||0;
+    Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);
+    assert.equal(world.phase,'reward');assert.equal(world.buffs[choice.id],before+1);assert.equal(world.choices.length,0);
+    assert.equal(events.filter(event=>event.type==='buff').length,1);assert.equal(world.pendingUpgradeBoost,true);
+    advanceScene(scene,1.01);assert.equal(world.phase,'battle');assert.equal(events.filter(event=>event.type==='buff').length,1);
+    assert.equal(world.choices.length,0,'task 5 does not introduce a second reward round');
+  }
+});
+
+test('gambler offers keep a three-above two-below formation around the player through actual viewport resize',t=>{
+  const {world,scene,g,pointer}=upgradeRun(app,{count:5}),previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;app.setFeedbackStrength(.6);});
+  app.mountSceneBoundary(pointer.canvas,g);const ids=world.choices.map(choice=>choice.id),events=observeWorldEvents(world);
+  for(const [width,height] of [[390,844],[844,390],[320,568]]){
+    window.innerWidth=width;window.innerHeight=height;resize();scene.update(0,0);
+    const p=world.player,bounds=world.arenaBounds;
+    near(p.x,width/2);near(p.y,world.choicePlayerY);assert.equal(world.phase,'choose');assert.deepEqual(world.choices.map(choice=>choice.id),ids);
+    assert.equal(world.choices.filter(choice=>choice.y<p.y).length,3);assert.equal(world.choices.filter(choice=>choice.y>p.y).length,2);
+    for(const choice of world.choices){
+      assert.ok(choice.x-choice.r>=bounds.left&&choice.x+choice.r<=bounds.right);
+      assert.ok(choice.y-choice.r>=bounds.top&&choice.y+choice.r+24<=bounds.bottom);
+      assert.ok(Math.hypot(choice.x-p.x,choice.y-p.y)>choice.r+p.r+4,'offers leave space for the player and a launch');
+    }
+    assert.equal(events.filter(event=>event.type==='buff').length,0,'resizing cannot select a reward');
+  }
+});
+
+test('every physical reward route produces one crisp hit and directional enemy-style fragments without scoring an enemy kill',t=>{
+  const audio=app.recordFeedbackAudio(),tones=app.recordTones();
+  t.after(()=>{audio.restore();tones.restore();app.prepareNormalGame();app.setFeedbackStrength(.6);});
+  const contact=(world,scene,context)=>{
+    assert.equal(world.phase,'choose',context);const choice=world.choices.find(choice=>choice.id!=='gambler')||world.choices[0],p=world.player;
+    const score=world.score,kills=world.stageKills,events=observeWorldEvents(world),beforeCount=world.buffs[choice.id]||0;
+    scene.effects=[];scene.impactGhosts=[];world.events=[];audio.calls.length=0;tones.calls.length=0;
+    Object.assign(p,{x:choice.x-choice.r-p.r+.2,y:choice.y,vx:world.unit*12,vy:0,feedbackFreeze:0});
+    world.step(1/120);const event=events.find(item=>item.type==='buff');assert.ok(event,context);scene.update(0,0);
+    assert.equal(world.phase,'reward');assert.equal(world.buffs[choice.id],beforeCount+1);assert.equal(world.score,score);assert.equal(world.stageKills,kills);
+    assert.equal(events.filter(item=>item.type==='kill').length,0,'rewards never count as enemy kills');
+    assert.equal(audio.calls.filter(call=>call.name==='rewardHit').length,1,context);
+    assert.equal(audio.calls.filter(call=>call.name==='impact').length,0,'the new cue must not be doubled by an enemy impact sound');
+    assert.equal(tones.calls.filter(call=>call[0]===700).length,0,'the former long reward tone must not overlap the crisp cue');
+    const shards=scene.effects.filter(effect=>effect.type==='shard');assert.equal(shards.length,7,'first-hit reward fragments use the same seven-shard fan as a normal enemy');
+    assert.ok(Number.isFinite(event.contactX)&&Number.isFinite(event.contactY));
+    for(const shard of shards){near(shard.x,event.contactX);near(shard.y,event.contactY);assert.ok([3,4,5].includes(shard.sides));assert.ok(shard.vx>0);assert.ok(shard.total>=.5&&shard.total<=.62);}
+    scene.update(0,0);assert.equal(audio.calls.filter(call=>call.name==='rewardHit').length,1,'redrawing cannot replay the reward');
+    return choice;
+  };
+  for(const count of [3,5]){
+    const {world,scene}=upgradeRun(app,{count});contact(world,scene,`normal ${count}-offer reward`);
+  }
+  app.seedRenderer(graphicsRecorder(),390,844,true);app.seedEndless({maxStage:10,best:0});app.prepareNormalGame();app.setFeedbackStrength(1);
+  {
+    const {world,scene}=app.readRestart();
+    waitForChoose(world,scene);contact(world,scene,'single starting reward');advanceScene(scene,1.01);assert.equal(world.phase,'battle');
+  }
+  {
+    const {world,scene}=bossScene(10);app.setFeedbackStrength(1);advanceToBoss(world,scene);world.gamblerRewardPending=true;defeatBoss(world,scene);
+    for(let round=1;round<=2;round++){waitForChoose(world,scene);contact(world,scene,`Boss round ${round}`);advanceScene(scene,1.01);}
+  }
+  for(const kind of ['choices-3','choices-5']){
+    app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(1);app.runFeedbackDemo(kind);
+    const {world,scene}=app.readRestart();contact(world,scene,kind);
+  }
+});
+
+test('a fully acquired upgrade pool skips the empty offer, keeps caps intact and starts the next ordinary stage',t=>{
+  const {world,scene}=controlRun();t.after(()=>app.setFeedbackStrength(.6));
+  for(const definition of UPGRADE_DEFINITIONS)for(let layer=0;layer<definition.maxStacks;layer++){
+    if(definition.id==='gambler'&&world.nextGambler){
+      // Consecutive Boss rewards cannot consume the second gambler stack;
+      // finish a genuine stage boundary before acquiring that final layer.
+      world.phase='reward';world.rewardSelectionsRemaining=1;world.finishRewardRound();
+    }
+    assert.equal(world.applyUpgrade(definition.id),true);
+  }
+  // All upgrade applications above are setup; there is no pending gambler reward
+  // or score/visual bonus manufactured by inspecting the exhausted pool.
+  world.nextGambler=false;world.gamblerRewardPending=false;
+  const before=JSON.stringify(world.buffs),stage=world.stage;world.beginUpgrade();scene.update(0,0);
+  assert.equal(world.phase,'reward');assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').children.length,0);
+  assert.equal(world.pendingUpgradeBoost,false);advanceScene(scene,1.01);
+  assert.equal(world.phase,'battle');assert.equal(world.stage,stage+1);assert.equal(JSON.stringify(world.buffs),before);
+  assert.ok(world.enemies.length>=world.floorCount);assert.ok(world.enemies.length<=28);
+});
+
+test('an acquired upgrade boosts exactly the next real shot while taps, cancellations and later shots preserve the intended feedback budget',t=>{
+  const {world,scene,pointer}=upgradeRun(app,{random:()=>0}),choice=world.choices.find(item=>item.id==='energy'),audio=app.recordFeedbackAudio(),events=observeWorldEvents(world);
+  t.after(()=>{audio.restore();pointer('pointercancel');app.setFeedbackStrength(.6);});assert.ok(choice);
+  Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);advanceScene(scene,1.01);
+  world.enemies=[];world.spawnTimer=world.floorTimer=world.introTimer=Infinity;world.wave=null;
+  assert.equal(world.pendingUpgradeBoost,true);assert.equal(world.shotUpgradeBoost,false);
+  const p=world.player,gesture=release=>{const x=p.x,y=p.y;pointer('pointerdown',x,y);pointer('pointermove',x-world.maxPull,y);pointer(release,x-world.maxPull,y);};
+  pointer('pointerdown',p.x,p.y);pointer('pointerup',p.x,p.y);gesture('pointercancel');
+  assert.equal(world.pendingUpgradeBoost,true);assert.equal(world.shotUpgradeBoost,false);assert.equal(events.filter(event=>event.type==='shoot').length,0);
+  gesture('pointerup');assert.equal(world.pendingUpgradeBoost,false);assert.equal(world.shotUpgradeBoost,true);advanceScene(scene,.04);
+  rhythmEnemy(world,100,200,{hp:1});collideFeedbackEnemy(world);scene.update(0,0);p.vx=p.vy=0;
+  assert.equal(events.filter(event=>event.type==='kill').at(-1).upgradeBoost,true);
+  advanceScene(scene,.1);assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,9,'the first boosted kill has the ordinary seven fragments plus two');
+  const killAudio=()=>audio.calls.filter(call=>call.name==='impact'&&call.args[0].kind==='kill');
+  assert.equal(killAudio().at(-1).args[0].upgradeBoost,true);
+  pointer('pointerdown',p.x,p.y);pointer('pointerup',p.x,p.y);assert.equal(world.shotUpgradeBoost,true,'a tap does not end the current shot');
+  advanceScene(scene,.65);gesture('pointerup');assert.equal(world.shotUpgradeBoost,false);advanceScene(scene,.04);
+  rhythmEnemy(world,100,200,{hp:1});collideFeedbackEnemy(world);scene.update(0,0);p.vx=p.vy=0;advanceScene(scene,.1);
+  assert.equal(events.filter(event=>event.type==='kill').at(-1).upgradeBoost,false);assert.equal(killAudio().at(-1).args[0].upgradeBoost,false);
+  assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,7,'the following real shot returns to ordinary fragments');
+});
+
+test('a boosted stage-ending kill does not raise the following automatic clearing sounds',t=>{
+  const {world,scene}=upgradeRun(app,{random:()=>0}),choice=world.choices.find(item=>item.id==='energy'),audio=app.recordFeedbackAudio();
+  t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
+  Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);advanceScene(scene,1.01);
+  world.enemies=[];world.spawnTimer=world.floorTimer=world.introTimer=Infinity;world.wave=null;world.stageKills=world.killTarget-1;
+  const p=world.player;Object.assign(p,{x:100,y:400,vx:0,vy:0});world.shoot(-world.maxPull,0);advanceScene(scene,.04);
+  const target=rhythmEnemy(world,0,0,{hp:1});Object.assign(target,{x:p.x+p.r+target.r-.5,y:p.y});rhythmEnemy(world,310,700);
+  const events=observeWorldEvents(world);scene.update(0,1000/120);
+  assert.equal(world.phase,'clearing');assert.equal(events.filter(event=>event.type==='kill').length,1);
+  assert.equal(events.find(event=>event.type==='kill').upgradeBoost,true);
+  for(let frame=0;frame<600&&world.phase==='clearing';frame++)scene.update(0,1000/120);
+  assert.equal(world.phase,'transition');const clear=events.filter(event=>event.type==='clearKill');assert.equal(clear.length,1);assert.equal(clear[0].upgradeBoost,undefined);
+  const sounds=audio.calls.filter(call=>call.name==='impact'&&call.args[0].kind==='kill');
+  assert.equal(sounds.length,2);assert.equal(sounds[0].args[0].upgradeBoost,true);assert.equal(sounds[1].args[0].upgradeBoost,undefined);
+});
+
+test('real split auxiliaries render without extra eyes, share kill credit, pause together and disappear on a deliberate new shot',t=>{
+  const g=graphicsRecorder();app.seedRenderer(g);app.runFeedbackDemo('upgrade-split');const {world,scene}=app.readRestart(),events=observeWorldEvents(world),pointer=inputCanvas();
+  const previousSaved=saved.get('qiuqiule-best');t.after(()=>{pointer('pointercancel');if(previousSaved===undefined)saved.delete('qiuqiule-best');else saved.set('qiuqiule-best',previousSaved);app.prepareNormalGame();app.setFeedbackStrength(.6);});
+  for(let frame=0;frame<180&&!world.auxiliaries.length;frame++)scene.update(0,1000/120);
+  assert.equal(world.auxiliaries.length,2);const [child]=world.auxiliaries,p=world.player;
+  assert.ok(world.auxiliaries.every(body=>body.isAuxiliary&&body.isPlayer));near(child.r,.7*world.unit);
+  const faces=eyeShapes(g);assert.equal(faces.length,2,'only the main player retains a face');
+  assert.equal(g.shapes.filter(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points?.length===193).length,3,'main and both auxiliary balls share the same contour renderer');
+  clickAction('pause');scene.update(0,0);const paused=JSON.stringify(world.auxiliaries);advanceScene(scene,.5);assert.equal(JSON.stringify(world.auxiliaries),paused);
+  clickAction('resume');app.advanceUi(.42);advanceScene(scene,.15);
+  world.enemies=[];Object.assign(p,{x:world.width*.75,y:world.height*.78,vx:0,vy:0});
+  const target=rhythmEnemy(world,130,300,{hp:1});Object.assign(child,{x:target.x-child.r-target.r+.5,y:target.y,vx:world.baseSpeed*.6,vy:0,feedbackFreeze:0,feedbackFreezeTotal:0});
+  const before=world.score,stageKills=world.stageKills;scene.update(0,1000/120);
+  const kill=events.filter(event=>event.type==='kill').at(-1);assert.equal(kill.auxiliary,true);assert.equal(kill.upgradeBoost,true);
+  assert.equal(world.score,before+kill.value);assert.equal(world.stageKills,stageKills+1);assert.equal(saved.get('qiuqiule-best'),previousSaved,'auxiliary scores also respect the demo record boundary');
+  const count=world.auxiliaries.length;pointer('pointerdown',p.x,p.y);pointer('pointerup',p.x,p.y);assert.equal(world.auxiliaries.length,count);
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x-50,p.y);pointer('pointerup',p.x-50,p.y);
+  assert.equal(world.auxiliaries.length,0);assert.equal(world.shotUpgradeBoost,false);
+});
+
+test('all upgrade and three/five-choice playgrounds keep initial bodies and reward labels above their visible controls',t=>{
+  const panel=element('#feedback-demo'),previousRect=panel.getBoundingClientRect,previousHidden=panel.hidden;
+  t.after(()=>{panel.getBoundingClientRect=previousRect;panel.hidden=previousHidden;app.seedRenderer(graphicsRecorder());app.prepareNormalGame();app.setFeedbackStrength(.6);});
+  const kinds=['choices-3','choices-5',...UPGRADE_DEFINITIONS.map(definition=>'upgrade-'+definition.id)];
+  for(const [width,height,top] of [[390,844,470],[320,667,290],[844,390,135],[320,568,180]])for(const kind of kinds){
+    const g=graphicsRecorder();app.seedRenderer(g,width,height);panel.hidden=false;
+    panel.getBoundingClientRect=()=>panel.classList.contains('demo-compact')
+      ?{left:width/2-52,right:width/2+52,top:height-60,bottom:height-20,width:104,height:40}
+      :{left:0,right:width,top,bottom:height,width,height:height-top};
+    app.runFeedbackDemo(kind);const {world,scene}=app.readRestart(),bounds=world.arenaBounds,bodies=[world.player,...world.enemies,...world.choices];
+    const visibleTop=panel.getBoundingClientRect().top;
+    if(kind==='choices-5'||kind==='upgrade-gambler')assert.equal(panel.classList.contains('demo-compact'),true,'five offers expose only the compact menu button');
+    else assert.equal(visibleTop,top,'other playgrounds retain the original full-control panel bounds');
+    for(let index=0;index<bodies.length;index++){
+      const body=bodies[index],label=`${kind} ${width}x${height}`;
+      assert.ok(body.x-body.r>=bounds.left-1e-8&&body.x+body.r<=bounds.right+1e-8,label);
+      assert.ok(body.y-body.r>=bounds.top-1e-8&&body.y+body.r<=visibleTop+1e-8,label);
+      for(const other of bodies.slice(index+1))assert.ok(Math.hypot(body.x-other.x,body.y-other.y)>=body.r+other.r-1e-8,label);
+    }
+    for(const choice of world.choices){
+      const outer=choice.r*(choice.rings===2?1.27:choice.rings===1?1.14:1),font=Math.max(9,Math.min(17,Math.floor(choice.labelWidth/choice.name.length*.9)));
+      assert.ok(choice.x-outer>=bounds.left&&choice.x+outer<=bounds.right);
+      assert.ok(choice.y-outer>=bounds.top&&choice.y+choice.r*(1+.14*choice.rings)+14+font<=visibleTop,`${kind} ${width}x${height}: rarity rings and one-line names stay above the visible controls (${choice.id}, top=${choice.y-outer}, bottom=${choice.y+choice.r*(1+.14*choice.rings)+14+font}, panel=${visibleTop})`);
+      assert.ok(choice.x-choice.labelWidth/2>=bounds.left&&choice.x+choice.labelWidth/2<=bounds.right);
+    }
+    scene.update(0,0);assertFiniteDemoFrame(world,scene,g);
+  }
+});
+
+test('the gambler playground compacts its controls and its menu button restores the complete demo menu',t=>{
+  app.seedRenderer(graphicsRecorder());
+  const panel=element('#feedback-demo'),originalQuery=document.querySelector,originalCreate=document.createElement,originalBody=document.body,originalListeners=new Map(panel.listeners);
+  let created=false;document.querySelector=selector=>selector==='#feedback-demo'&&!created?null:originalQuery(selector);
+  document.createElement=tag=>{if(tag==='section'){created=true;return panel;}return originalCreate(tag);};
+  document.body={append(node){assert.equal(node,panel);}};
+  t.after(()=>{document.querySelector=originalQuery;document.createElement=originalCreate;if(originalBody===undefined)delete document.body;else document.body=originalBody;panel.listeners=originalListeners;panel.classList.remove('demo-flow','demo-compact');app.seedRenderer(graphicsRecorder());app.prepareNormalGame();});
+  app.installDemoControls();assert.equal(created,true);assert.match(panel.innerHTML,/data-demo="all-demos">试玩菜单/);
+  app.runFeedbackDemo('choices-5');assert.equal(panel.classList.contains('demo-compact'),true);near(panel.getBoundingClientRect().height,40);
+  for(const handler of panel.listeners.get('click')||[])handler({target:{closest:()=>({dataset:{demo:'all-demos'}})}});
+  assert.equal(panel.classList.contains('demo-compact'),false);assert.equal(panel.classList.contains('demo-flow'),false);
+  const world=app.readRestart().world;assert.equal(world.phase,'choose');assert.equal(world.choices.length,5,'opening the menu does not replace the current offer');
+});
+
+for(const definition of UPGRADE_DEFINITIONS)test(`the real ${definition.id} upgrade playground exercises its effect and keeps score and progression isolated`,t=>{
+  const g=graphicsRecorder();app.seedRenderer(g);app.setFeedbackStrength(.6);
+  const previousBest=app.seedBest(0),previousSaved=saved.get('qiuqiule-best');saved.set('qiuqiule-best','0');
+  const progressBefore=saved.get('qiuqiule-campaign'),skinsBefore=saved.get('qiuqiule-skins'),audio=app.recordFeedbackAudio();
+  t.after(()=>{audio.restore();app.seedBest(previousBest);if(previousSaved===undefined)saved.delete('qiuqiule-best');else saved.set('qiuqiule-best',previousSaved);app.prepareNormalGame();app.setFeedbackStrength(.6);});
+  app.runFeedbackDemo('upgrade-'+definition.id);const {world,scene}=app.readRestart(),events=observeWorldEvents(world),p=world.player;
+  assert.equal(app.isFeedbackDemo(),true);assert.equal(world.buffs[definition.id],1);
+  if(definition.id==='energy')near(world.energy,1.3);
+  if(definition.id==='overspeed'){assert.equal(world.buffs.energy,4);near(world.launchCap,world.unit*68);assert.ok(Math.hypot(p.vx,p.vy)>world.unit*60);}
+  if(definition.id==='density')near(world.density,1.35);
+  if(definition.id==='growth')near(p.r,world.unit*1.2);
+  if(definition.id==='frenzy'){assert.equal(world.waveSize,6);assert.equal(world.comboCap,12);}
+  if(definition.id==='gambler'){assert.equal(world.choices.length,5);near(world.gamblerTargetMultiplier,1.5);assert.equal(world.gamblerRewardPending,false);}
+  const target=world.enemies[0],startDistance=target?Math.hypot(target.x-p.x,target.y-p.y):Infinity;
+  let minDistance=startDistance,maxAuxiliaries=0,magnetSeen=false,breathSeen=false,boomerangSeen=false;
+  for(let frame=0;frame<720;frame++){
+    scene.update(0,1000/120);assertFiniteDemoFrame(world,scene,g);assert.ok(world.liveCount<=28);
+    maxAuxiliaries=Math.max(maxAuxiliaries,world.auxiliaries.length);magnetSeen ||= !!world.magnetPull;breathSeen ||= world.breathTime>0;boomerangSeen ||= p.boomerangTime>0;
+    if(target)minDistance=Math.min(minDistance,Math.hypot(target.x-p.x,target.y-p.y));
+  }
+  const kills=events.filter(event=>event.type==='kill');
+  if(definition.id==='gravity')assert.ok(minDistance<startDistance-world.unit,'stationary enemies actually approach the player');
+  else if(definition.id==='gambler')assert.equal(world.phase,'choose');
+  else assert.ok(kills.length>0,`${definition.id} must produce a real enemy kill in its prepared scene`);
+  if(definition.id==='magnet')assert.equal(magnetSeen,true);
+  if(definition.id==='pulse')assert.ok(events.some(event=>event.type==='pulse'));
+  if(definition.id==='bank')assert.ok(events.some(event=>event.type==='wall'&&event.bank>0));
+  if(definition.id==='breath')assert.equal(breathSeen,true);
+  if(definition.id==='split'){assert.equal(maxAuxiliaries,2);assert.equal(events.filter(event=>event.type==='playerSplit').length,1);}
+  if(definition.id==='boomerang')assert.equal(boomerangSeen,true);
+  if(definition.id==='shockwave')assert.ok(events.some(event=>event.type==='shockwave'));
+  if(definition.id==='risk')assert.ok(kills.every(event=>event.value===Math.round(10*Math.min(event.combo,8)*(event.banked?1.5:1)*1.5)));
+  if(kills.length){assert.ok(kills.every(event=>event.upgradeBoost===true));assert.ok(audio.calls.some(call=>call.name==='impact'&&call.args[0].kind==='kill'&&call.args[0].upgradeBoost));}
+  if(world.phase==='choose'){
+    const choice=world.choices[0];Object.assign(p,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);advanceScene(scene,1.01);
+  }
+  if(world.score===0){collideFeedbackEnemy(world);scene.update(0,0);}
+  assert.ok(world.score>0);assert.equal(saved.get('qiuqiule-best'),'0');assert.equal(saved.get('qiuqiule-campaign'),progressBefore);assert.equal(saved.get('qiuqiule-skins'),skinsBefore);
+  clickAction('pause');app.advanceUi(.42);clickAction('home');app.advanceUi(.82);
+  assert.equal(app.readRestart().modal,'over');assert.equal(saved.get('qiuqiule-best'),'0');
+  clickRestart();app.advanceUi(.65);assert.equal(app.isFeedbackDemo(),false);assert.equal(app.readRestart().world.score,0);
+});
+
+test('enemy variants and fragments keep their colors, silhouettes and physical bodies through real arena and ghost rendering',t=>{
+  t.after(()=>app.setFeedbackStrength(.6));
+  for(const type of ['ring','heavy','split','walker','magnet','shield','leader','fragment']){
+    const {world,scene,g,enemy}=typedEnemyRun(type),baseInk=parseInt(app.readFeedbackSettings().enemy.slice(1),16);
+    const ink=type==='fragment'?[16,8,0].reduce((color,shift)=>color|(Math.round(((baseInk>>shift)&255)*.7)<<shift),0):baseInk;
+    enemy.hp=enemy.maxHp*.5;
+    const physical={x:enemy.x,y:enemy.y,r:enemy.r,mass:enemy.mass},shapeAtEnemy=shape=>shape.points?.length===128&&Math.hypot(outlineBounds(shape).cx-enemy.x,outlineBounds(shape).cy-enemy.y)<1;
+    scene.update(0,0);
+    const shapes=g.shapes.filter(shapeAtEnemy),strokes=shapes.filter(shape=>shape.type==='stroke'),fills=shapes.filter(shape=>shape.type==='path');
+    assert.deepEqual({x:enemy.x,y:enemy.y,r:enemy.r,mass:enemy.mass},physical);
+    assert.equal(strokes.length,{ring:1,heavy:1,split:0,walker:0,magnet:2,shield:1,leader:0,fragment:0}[type],type);
+    assert.equal(fills.length,{ring:0,heavy:1,split:1,walker:1,magnet:0,shield:1,leader:2,fragment:1}[type],type);
+    const contour=shapes.find(shape=>shape.color===ink&&shape.type===(['ring','magnet'].includes(type)?'stroke':'path'));
+    if(type==='ring'){
+      assert.equal(contour.width,3);near(outlineBounds(contour).width+contour.width,enemy.r*2*.91+1.5,'the thicker ring grows inward and preserves its previous outer edge');
+    }else near(outlineBounds(contour).width,enemy.r*2*.91);
+    if(type==='shield')near(outlineBounds(strokes[0]).width,(enemy.r+.3*world.unit)*2*.91);
+    if(type==='walker')assert.equal(g.shapes.filter(shape=>shape.type==='path'&&shape.points.length===32).length,2,'only the walker has its own paired eyes');
+    // Break the shield through real damage before the separate lethal impact.
+    if(enemy.shield)world.damage(enemy,1);
+    world.damage(enemy,enemy.hp+1);world.enemies=[];scene.update(0,0);
+    assert.equal(scene.impactGhosts.length,1,type);assert.equal(scene.impactGhosts[0].body.enemyType,type);
+    const ghostContours=g.shapes.filter(shape=>shape.points?.length===128&&shape.color===ink);
+    assert.ok(ghostContours.length>0,type);
+    assert.equal(ghostContours.some(shape=>shape.type==='path'),!['ring','magnet'].includes(type),`${type} retains its hollow/solid silhouette when killed`);
+    near(enemy.r,physical.r);near(enemy.mass,physical.mass);
+    advanceScene(scene,.15);assert.equal(scene.impactGhosts.length,0);assert.ok(scene.effects.some(effect=>effect.type==='shard'));
+    if(type==='fragment')assert.ok(scene.effects.filter(effect=>effect.type==='shard').every(effect=>effect.color===ink),'fragment shards keep the darker body color');
+  }
+});
+
+test('a real shield contact breaks only the visual ring and the next contact kills once with the correct feedback',t=>{
+  const {world,scene,g,enemy}=typedEnemyRun('shield'),events=observeWorldEvents(world),audio=app.recordFeedbackAudio(),p=world.player;
+  t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
+  Object.assign(enemy,{hp:20,maxHp:20});const radius=enemy.r;
+  const contact=()=>{Object.assign(p,{x:100,y:400,vx:world.baseSpeed,vy:0});Object.assign(enemy,{x:p.x+p.r+enemy.r-3,y:p.y,vx:0,vy:0});world.step(1/120);scene.update(0,0);};
+  world.shoot(-world.maxPull,0);advanceScene(scene,.04);contact();
+  assert.equal(enemy.shield,false);assert.equal(enemy.hp,20);assert.equal(enemy.r,radius);
+  assert.equal(world.score,0);assert.equal(world.stageKills,0);assert.equal(world.activeShot.hits,1);
+  assert.equal(events.filter(event=>event.type==='shieldBreak').length,1);assert.equal(events.filter(event=>event.type==='hit').length,0);
+  assert.equal(scene.impactGhosts.length,0);assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,5);
+  assert.equal(enemy.hit,0);assert.equal(enemy.feedbackFreeze,0);assert.equal(p.feedbackFreeze,0);
+  assert.ok(!g.shapes.some(shape=>shape.type==='stroke'&&shape.points?.length===128),'the broken shield contour is gone');
+  assert.deepEqual(audio.calls.filter(call=>call.name==='impact').map(call=>call.args[0].kind),['hit']);
+  contact();
+  assert.equal(events.filter(event=>event.type==='shieldBreak').length,1);assert.equal(events.filter(event=>event.type==='kill').length,1);
+  assert.equal(events.filter(event=>event.type==='firstTypeKill').length,1);assert.equal(world.score,20);assert.equal(world.stageKills,1);
+  assert.deepEqual(audio.calls.filter(call=>call.name==='impact').map(call=>call.args[0].kind),['hit','kill']);
+  assert.equal(scene.impactGhosts.length,1);assert.equal(scene.impactGhosts[0].body.shield,false);
+});
+
+test('first-type surprise uses 300 ms of active time once per type and still appears on the stage-ending kill',t=>{
+  const {world,scene,g,enemy}=typedEnemyRun('ring'),events=observeWorldEvents(world),p=world.player;
+  t.after(()=>app.setFeedbackStrength(.6));clickAction('expressions');scene.update(0,0);
+  const ordinary=playerEyes(g,p).map(shape=>({width:shape.width,height:shape.height}));assert.equal(ordinary.length,2);
+  const kill=body=>{world.damage(body,body.hp+1);world.enemies=world.enemies.filter(item=>item.hp>0);scene.update(0,0);};
+  kill(enemy);near(scene.firstTypeUntil-world.feedbackTime,.3);
+  const enlarged=playerEyes(g,p);assert.equal(enlarged.length,2);
+  enlarged.forEach((shape,index)=>{near(shape.width,ordinary[index].width*1.3);near(shape.height,ordinary[index].height*1.3);});
+  assert.equal(scene.testLabels.length,0,'type recognition is an expression, not new text');
+  clickAction('pause');scene.update(0,0);const frozenTime=world.feedbackTime,deadline=scene.firstTypeUntil;
+  advanceScene(scene,.6);near(world.feedbackTime,frozenTime);near(scene.firstTypeUntil,deadline);
+  clickAction('resume');app.advanceUi(.42);advanceScene(scene,.31);assert.ok(world.feedbackTime>=deadline);
+  const another=world.spawnEnemy(null,'ring');Object.assign(another,{born:1,solid:true});kill(another);
+  near(scene.firstTypeUntil,deadline);assert.equal(events.filter(event=>event.type==='firstTypeKill').length,1);
+  const heavy=world.spawnEnemy(null,'heavy');Object.assign(heavy,{x:100,y:260,born:1,solid:true});
+  rhythmEnemy(world,320,730);world.stageKills=world.killTarget-1;
+  world.damage(heavy,heavy.hp+1);scene.update(0,1000/120);
+  assert.equal(world.phase,'clearing');assert.equal(events.filter(event=>event.type==='firstTypeKill').length,2);
+  assert.equal(playerEyes(g,p).length,2,'the first-type surprise wins over combo eyes when the kill also starts clearing');
+  assert.ok(playerEyes(g,p).every(shape=>shape.width>p.r*.105*1.2));
+  clickAction('pause');app.advanceUi(.42);clickRestart();assert.equal(scene.firstTypeUntil,0);
+  assert.equal(app.readRestart().world.seenEnemyKills.size,0);
+});
+
+test('first-type expressions respect their own toggle while remaining readable at zero strength and reduced motion',async()=>{
+  for(const [strength,reduced,expressions] of [[0,false,true],[1,true,true],[1,false,false]])await withReloadedEntry({juice:strength,expressions},reduced,fresh=>{
+    const {world,scene,g,enemy}=typedEnemyRun('ring',fresh,strength);
+    fresh.setExpressionEnabled(expressions);
+    world.damage(enemy,enemy.hp+1);world.enemies=[];scene.update(0,0);
+    const eyes=playerEyes(g,world.player);assert.equal(eyes.length,2);
+    eyes.forEach(eye=>near(eye.width,world.player.r*.105*(expressions?1.3:1)));
+    if(strength===0||reduced)assert.equal(scene.zoomPulse,null);
+  });
+});
+
+test('hollow and fragment result transfers preserve their appearance before fading into the menu control',t=>{
+  t.after(()=>app.setFeedbackStrength(.6));
+  for(const type of ['ring','magnet','fragment']){
+    const {world,scene,enemy}=typedEnemyRun(type);enemy.hp=enemy.maxHp*.5;
+    world.phase='over';world.emit('over');scene.update(0,0);scene.advanceEnding(.6);
+    const item=app.readRestart().controlFlight.items[0];assert.equal(item.from.enemyType,type);
+    near(item.from.r,enemy.r*.91);assert.ok(item.enemySource);
+    if(type==='fragment'){
+      assert.match(item.el.innerHTML,/fill="#a26250"/);
+      assert.equal(item.el.style.background,'rgba(162,98,80,0)','the color transition starts at the fragment tone');
+    }else{assert.match(item.el.innerHTML,/fill="none"/);assert.match(item.el.innerHTML,/stroke=/);}
+    assert.match(item.el.style.background,/,0\)$/);assert.equal(item.enemySource.style.opacity,1);
+    app.advanceUi(.2);assert.ok(item.enemySource.style.opacity>0&&item.enemySource.style.opacity<1);
+    assert.doesNotMatch(item.el.style.background,/,0\)$/);
+  }
+});
+
+test('split children wait at the hard capacity, survive a pause, and fill newly opened slots without losing their parent profile',t=>{
+  const {world,scene,enemy}=typedEnemyRun('split'),events=observeWorldEvents(world),parentHp=enemy.maxHp;
+  t.after(()=>app.setFeedbackStrength(.6));
+  for(let index=0;index<27;index++)rhythmEnemy(world,38+(index%7)*50,100+Math.floor(index/7)*100,{r:world.unit*.3,hp:10000});
+  world.damage(enemy,enemy.hp+1);scene.update(0,1000/120);
+  assert.equal(world.liveCount,28);assert.equal(world.fragmentQueue.length,2);
+  assert.equal(world.enemies.filter(body=>body.enemyType==='fragment').length,1);
+  clickAction('pause');scene.update(0,0);const snapshot=JSON.stringify({queue:world.fragmentQueue,time:world.feedbackTime});
+  advanceScene(scene,.5);assert.equal(JSON.stringify({queue:world.fragmentQueue,time:world.feedbackTime}),snapshot);
+  clickAction('resume');app.advanceUi(.42);
+  const normals=world.enemies.filter(body=>!body.enemyType).slice(0,2);
+  assert.equal(normals.length,2);for(const body of normals)world.damage(body,body.hp+1);
+  scene.update(0,1000/120);
+  const children=world.enemies.filter(body=>body.enemyType==='fragment');
+  assert.equal(children.length,3);assert.equal(world.fragmentQueue.length,0);assert.equal(world.liveCount,28);
+  for(const child of children){near(child.r,world.unit*.6);near(child.maxHp,parentHp*.3);assert.equal(child.value,5);}
+  assert.equal(events.filter(event=>event.type==='spawn'&&event.enemyType==='fragment').length,3);
+  assert.equal(events.filter(event=>event.type==='firstTypeKill').length,1);assert.equal(world.stageKills,3);
+  clickAction('pause');app.advanceUi(.42);clickRestart();const next=app.readRestart().world;
+  assert.deepEqual(next.fragmentQueue,[]);assert.equal(next.seenEnemyKills.size,0);assert.equal(next.stageKills,0);
+});
+
+test('enemy playground targets remain above the panel without overlapping on tall and short touch viewports',t=>{
+  const panel=element('#feedback-demo'),previousRect=panel.getBoundingClientRect,previousHidden=panel.hidden;
+  t.after(()=>{panel.getBoundingClientRect=previousRect;panel.hidden=previousHidden;app.seedRenderer(graphicsRecorder());app.prepareNormalGame();app.setFeedbackStrength(.6);});
+  for(const [width,height,top] of [[390,844,500],[320,667,320],[844,390,135],[320,568,180]])for(const type of ['ring','heavy','split','walker','magnet','shield','leader']){
+    const g=graphicsRecorder();app.seedRenderer(g,width,height);panel.hidden=false;
+    panel.getBoundingClientRect=()=>({left:0,right:width,top,bottom:height,width,height:height-top});
+    app.runFeedbackDemo('type-'+type);const {world,scene}=app.readRestart(),bounds=world.arenaBounds,bodies=[world.player,...world.enemies];
+    for(let index=0;index<bodies.length;index++){
+      const body=bodies[index];assert.ok(body.x-body.r>=bounds.left-1e-8&&body.x+body.r<=bounds.right+1e-8,`${type} fits the walls at ${width}x${height}`);
+      assert.ok(body.y-body.r>=bounds.top-1e-8&&body.y+body.r<=top+1e-8,`${type} is visible above the panel at ${width}x${height}`);
+      for(const other of bodies.slice(index+1))assert.ok(Math.hypot(body.x-other.x,body.y-other.y)>=body.r+other.r-1e-8,`${type} starts without overlap at ${width}x${height}`);
+    }
+    scene.update(0,0);assertFiniteDemoFrame(world,scene,g);
+  }
+});
+
+for(const type of ['ring','heavy','split','walker','magnet','shield','leader'])test(`the real ${type} enemy playground uses live type behavior and isolates all score and progression`,t=>{
+  const g=graphicsRecorder();app.seedRenderer(g);app.setFeedbackStrength(.6);
+  const previousBest=app.seedBest(0),previousSaved=saved.get('qiuqiule-best');saved.set('qiuqiule-best','0');
+  const progressBefore=saved.get('qiuqiule-campaign'),skinsBefore=saved.get('qiuqiule-skins');
+  t.after(()=>{app.seedBest(previousBest);if(previousSaved===undefined)saved.delete('qiuqiule-best');else saved.set('qiuqiule-best',previousSaved);app.prepareNormalGame();app.setFeedbackStrength(.6);});
+  app.runFeedbackDemo('type-'+type);const {world,scene}=app.readRestart(),events=observeWorldEvents(world),target=world.enemies.find(body=>body.enemyType===type);
+  assert.ok(target);assert.equal(app.isFeedbackDemo(),true);assert.equal(world.mode==='campaign',false);assert.equal(world.continuousControl,true);assert.equal(world.introTimer,Infinity);
+  assert.equal(world.stage,{ring:3,heavy:6,split:8,walker:10,magnet:13,shield:16,leader:12}[type]);
+  const start={x:target.x,y:target.y,px:world.player.x,py:world.player.y};
+  if(type==='walker')near(Math.hypot(target.vx,target.vy),world.unit*2);
+  if(type==='leader')assert.equal(world.enemies.filter(body=>body.clusterId===target.clusterId).length,4);
+  for(let frame=0;frame<360;frame++){scene.update(0,1000/120);assertFiniteDemoFrame(world,scene,g);assert.ok(world.liveCount<=28);}
+  if(['ring','heavy','split'].includes(type))assert.ok(events.some(event=>event.type==='hit'&&event.enemyType===type),'the real prearranged launch reaches its typed target');
+  if(type==='shield')assert.equal(events.filter(event=>event.type==='shieldBreak').length,1);
+  if(type==='walker')assert.ok(Math.hypot(target.x-start.x,target.y-start.y)>world.unit,'walker moves without a player shot');
+  if(type==='magnet')assert.ok(world.player.x>start.px,'the stationary demo player is pulled toward the nearby magnet');
+  // Preserve real HP in the initial scene, then explicitly finish a genuine
+  // typed kill so score isolation cannot pass just because the score stayed 0.
+  if(target.hp>0){if(target.shield)world.damage(target,1);world.damage(target,target.hp+1);scene.update(0,0);}
+  assert.ok(world.score>0);assert.equal(saved.get('qiuqiule-best'),'0');
+  assert.equal(saved.get('qiuqiule-campaign'),progressBefore);assert.equal(saved.get('qiuqiule-skins'),skinsBefore);
+  clickAction('pause');app.advanceUi(.42);clickAction('home');app.advanceUi(.82);
+  assert.equal(app.readRestart().modal,'over');assert.equal(saved.get('qiuqiule-best'),'0');
+  clickRestart();app.advanceUi(.65);assert.equal(app.isFeedbackDemo(),false);assert.equal(app.readRestart().world.score,0);
+  assert.equal(saved.get('qiuqiule-best'),'0');
+});
+
+for(const kind of ['light','heavy','kill','multi','boss','reward','steer','rescue','danger'])test(`the real ${kind} acceptance demo runs for three seconds with valid feedback and never saves its score`,t=>{
+  const g=graphicsRecorder();app.seedRenderer(g);app.setFeedbackStrength(.6);
+  const previousBest=app.seedBest(0),previousSaved=saved.get('qiuqiule-best');saved.set('qiuqiule-best','0');
+  const progressBefore=saved.get('qiuqiule-campaign'),skinsBefore=saved.get('qiuqiule-skins');
+  const audio=app.recordFeedbackAudio();
+  t.after(()=>{
+    audio.restore();app.seedBest(previousBest);
+    if(previousSaved===undefined)saved.delete('qiuqiule-best');else saved.set('qiuqiule-best',previousSaved);
+    app.prepareNormalGame();app.setFeedbackStrength(.6);
+  });
+  app.runFeedbackDemo(kind);const {world,scene}=app.readRestart(),events=observeWorldEvents(world);
+  assert.equal(app.isFeedbackDemo(),true);assert.equal(app.readRestart().paused,false);assert.equal(app.readRestart().screen,'play');
+  if(kind==='steer'){
+    const p=world.player,pointer=inputCanvas(),start={x:p.x,y:p.y},speed=Math.hypot(p.vx,p.vy);
+    near(p.vx,world.baseSpeed);near(p.vy,-world.baseSpeed*.2);
+    assert.ok(speed>world.readySpeed);assert.equal(world.enemies.length,3);assert.ok(world.enemies.every(enemy=>enemy.hp===10000));
+    pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x,start.y+world.maxPull);scene.update(0,0);
+    assert.equal(app.readRestart().drag.pending,false);near(scene.timeScale,.3);
+    pointer('pointercancel');pointer('pointerup',start.x,start.y+world.maxPull);
+    assert.equal(app.readRestart().drag,null);near(scene.timeScale,1);near(Math.hypot(p.vx,p.vy),speed);
+    assert.equal(events.filter(e=>e.type==='shoot').length,0,'cancelling the moving-ball demo never releases a shot');
+    pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x,start.y+world.maxPull);pointer('pointerup',start.x,start.y+world.maxPull);
+    assert.equal(app.readRestart().drag,null);near(scene.timeScale,1);near(p.vx,0);near(p.vy,-speed*.9);
+    assert.equal(events.filter(e=>e.type==='shoot').length,1,'a deliberate release redirects exactly once');
+    assert.equal(audio.calls.at(-1).name,'stopCharge');
+  }
+  for(let frame=0;frame<360;frame++){
+    scene.update(0,1000/120);assertFiniteDemoFrame(world,scene,g);
+    if(kind==='boss'&&world.boss)assert.ok(!g.shapes.some(shape=>shape.type==='ellipse'&&[0xf9f8f0,0xffffff].includes(shape.color)&&shape.alpha>0&&Math.hypot(shape.x-world.boss.x,shape.y-world.boss.y)<world.boss.r*.5),'the boss itself never receives a white overlay; pre-Boss ordinary targets keep their existing feedback');
+  }
+  const hits=events.filter(e=>e.type==='hit'),kills=events.filter(e=>e.type==='kill');
+  if(kind==='light'||kind==='heavy'){
+    assert.ok(hits.length>0,'the pre-arranged launch reaches its target');
+    assert.equal(hits[0].lethal,false);assert.ok(hits[0].damage>0&&hits[0].damage<hits[0].maxHp);
+    if(kind==='light'){
+      assert.ok(hits[0].damage<hits[0].maxHp*.3);assert.equal(hits[0].freezeDuration,0);
+    }else{
+      assert.ok(hits[0].damage>=hits[0].maxHp*.3);assert.ok(hits[0].freezeDuration>0);
+    }
+  }else if(kind==='kill')assert.ok(kills.length>=1);
+  else if(kind==='multi')assert.ok(kills.length>=2,'continuous-kill demo must actually demonstrate multiple kills without extra input');
+  else if(kind==='reward'){
+    assert.equal(kills.length,1,'the automatic launch performs the threshold kill exactly once');
+    assert.equal(events.filter(e=>e.type==='clearKill').length,8);assert.equal(world.score,90);
+    assert.equal(world.stageKills,world.killTarget);assert.equal(events.filter(e=>e.type==='upgrade').length,1);
+    assert.equal(world.phase,'choose','the final-kill demo reaches its ordinary reward choices within three seconds');
+    assert.equal(world.ready,true);assert.equal(world.choices.length,3);
+    assert.ok(element('#choice-labels').children.length>0&&element('#choice-labels').children.every(node=>node.style.opacity==='1'));
+  }
+  else if(kind==='steer'){
+    assert.equal(world.phase,'battle');assert.equal(kills.length,0,'the sturdy demo targets remain available for repeated practice');
+    // Make a real collision lethal so the record-isolation assertion exercises
+    // an actual positive award instead of merely checking the initial zero.
+    world.player.x=world.width*.25;world.player.y=world.height*.5;
+    collideFeedbackEnemy(world);scene.update(0,0);assert.ok(world.score>0);
+  }
+  else if(kind==='rescue'){
+    assert.equal(world.phase,'battle');assert.equal(world.saveUsed,true);assert.equal(world.liveCount,25);
+    assert.equal(world.score,0);assert.equal(world.stageKills,0);
+    assert.equal(events.filter(event=>event.type==='rescue').length,1);
+    assert.equal(events.filter(event=>event.type==='shatter'&&event.source==='rescue').length,3);
+    world.damage(world.enemies[0],1000);scene.update(0,0);assert.equal(world.score,10);
+  }
+  else if(kind==='danger'){
+    assert.equal(world.phase,'over');assert.equal(world.deathReason,'capacity');assert.equal(app.readRestart().modal,'over');
+    assert.equal(events.filter(event=>event.type==='over').length,1);assert.equal(events.filter(event=>event.type==='rescue').length,0);
+    assert.equal(element('#result-reason').hidden,true,'playground results do not present a personal record claim');
+  }
+  else{
+    assert.ok(events.some(e=>e.type==='bossHit'&&e.power>0));assert.ok(world.boss.r<events.find(event=>event.type==='bossEntry').r);assert.equal(events.filter(event=>event.type==='clearKill').length,2);assert.equal(world.enemies.length,0);
+    assert.ok(audio.calls.some(c=>c.name==='impact'&&c.args[0].kind==='boss'),'the automatic boss hit dispatches the proper impact sound');
+    // Exercise a real segment reward too, to verify the boss-score persistence
+    // branch even when the three-second automatic launch only shrinks it once.
+    for(let i=0;i<30&&world.boss.scoredSegments===0;i++)world.damageBoss(world.baseSpeed);
+    scene.update(0,0);assert.ok(world.boss.scoredSegments>0);assert.ok(world.score>30);
+  }
+  assert.equal(saved.get('qiuqiule-best'),'0');
+  assert.equal(saved.get('qiuqiule-campaign'),progressBefore);assert.equal(saved.get('qiuqiule-skins'),skinsBefore);
+  if(world.score>0){
+    clickAction('pause');app.advanceUi(.42);clickAction('home');
+    assert.equal(app.readRestart().modal,'over','the ordinary pause-to-results route is exercised');
+    assert.equal(saved.get('qiuqiule-best'),'0','the result path also keeps demo records isolated');
+    app.advanceUi(.82);clickRestart();app.advanceUi(.65);
+    assert.equal(app.isFeedbackDemo(),false,'an ordinary restart exits the playground');
+    assert.equal(app.readRestart().world.score,0);assert.equal(saved.get('qiuqiule-best'),'0');
+    if(kind==='reward'){
+      const normal=app.readRestart();finishStartingChoice(normal.world,normal.scene);normal.world.spawnTimer=Infinity;normal.world.floorTimer=Infinity;
+      collideFeedbackEnemy(normal.world);normal.scene.update(0,0);
+      assert.equal(saved.get('qiuqiule-best'),'10','the new ordinary run resumes real record saving');
+    }
+  }
+});
+
+test('pressure playgrounds keep their seven-column layout and player above the controls on phone and desktop',t=>{
+  const panel=element('#feedback-demo'),previousRect=panel.getBoundingClientRect,previousHidden=panel.hidden;
+  t.after(()=>{panel.getBoundingClientRect=previousRect;panel.hidden=previousHidden;app.seedRenderer(graphicsRecorder());app.prepareNormalGame();app.setFeedbackStrength(.6);});
+  for(const [width,height,top] of [[390,844,594],[1364,936,725]])for(const kind of ['rescue','danger']){
+    const g=graphicsRecorder();app.seedRenderer(g,width,height);app.setFeedbackStrength(.6);
+    panel.hidden=false;panel.getBoundingClientRect=()=>({left:0,right:width,top,bottom:height,width,height:height-top});
+    app.runFeedbackDemo(kind);const {world,scene}=app.readRestart(),p=world.player,bounds=world.arenaBounds,events=observeWorldEvents(world);
+    assert.ok(p.y+p.r<=top-p.r+1e-8,'the player retains a full radius of clearance above the visible panel');
+    assert.equal(world.enemies.length,kind==='rescue'?28:27);
+    assert.equal(new Set(world.enemies.map(body=>body.x)).size,7);assert.equal(new Set(world.enemies.map(body=>body.y)).size,4);
+    const bodies=[p,...world.enemies];
+    for(let index=0;index<bodies.length;index++){
+      const body=bodies[index];
+      assert.ok(body.x-body.r>=bounds.left-1e-8&&body.x+body.r<=bounds.right+1e-8);
+      assert.ok(body.y-body.r>=bounds.top-1e-8&&body.y+body.r<=Math.min(bounds.bottom,top)+1e-8);
+      for(const other of bodies.slice(index+1))assert.ok(Math.hypot(body.x-other.x,body.y-other.y)>=body.r+other.r-1e-8,'the laid-out balls start without overlap');
+    }
+    scene.update(0,0);assertFiniteDemoFrame(world,scene,g);
+    advanceScene(scene,kind==='rescue'?.82:1.62);
+    if(kind==='rescue'){
+      assert.equal(world.phase,'battle');assert.equal(world.saveUsed,true);assert.equal(world.liveCount,25);
+      assert.equal(events.filter(event=>event.type==='rescue').length,1);
+    }else{
+      assert.equal(world.phase,'over');assert.equal(world.deathReason,'capacity');assert.equal(events.filter(event=>event.type==='over').length,1);
+    }
+  }
+});
+
+test('returning home or preparing a real run exits the acceptance demo and restores ordinary scoring',()=>{
+  const previousBest=app.seedBest(0),previousSaved=saved.get('qiuqiule-best');
+  try{
+    app.seedRenderer(graphicsRecorder());app.runFeedbackDemo('kill');
+    clickAction('home');assert.equal(app.isFeedbackDemo(),false);assert.equal(app.readRestart().screen,'home');assert.equal(app.readRestart().world,null);
+    app.advanceUi(.65);app.runFeedbackDemo('multi');assert.equal(app.isFeedbackDemo(),true);
+    app.prepareNormalGame();assert.equal(app.isFeedbackDemo(),false);
+    const {world,scene}=app.readRestart();finishStartingChoice(world,scene);world.spawnTimer=Infinity;world.floorTimer=Infinity;world.wave=null;
+    collideFeedbackEnemy(world);scene.update(0,0);
+    assert.ok(world.score>0);assert.equal(Number(saved.get('qiuqiule-best')),world.score,'a subsequent real run saves its real score again');
+  }finally{
+    app.seedBest(previousBest);if(previousSaved===undefined)saved.delete('qiuqiule-best');else saved.set('qiuqiule-best',previousSaved);
+    app.prepareNormalGame();app.setFeedbackStrength(.6);
+  }
+});
+
+// Task 6 exercises the actual entry scene and event routing; only DOM/Phaser
+// surfaces and the starting position of each reproducible scenario are mocked.
+function documentPointer(type,options={}){
+  const event={pointerId:91,isPrimary:true,button:0,clientX:20,clientY:20,detail:1,target:{closest:()=>null},preventDefault(){},...options};
+  for(const handler of listeners.get(type)||[])handler(event);
+}
+function endingRun(module=app,strength=.6){
+  const run=feedbackRun(module,strength),{world,scene}=run;
+  module.seedEndless({best:1000},{recordEffects:true});
+  Object.assign(world,{score:460,maxCombo:7,maxStage:12,shotHistory:Array.from({length:3},()=>({time:world.feedbackTime,hits:0}))});
+  Object.assign(world.player,{vx:world.unit*5,vy:-world.unit,born:1,solid:true});
+  world.endRun('capacity');scene.update(0,0);
+  assert.ok(scene.ending);assert.equal(module.readRestart().result,null);
+  return run;
+}
+function chooseByContact(world,scene,choice=world.choices[0]){
+  assert.equal(world.phase,'choose');assert.ok(choice);
+  const count=world.buffs[choice.id]||0;
+  Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0,feedbackFreeze:0});
+  scene.update(0,1000/120);
+  assert.equal(world.phase,'reward');assert.equal(world.buffs[choice.id],count+1);
+  return choice.id;
+}
+function waitForChoose(world,scene){
+  for(let frame=0;world.phase!=='choose'&&frame<1000;frame++)scene.update(0,1000/120);
+  assert.equal(world.phase,'choose');
+}
+
+function finishStartingChoice(world,scene){
+  assert.equal(world.startingUpgrades,true);assert.equal(world.rewardSelectionsRemaining,1);
+  waitForChoose(world,scene);chooseByContact(world,scene,world.choices.find(choice=>choice.id!=='growth'));
+  advanceScene(scene,1.01);assert.equal(world.phase,'battle');assert.equal(world.startingUpgrades,false);
+}
+
+test('the real endless failure freezes gameplay, animates only its snapshot and shows ordered result statistics before a 400 ms blank restart',()=>{
+  const {world,scene}=endingRun(),snapshot=scene.ending;
+  const actual={x:world.player.x,y:world.player.y,time:world.time,feedbackTime:world.feedbackTime,score:world.score,enemies:world.enemies.length};
+  let steps=0;const original=world.step.bind(world);world.step=(...args)=>{steps++;return original(...args);};
+  advanceScene(scene,.3);near(snapshot.age,.3);assert.notEqual(snapshot.player.x,actual.x);
+  assert.equal(steps,0);assert.deepEqual({x:world.player.x,y:world.player.y,time:world.time,feedbackTime:world.feedbackTime,score:world.score,enemies:world.enemies.length},actual);
+  documentPointer('pointerdown');documentPointer('click');assert.equal(app.readRestart().world,world,'ending cannot be skipped by blank clicks');
+  advanceScene(scene,.3);assert.equal(scene.ending,null);
+  let state=app.readRestart();assert.equal(state.modal,'over');assert.equal(state.transfer.duration,.4);
+  assert.equal(state.result.maxCombo,7);assert.equal(state.result.maxStage,12);
+  assert.match(element('#result-peak').innerHTML,/最大连击.*7.*到达阶段.*12/);
+  assert.equal(element('#result-records').textContent,'历史最佳1000');assert.equal(element('#result-records').hidden,false);
+  assert.equal(element('#result-reason').textContent,'');
+  documentPointer('pointerdown');documentPointer('click');assert.equal(app.readRestart().transfer.target,'over','flight cannot be restarted early');
+  app.advanceUi(.4);assert.equal(app.readRestart().transfer,null);assert.equal(element('#ui-ball .ui-result-crown').style.display,'','six-combo crowns remain available without a Boss victory');
+  documentPointer('click');assert.equal(app.readRestart().world,world,'late release without a fresh result press cannot restart');
+  for(const options of [{isPrimary:false},{button:2}]){documentPointer('pointerdown',options);documentPointer('click');assert.equal(app.readRestart().world,world);}
+  documentPointer('pointerdown');documentPointer('pointermove',{clientX:40});documentPointer('click');assert.equal(app.readRestart().world,world);
+  documentPointer('pointerdown');documentPointer('pointercancel');documentPointer('click');assert.equal(app.readRestart().world,world);
+  documentPointer('pointerdown');documentPointer('click');state=app.readRestart();assert.notEqual(state.world,world);assert.equal(state.transfer.duration,.4);
+  const fresh=state.world;documentPointer('click');assert.equal(app.readRestart().world,fresh,'one accepted click starts exactly one new run');
+  app.advanceUi(.4);assert.equal(app.readRestart().transfer,null);assert.equal(fresh.score,0);assert.equal(fresh.startingUpgrades,true);assert.equal(fresh.rewardSelectionsRemaining,1,'quick restart always offers one starting choice');
+});
+
+test('ending blur, pagehide and visibility suspension preserve active time and discard the entire returning frame',()=>{
+  const oldHidden=document.hidden,oldFocus=document.hasFocus;
+  try{
+    for(const interruption of ['blur','pagehide','hidden']){
+      document.hidden=false;document.hasFocus=()=>true;
+      const {world,scene}=endingRun();advanceScene(scene,.2);const ending=scene.ending,pose={...ending.player};
+      if(interruption==='hidden'){document.hidden=true;for(const fn of listeners.get('visibilitychange'))fn();}
+      else for(const fn of windowListeners.get(interruption))fn();
+      scene.update(0,5000);near(ending.age,.2);near(ending.player.x,pose.x);assert.equal(app.readRestart().modal,null);
+      if(interruption==='hidden'){document.hidden=false;for(const fn of listeners.get('visibilitychange'))fn();}
+      else for(const fn of windowListeners.get(interruption==='blur'?'focus':'pageshow'))fn();
+      scene.update(0,5000);near(ending.age,.2);assert.equal(app.readRestart().world,world);
+      advanceScene(scene,.39);assert.equal(app.readRestart().result,null);
+      advanceScene(scene,.02);assert.equal(app.readRestart().modal,'over');assert.equal(world.score,460);
+    }
+  }finally{document.hidden=oldHidden;document.hasFocus=oldFocus;}
+});
+
+test('resizing during the ending maps its snapshot, preserves its age and reaches results without advancing the failed world',t=>{
+  const {g,world,scene}=endingRun(),pointer=inputCanvas();
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;});
+  app.mountSceneBoundary(pointer.canvas,g);advanceScene(scene,.2);
+  const ending=scene.ending,old={x:ending.player.x,y:ending.player.y,r:ending.player.r,unit:world.unit,time:world.time};
+  window.innerWidth=844;window.innerHeight=390;resize();
+  assert.equal(scene.ending,ending);near(ending.age,.2);near(ending.player.r,old.r*world.unit/old.unit);
+  const bounds=world.arenaBounds;assert.ok(ending.player.x-ending.player.r>=bounds.left&&ending.player.x+ending.player.r<=bounds.right);
+  assert.ok(ending.player.y-ending.player.r>=bounds.top&&ending.player.y+ending.player.r<=bounds.bottom);
+  scene.update(0,5000);near(ending.age,.2);near(world.time,old.time);
+  advanceScene(scene,.41);assert.equal(app.readRestart().modal,'over');assert.equal(world.score,460);assert.equal(app.readRestart().result.maxCombo,7);
+});
+
+test('zero strength and reduced motion keep the full ending duration with a static snapshot',async()=>{
+  for(const [strength,reduced] of [[0,false],[1,true]])await withReloadedEntry({juice:strength},reduced,fresh=>{
+    const {world,scene}=endingRun(fresh,strength),pose={...scene.ending.player};
+    advanceScene(scene,.59);near(scene.ending.player.x,pose.x);near(scene.ending.player.y,pose.y);near(scene.timeScale,1);
+    assert.equal(fresh.readRestart().result,null);advanceScene(scene,.02);
+    assert.equal(fresh.readRestart().modal,'over');assert.equal(world.score,460);
+  });
+  const {world,scene}=endingRun();advanceScene(scene,.2);const ending=scene.ending,pose={...ending.player};
+  app.setFeedbackStrength(0);assert.equal(scene.ending,ending);near(ending.age,.2);
+  advanceScene(scene,.39);near(ending.player.x,pose.x);near(ending.player.y,pose.y);
+  advanceScene(scene,.02);assert.equal(app.readRestart().modal,'over');assert.equal(world.score,460);app.setFeedbackStrength(.6);
+});
+
+test('a new record compares against the starting best, celebrates once and persists stage, combo and the captured day',t=>{
+  const {world,scene}=controlRun();app.seedEndless({best:100},{date:'2030-01-01'});
+  const tones=app.recordTones();t.after(()=>tones.restore());
+  world.score=100;app.updateScoreHud();assert.equal(app.readEndless().runNewRecord,false);
+  world.score=101;world.maxCombo=6;app.updateScoreHud();assert.equal(app.readEndless().runNewRecord,true);
+  assert.deepEqual(tones.calls.map(call=>call[0]),[660]);app.updateScoreHud(.1);
+  near(Number(element('#score').style.transform.match(/scale\(([^)]+)/)[1]),1.3);assert.deepEqual(tones.calls.map(call=>call[0]),[660,880]);
+  world.score=120;world.stage=4;world.maxStage=4;app.updateScoreHud(.2);
+  assert.deepEqual(tones.calls.map(call=>call[0]),[660,880]);assert.equal(element('#score').style.color,'var(--player)');
+  const stored=JSON.parse(saved.get('qiuqiule-endless'));
+  assert.equal(stored.best,120);assert.equal(stored.maxStage,4);assert.equal(stored.maxCombo,6);
+  assert.deepEqual(stored.daily.find(day=>day.key==='2030-01-01'),{key:'2030-01-01',best:120,maxStage:4,maxCombo:6});
+  assert.equal(app.readEndless().runBest,100);world.stageKills=7;scene.update(0,0);assertStageProgress(world);
+});
+
+test('endless records retain reached stages without unlocking skins or changing campaign progress',()=>{
+  const {world}=controlRun();app.seedEndless();app.seedSkins(null,0);
+  const before={...app.readRestart().campaignProgress},original={...app.readSkins().skins};
+  for(const stage of [5,10,15,20,25]){
+    world.stage=world.maxStage=stage;app.updateScoreHud();assert.equal(JSON.parse(saved.get('qiuqiule-endless')).maxStage,stage);
+    assert.deepEqual(app.readSkins().skins,original);assert.deepEqual(app.readRestart().campaignProgress,before);
+  }
+  app.changeSkinSides({sides:6,variant:true});assert.deepEqual(app.readSkins().skins,original);
+  assert.equal(app.readSkins().skins.unlocked,0);app.seedSkins();
+});
+
+test('loading old endless variants removes them from storage and retains only owned campaign skins',async t=>{
+  const priorSkins=saved.get('qiuqiule-skins'),priorCampaign=saved.get('qiuqiule-campaign');
+  t.after(()=>{for(const [key,value] of [['qiuqiule-skins',priorSkins],['qiuqiule-campaign',priorCampaign]]){if(value===undefined)saved.delete(key);else saved.set(key,value);}});
+  for(const [completed,selection,expected] of [
+    [0,{enabled:true,sides:6,unlocked:0,variants:[6,7,8,9],variant:true},{enabled:false,sides:6,unlocked:0}],
+    [10,{enabled:true,sides:6,unlocked:6,variants:[6],variant:true},{enabled:true,sides:6,unlocked:6}],
+    [10,{enabled:true,sides:9,unlocked:6,variants:[9],variant:true},{enabled:true,sides:6,unlocked:6}],
+  ]){
+    saved.set('qiuqiule-skins',JSON.stringify(selection));saved.set('qiuqiule-campaign',JSON.stringify({completed,unlocked:completed+1}));
+    await withReloadedEntry(null,false,fresh=>{
+      assert.deepEqual(fresh.readSkins().skins,expected);assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),expected);
+    });
+  }
+});
+
+test('every normal fresh game offers exactly one regular starting choice regardless of its historical stage',()=>{
+  for(const maxStage of [0,4,5,10,25,1000]){
+    const rounds=1;
+    app.seedRenderer(graphicsRecorder(),390,844,true);app.seedEndless({maxStage,best:0});app.prepareNormalGame();
+    const {world,scene}=app.readRestart(),events=observeWorldEvents(world);
+    assert.equal(world.score,0);assert.equal(world.stage,1);
+    assert.equal(world.startingUpgrades,true);assert.equal(world.rewardSelectionsRemaining,rounds);assert.equal(world.enemies.length,0);
+    for(let round=1;round<=rounds;round++){
+      waitForChoose(world,scene);assert.equal(world.upgradeRound,round);assert.equal(world.choices.length,3);
+      assert.ok(world.choices.every(choice=>choice.kind==='regular'&&(world.buffs[choice.id]||0)<choice.maxStacks));
+      advanceScene(scene,2);assert.equal(world.enemies.length,0);assert.equal(world.stage,1,'choosing is player controlled, never automatic');
+      chooseByContact(world,scene);advanceScene(scene,1.01);
+      if(round<rounds){assert.equal(world.phase,'transition');assert.equal(world.stage,1);assert.equal(world.enemies.length,0);}
+    }
+    assert.equal(world.phase,'battle');assert.equal(world.startingUpgrades,false);assert.equal(world.enemies.length,6);
+    assert.equal(world.score,0);assert.equal(world.stageKills,0);assert.ok(world.time<.02,'time spent selecting cannot increase stage-one stats');
+    assert.equal(world.pendingUpgradeBoost,true);assert.equal(events.filter(event=>event.type==='buff').length,rounds);
+  }
+});
+
+test('Boss victory offers two independent physical choices, with gambler affecting only round one and stage advance after round two',()=>{
+  for(const gambler of [false,true]){
+    const {world,scene}=bossScene(10);advanceToBoss(world,scene);world.gamblerRewardPending=gambler;
+    defeatBoss(world,scene);waitForChoose(world,scene);
+    assert.equal(world.upgradeRound,1);assert.equal(world.upgradeRoundTotal,2);assert.equal(world.choices.length,gambler?5:3);
+    const score=world.score,first=world.choices.find(choice=>choice.id!=='gambler');chooseByContact(world,scene,first);advanceScene(scene,1.01);
+    assert.equal(world.stage,10);assert.equal(world.rewardSelectionsRemaining,1);waitForChoose(world,scene);
+    assert.equal(world.upgradeRound,2);assert.equal(world.choices.length,3);assert.equal(world.gamblerRewardPending,false);
+    assert.ok(world.choices.every(choice=>(world.buffs[choice.id]||0)<choice.maxStacks));
+    chooseByContact(world,scene);advanceScene(scene,1.01);
+    assert.equal(world.stage,11);assert.equal(world.phase,'battle');assert.equal(world.rewardSelectionsRemaining,0);assert.equal(world.score,score);
+    assert.equal(world.boss,null);assert.ok(world.enemies.length>=world.floorCount);assert.equal(world.pendingUpgradeBoost,true);
+  }
+});
+
+test('same-time restarts randomize gameplay while records stay on the opening date across midnight',t=>{
+  let nextSeed=900; t.mock.method(globalThis.crypto,'getRandomValues',array=>{array[0]=nextSeed++;return array;});
+  const OriginalDate=globalThis.Date;let now='2030-01-01T12:00:00';
+  class FakeDate extends OriginalDate{constructor(...args){super(...(args.length?args:[now]));}static now(){return new OriginalDate(now).getTime();}}
+  globalThis.Date=FakeDate;
+  try{
+    app.seedRenderer(graphicsRecorder(),390,844,true);app.seedEndless();app.prepareNormalGame();
+    const beginBattle=()=>{const {world,scene}=app.readRestart();waitForChoose(world,scene);chooseByContact(world,scene,world.choices.find(choice=>choice.id!=='growth'));advanceScene(scene,1.01);assert.equal(world.phase,'battle');};
+    beginBattle();
+    const first=app.readRestart().world,key=app.readEndless().runDay.key,seed=app.readEndless().runDay.seed;
+    const bodyState=world=>world.enemies.map(({x,y,r,hp,enemyType})=>({x,y,r,hp,enemyType}));const firstBodies=bodyState(first);
+    app.prepareNormalGame();beginBattle();assert.equal(app.readEndless().runDay.key,key);assert.notEqual(app.readEndless().runDay.seed,seed);assert.notDeepEqual(bodyState(app.readRestart().world),firstBodies);
+    now='2030-01-02T12:00:00';app.readRestart().world.score=13;app.updateScoreHud();
+    assert.equal(app.readEndless().runDay.key,key);assert.equal(JSON.parse(saved.get('qiuqiule-endless')).daily.find(day=>day.key===key).best,13);
+    app.prepareNormalGame();beginBattle();assert.equal(app.readEndless().runDay.key,'2030-01-02');assert.notEqual(app.readEndless().runDay.seed,seed);
+    assert.notDeepEqual(bodyState(app.readRestart().world),firstBodies);
+  }finally{globalThis.Date=OriginalDate;}
+});
+
+for(const kind of ['boss-inflation','boss-rewards','ending','starting-1'])test(`task-six playground ${kind} runs through the actual scene and isolates all records and unlocks`,()=>{
+  const g=graphicsRecorder();app.seedRenderer(g);app.seedEndless({best:777,maxStage:1,maxCombo:2});app.seedSkins();
+  const stored=new Map(saved);app.runFeedbackDemo(kind);const {world,scene}=app.readRestart(),events=observeWorldEvents(world);
+  assert.equal(app.isFeedbackDemo(),true);assert.equal(app.readRestart().screen,'play');
+  const originalEnemies=world.enemies.map(body=>body.id);
+  for(let frame=0;frame<960;frame++){scene.update(0,1000/120);assertFiniteDemoFrame(world,scene,g);}
+  if(kind.startsWith('boss-')&&kind!=='boss-rewards'){
+    assert.equal(world.boss.bossType,kind.slice(5));assert.equal(world.phase,'boss');assert.equal(originalEnemies.length,3);assert.equal(events.filter(event=>event.type==='clearKill').length,2);assert.equal(events.filter(event=>event.type==='clearingStart').length,1);assert.equal(world.enemies.length,0);
+    assert.ok(events.some(event=>event.type==='bossHit'));
+  }else if(kind==='boss-rewards'){
+    assert.equal(world.phase,'choose');assert.equal(world.rewardSelectionsRemaining,2);assert.equal(world.upgradeRound,1);assert.equal(world.choices.length,3);
+    chooseByContact(world,scene);waitForChoose(world,scene);assert.equal(world.upgradeRound,2);assert.equal(world.choices.length,3);
+  }else if(kind==='ending'){
+    assert.equal(world.phase,'over');assert.equal(app.readRestart().modal,'over');assert.equal(app.readRestart().result.maxCombo,7);
+    assert.equal(element('#result-records').hidden,true);assert.equal(element('#result-reason').hidden,true);
+  }else{
+    assert.equal(world.startingUpgrades,true);assert.equal(world.upgradeRoundTotal,1);assert.equal(world.choices.length,3);
+    assert.ok(world.choices.every(choice=>choice.kind==='regular'));assert.equal(world.enemies.length,0);
+  }
+  assert.deepEqual(saved,stored,'demo state must not persist best, daily stats, milestones, campaign progress or skins');
+});
+
+
+test('real split balls inherit campaign polygons and migrated default circles while keeping only the main face',()=>{
+  try{
+    for(const selection of [{enabled:true,sides:8,unlocked:8},{enabled:true,sides:6,unlocked:0,variants:[6],variant:true}]){
+      const g=graphicsRecorder();app.seedRenderer(g);app.seedSkins(selection);app.runFeedbackDemo('upgrade-split');
+      const {world,scene}=app.readRestart();
+      for(let frame=0;!world.auxiliaries.length&&frame<180;frame++)scene.update(0,1000/120);
+      assert.equal(world.auxiliaries.length,2);
+      for(const [index,body] of [world.player,...world.auxiliaries].entries())Object.assign(body,{x:80+index*100,y:400,vx:0,vy:0,squash:0,angle:0,roll:0,feedbackFreeze:0});
+      scene.resetFeedback();scene.update(0,0);const active=app.readSkins().skins;const contour=active.enabled?skinContour(active.sides):Array.from({length:192},(_,i)=>({x:Math.cos(i/192*Math.PI*2),y:Math.sin(i/192*Math.PI*2)}));
+      for(const body of [world.player,...world.auxiliaries]){
+        const shape=g.shapes.find(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points?.length===193&&Math.hypot(outlineBounds(shape).cx-body.x,outlineBounds(shape).cy-body.y)<body.r*.1&&Math.abs(outlineBounds(shape).width/body.r-(Math.max(...contour.map(p=>p.x))-Math.min(...contour.map(p=>p.x))))<1e-6);
+        assert.ok(shape,'each physical player ball has its own visible skin');
+        const local=shape.points.slice(0,-1).map(point=>({x:(point.x-body.x)/body.r,y:(point.y-body.y)/body.r}));
+        assertSameContour(local,contour);
+        assert.equal(playerEyes(g,body).length,body.isAuxiliary?0:2);
+      }
+    }
+  }finally{app.seedSkins();app.prepareNormalGame();}
+});
+
+test('real split photos use independent slots with the main photo retained and removed auxiliaries hidden on the next frame',()=>{
+  const g=graphicsRecorder();app.seedRenderer(g);app.seedSkins({enabled:true,sides:6,unlocked:6});app.runFeedbackDemo('upgrade-split');
+  const {world,scene}=app.readRestart();for(let frame=0;!world.auxiliaries.length&&frame<180;frame++)scene.update(0,1000/120);
+  assert.equal(world.auxiliaries.length,2);for(const body of [world.player,...world.auxiliaries])body.feedbackFreeze=0;scene.resetFeedback();const photos=app.recordCompositePhotos();
+  try{
+    scene.update(0,0);assert.equal(photos.main.length,1);assert.deepEqual(photos.aux.map(call=>call.slot),[0,1]);
+    assert.deepEqual([...photos.visible].sort(),[0,1,'main']);
+    for(const [index,body] of world.auxiliaries.entries()){
+      const draw=photos.aux[index];near(draw.pose.x,body.x);near(draw.pose.y,body.y);near(draw.pose.r,body.r);
+      assertSameContour(draw.contour,photos.main[0].contour);assert.equal(draw.options.baseColor,photos.main[0].options.baseColor);
+      assert.equal(draw.options.alpha,1);assert.equal(playerEyes(g,body).length,0);
+    }
+    near(photos.main[0].pose.x,world.player.x);near(photos.main[0].pose.r,world.player.r);assert.equal(eyeShapes(g).length,0,'photo mode never adds canvas eyes');
+    world.clearAuxiliaries();scene.update(0,0);
+    assert.equal(photos.main.length,2,'the main photo still draws after split cleanup');assert.equal(photos.aux.length,2,'expired auxiliaries never draw again');
+    assert.deepEqual([...photos.visible],['main']);assert.ok(photos.hidden.length>=2);
+  }finally{photos.restore();app.seedSkins();app.prepareNormalGame();}
+});
+
+
+function finalBossCollision(module=app,strength=.6){
+  const run=feedbackRun(module,strength),{world,scene}=run;world.stage=5;world.beginBoss();advanceScene(scene,.86);
+  assert.equal(world.phase,'boss');scene.resetFeedback();world.events=[];
+  Object.assign(world.boss,{r:world.boss.minRadius,stunned:true,hp:1,maxHp:1,feedbackFreeze:0});
+  const p=world.player,b=world.boss;Object.assign(p,{x:b.x,y:b.y+b.r+p.r-.1,vx:0,vy:-world.baseSpeed,feedbackFreeze:0});
+  const events=observeWorldEvents(world);
+  world.collideBoss();assert.equal(world.phase,'boss-celebrate');assert.equal(world.bossKills,1);assert.equal(world.hasDefeatedBoss,true);scene.update(0,0);
+  return {...run,events};
+}
+
+test('a real Boss final collision triggers one heavy sound and a 180 ms border-only pulse with immutable square, ball and HUD geometry',t=>{
+  const audio=app.recordFeedbackAudio();t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
+  const {world,scene,g}=finalBossCollision(),circle={...world.arenaGeometry},pose={x:world.player.x,y:world.player.y,r:world.player.r};
+  const hud=element('#hud').style.transform,scoreTransform=element('#score').style.transform;
+  assert.equal(audio.calls.filter(call=>call.name==='bossDefeat').length,1);
+  assert.equal(audio.calls.filter(call=>call.name==='impact'&&call.args[0].kind==='boss').length,0,'the same final contact must not also play its ordinary Boss-hit sound');
+  assert.equal(scene.wallFlashes.filter(flash=>flash.bossDefeat).length,1);assert.equal(g.borders.length,1);
+  const baseline={...g.borders[0]};scene.updateFeedback(.025);g.clear();scene.drawArena();
+  assert.ok(baseline.height<world.height-32,'the pulse belongs to the contracted Boss square');assert.equal(g.borders.length,1,'no static duplicate hides the shaking frame');
+  const offset=5*.6*Math.sin(Math.PI*2*18*.025)*(1-.025/.18)**2;
+  near(g.borders[0].x-baseline.x,offset);assert.ok(Math.abs(offset)>.1);
+  for(const key of ['y','width','height','r'])near(g.borders[0][key],baseline[key]);
+  assert.deepEqual(world.arenaGeometry,circle);assert.deepEqual({x:world.player.x,y:world.player.y,r:world.player.r},pose);
+  assert.equal(element('#hud').style.transform,hud);assert.equal(element('#score').style.transform,scoreTransform);assert.equal(element('#game').style.transform,'none');
+  scene.updateFeedback(.156);g.clear();scene.drawArena();assert.equal(g.borders.length,1);assert.equal(scene.wallFlashes.filter(flash=>flash.bossDefeat).length,0);
+  for(const key of ['x','y','width','height','r'])near(g.borders[0][key],baseline[key]);
+  assert.equal(audio.calls.filter(call=>call.name==='bossDefeat').length,1);
+  for(const reason of ['pause','pagehide']){
+    const run=finalBossCollision();assert.ok(run.scene.wallFlashes.some(flash=>flash.bossDefeat));
+    if(reason==='pause')clickAction('pause');else for(const fn of windowListeners.get('pagehide'))fn();
+    run.scene.update(0,0);assert.equal(run.scene.wallFlashes.some(flash=>flash.bossDefeat),false);
+    app.advanceUi(.42);clickRestart();assert.equal(app.readRestart().scene.wallFlashes.some(flash=>flash.bossDefeat),false);
+    if(reason==='pagehide')for(const fn of windowListeners.get('pageshow'))fn();
+  }
+});
+
+test('Boss final border feedback is disabled at zero and stays on the original square with reduced motion',async()=>{
+  for(const [strength,reduced] of [[0,false],[1,true]])await withReloadedEntry({juice:strength},reduced,fresh=>{
+    const {world,scene,g}=finalBossCollision(fresh,strength),geometry={...world.arenaGeometry};
+    scene.updateFeedback(.025);g.clear();scene.drawArena();assert.equal(g.borders.length,1);const pulse={...g.borders[0]};
+    assert.deepEqual(world.arenaGeometry,geometry);scene.updateFeedback(.16);assert.equal(scene.wallFlashes.filter(flash=>flash.bossDefeat).length,0);
+    g.clear();scene.drawArena();const base=g.borders[0];
+    for(const key of ['x','y','width','height','r'])near(pulse[key],base[key]);
+    if(strength)assert.ok(pulse.strokeWidth>base.strokeWidth);else near(pulse.strokeWidth,base.strokeWidth);
+  });
+});
+
+test('a real Boss victory gives a low-combo result its crown and the next run clears only that run-specific award',()=>{
+  const {world,scene}=finalBossCollision();assert.ok(world.maxCombo<6);world.endRun('capacity');scene.update(0,0);advanceScene(scene,.61);app.advanceUi(.4);
+  const result=app.readRestart().result;assert.equal(result.bossKills,1);assert.ok(result.maxCombo<6);assert.equal(element('#ui-ball .ui-result-crown').style.display,'');
+  clickRestart();app.advanceUi(.4);const fresh=app.readRestart().world;assert.equal(fresh.bossKills,0);assert.equal(fresh.hasDefeatedBoss,false);
+  fresh.endRun('capacity');scene.update(0,0);advanceScene(scene,.61);app.advanceUi(.4);
+  assert.equal(app.readRestart().result.bossKills,0);assert.ok(app.readRestart().result.maxCombo<6);assert.equal(element('#ui-ball .ui-result-crown').style.display,'none');
+});
+
+
+test('successful photo rendering paints each main or fading auxiliary body once, while unavailable photo rendering keeps the graphics fallback',()=>{
+  for(const success of [true,false,undefined]){
+    const g=graphicsRecorder();app.seedRenderer(g);app.seedSkins({enabled:true,sides:8,unlocked:8});app.runFeedbackDemo('upgrade-split');
+    const {world,scene}=app.readRestart();for(let frame=0;!world.auxiliaries.length&&frame<180;frame++)scene.update(0,1000/120);
+    assert.equal(world.auxiliaries.length,2);for(const body of [world.player,...world.auxiliaries])body.feedbackFreeze=0;scene.resetFeedback();
+    const photos=app.recordCompositePhotos(success),bodyFills=()=>g.shapes.filter(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points?.length===193);
+    try{
+      scene.update(0,0);assert.equal(photos.main.length,1);assert.equal(photos.aux.length,2);
+      assert.equal(bodyFills().length,success===true?0:3,'only an explicit renderer success replaces the main and auxiliary graphics fills');
+      assert.equal(photos.main[0].options.alpha,1);assert.ok(photos.aux.every(call=>call.options.alpha===1));
+      world.endRun('capacity');scene.update(0,0);scene.advanceEnding(.6);
+      const result=app.readRestart().result;assert.equal(result.sceneBodies.auxiliaries.length,2);result.clock=.65*.5;
+      photos.aux.length=0;g.clear();scene.drawArena();assert.equal(photos.aux.length,2);assert.ok(photos.aux.every(call=>Math.abs(call.options.alpha-.5)<1e-9));
+      const fills=bodyFills();assert.equal(fills.length,success===true?0:2,'half-transparent photo auxiliaries must not receive a second colored fill below the photo');
+      if(success!==true)assert.ok(fills.every(shape=>Math.abs(shape.alpha-.5)<1e-9));
+    }finally{photos.restore();app.seedSkins();}
+  }
+});
+
+const cometShapes=(g,module=app)=>g.shapes.filter(shape=>shape.type==='path'&&shape.color===module.playerInk()&&shape.points.length>=4&&shape.alpha>0&&shape.alpha<1);
+
+test('the actual scene draws a short transparent comet behind fast players, lengthens it with speed and omits enemy trails',t=>{
+  const lengths=[];t.after(()=>app.setFeedbackStrength(.6));
+  for(const speed of [19,25,40]){
+    const {world,scene,g}=controlRun(),p=world.player;
+    Object.assign(p,{x:80,y:600,vx:speed*world.unit,vy:0});advanceScene(scene,.2);
+    const ribbons=cometShapes(g),entry=scene.cometTrails.entries.get(p);
+    if(speed===19){assert.equal(ribbons.length,0);assert.equal(entry.active,false);continue;}
+    assert.ok(ribbons.length>0);assert.equal(entry.active,true);assert.ok(entry.points.length<=48);
+    const vertices=ribbons.flatMap(shape=>shape.points);assert.ok(vertices.every(point=>point.x<=p.x+1e-8),'the trail stays behind a right-moving player');
+    assert.ok(ribbons.every(shape=>shape.alpha<=.24),'the body remains visually stronger than its translucent trail');
+    lengths.push(p.x-Math.min(...vertices.map(point=>point.x)));
+    assert.ok(lengths.at(-1)<=p.r*7+1,'the comet never becomes a full-screen motion path');
+    const bodyIndex=g.shapes.findIndex(shape=>shape.type==='path'&&shape.alpha===1&&shape.color===app.playerInk()&&shape.points.length===193);
+    assert.ok(g.shapes.indexOf(ribbons.at(-1))<bodyIndex,'the opaque player is drawn over the comet');
+    const enemy=world.spawnEnemy(null,'normal');Object.assign(enemy,{x:100,y:200,vx:40*world.unit,vy:0,born:1,solid:true});
+    advanceScene(scene,.05);assert.equal(scene.cometTrails.entries.has(enemy),false,'ordinary enemies do not fill the arena with trails');
+    p.vx=17*world.unit;scene.update(0,0);assert.equal(cometShapes(g).length,0,'a slowing player loses its comet');
+  }
+  assert.ok(lengths[1]>lengths[0]*2,'the high-speed comet is visibly longer than the threshold-level comet');
+});
+
+test('Boss play and split auxiliaries share comet rendering, and independent aim slows trail ageing with world motion',t=>{
+  t.after(()=>app.setFeedbackStrength(.6));
+  {
+    const {world,scene,g}=bossScene();app.setFeedbackStrength(1);advanceToBoss(world,scene);scene.resetFeedback();
+    const p=world.player,b=world.arenaBounds;Object.assign(p,{x:b.left+60,y:b.bottom-p.r-20,vx:world.unit*35,vy:0,feedbackFreeze:0});
+    advanceScene(scene,.12);assert.ok(cometShapes(g).length>0,'the square Boss arena uses the same speed presentation');
+  }
+  {
+    const {world,scene,g,pointer}=controlRun(),p=world.player;
+    const aux=world.makeBody(80,350,p.r*.55,p.density);Object.assign(aux,{isAuxiliary:true,born:1,solid:true,vx:world.unit*40,vy:0});world.auxiliaries=[aux];
+    Object.assign(p,{x:80,y:600,vx:world.unit*40,vy:0});
+    pointer('pointerdown',80,600);pointer('pointermove',80,640);advanceScene(scene,.5);near(scene.timeScale,.3);
+    for(const body of [p,aux]){
+      const trail=scene.cometTrails.entries.get(body);assert.equal(trail.active,true);assert.ok(trail.points.length>4);
+      assert.ok(Math.max(...trail.points.map(point=>point.age))<.16,'history ages by simulated time, not half a second of real aim time');
+    }
+    assert.ok(cometShapes(g).some(shape=>outlineBounds(shape).cy<400),'the auxiliary gets a smaller tail in its own position');
+    world.auxiliaries=[];scene.update(0,0);assert.equal(scene.cometTrails.entries.has(aux),false);pointer('pointercancel');
+  }
+});
+
+test('comets are cleared across pause, background, rewards, ending, resize and fresh runs with no streak between positions',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  for(const reason of ['pause','background','reward','ending','resize','restart']){
+    const {world,scene,g,pointer}=controlRun(),p=world.player;let resize;
+    window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+    if(reason==='resize')app.mountSceneBoundary(pointer.canvas,g);
+    Object.assign(p,{x:80,y:600,vx:world.unit*35,vy:0});advanceScene(scene,.12);assert.ok(cometShapes(g).length>0,reason);
+    if(reason==='pause')clickAction('pause');
+    else if(reason==='background'){document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();}
+    else if(reason==='reward')world.beginUpgrade();
+    else if(reason==='ending')world.endRun('capacity');
+    else if(reason==='resize'){window.innerWidth=844;window.innerHeight=390;resize();}
+    else app.prepareNormalGame();
+    scene.update(0,0);assert.equal(cometShapes(g).length,0,reason);
+    assert.ok([...scene.cometTrails.entries.values()].every(entry=>entry.points.length<=1),'no historical segment can connect different phases or viewports');
+    document.hidden=false;window.innerWidth=previous.width;window.innerHeight=previous.height;
+  }
+});
+
+test('zero visual feedback and reduced motion suppress comets while keeping the independent aim assist',async()=>{
+  for(const [strength,reduced] of [[0,false],[1,true]])await withReloadedEntry({juice:strength},reduced,fresh=>{
+    const {world,scene,g,pointer}=controlRun(fresh,strength),p=world.player;Object.assign(p,{x:80,y:600,vx:world.unit*40,vy:0});
+    pointer('pointerdown',80,600);pointer('pointermove',80,640);advanceScene(scene,.2);
+    near(scene.timeScale,reduced?.6:.3);assert.equal(cometShapes(g,fresh).length,0);assert.equal(scene.cometTrails.entries.size,0);pointer('pointercancel');
+  });
+});
+
+// v6.5.6: inspect the actual DOM nodes and painted circles on both sides of
+// transition -> choose, where replacing labels previously bypassed the fade.
+function assertRewardEntry(world,scene,g,{fps=60,reduced=false}={}){
+  scene.update(0,0);
+  const nodes=[...element('#choice-labels').children],choices=[...world.choices];
+  assert.equal(nodes.length,choices.length);assert.ok(nodes.length>0);
+  const titles=nodes.map(node=>node.children[0]),fonts=titles.map(title=>title.style.fontSize);
+  const widths=nodes.map(node=>node.style.width),radii=choices.map(choice=>choice.r);
+  let previous=nodes.map(node=>Number(node.style.opacity)),previousFrame=null,sawPartial=false,crossed=false;
+  assert.ok(previous.every(alpha=>alpha<.04),'each new offer starts transparent');
+  for(let frame=0;frame<fps*2.5;frame++){
+    const before=world.phase;scene.update(0,1000/fps);
+    assert.deepEqual(element('#choice-labels').children,nodes,'keep the exact same nodes throughout entrance and ready state');
+    const circles=[];
+    for(const [i,choice] of choices.entries()){
+      assert.equal(nodes[i].children[0],titles[i]);assert.equal(titles[i].style.fontSize,fonts[i]);
+      assert.equal(nodes[i].style.width,widths[i]);assert.equal(choice.r,radii[i],'visual entry never changes collision radius');
+      const alpha=Number(nodes[i].style.opacity);
+      assert.ok(Number.isFinite(alpha)&&alpha>=previous[i]-1e-10&&alpha<=1);
+      assert.ok(alpha-previous[i]<=3/fps+1e-8,'no one-frame opacity jump');
+      if(alpha>.05&&alpha<.95)sawPartial=true;
+      const shape=g.shapes.find(shape=>shape.type==='path'&&shape.points.length===96&&Math.abs(outlineBounds(shape).cx-choice.x)<1e-6);
+      if(shape){
+        const bounds=outlineBounds(shape);near(shape.alpha,alpha);
+        near(bounds.width,2*choice.r*alpha);circles.push(bounds);
+        near(parseFloat(nodes[i].style.top),bounds.cy+choice.r*(1+.14*(choice.rings||0))+14);
+        if(reduced)near(bounds.cy,choice.y);
+      }
+      previous[i]=alpha;
+    }
+    if(before==='transition'&&world.phase==='choose'){
+      crossed=true;assert.equal(circles.length,choices.length);
+      circles.forEach((circle,i)=>{near(circle.width,previousFrame[i].width);assert.ok(Math.abs(circle.cy-previousFrame[i].cy)<.06,'floating begins without a position pop');});
+    }
+    previousFrame=circles;
+  }
+  assert.ok(crossed&&sawPartial);assert.equal(world.phase,'choose');
+  assert.ok(nodes.every(node=>node.style.opacity==='1'));
+  return nodes;
+}
+
+for(const [kind,fps] of [['starting',120],['ordinary',60],['gambler',30]])test(`${kind} rewards fade without font or size jumps at ${fps} fps and still select by collision`,()=>{
+  const g=graphicsRecorder(),{world,scene}=app.seedRenderer(g,390,844,true);
+  world.events=[];
+  if(kind==='starting')world.beginStartingUpgrades();
+  else{world.gamblerRewardPending=kind==='gambler';world.beginUpgrade();}
+  assert.equal(world.choices.length,kind==='gambler'?5:3);
+  assertRewardEntry(world,scene,g,{fps});
+  chooseByContact(world,scene);assert.equal(element('#choice-labels').children.length,0);
+  advanceScene(scene,1.01);assert.equal(world.phase,'battle');
+});
+
+test('both real Boss reward rounds restart their entrance cleanly and stay continuous at selection time',()=>{
+  const {g,world,scene}=bossScene();advanceToBoss(world,scene);defeatBoss(world,scene);
+  for(let frame=0;world.phase!=='transition'&&frame<1200;frame++)scene.update(0,1000/120);
+  assert.equal(world.phase,'transition');assert.equal(world.rewardSelectionsRemaining,2);
+  const first=assertRewardEntry(world,scene,g);chooseByContact(world,scene);
+  assert.equal(element('#choice-labels').children.length,0);
+  for(let frame=0;world.phase!=='transition'&&frame<240;frame++)scene.update(0,1000/120);
+  assert.equal(world.phase,'transition');assert.equal(world.rewardSelectionsRemaining,1);
+  const second=assertRewardEntry(world,scene,g);
+  assert.ok(second.every(node=>!first.includes(node)),'new offer receives fresh labels, with no old fully opaque text');
+  chooseByContact(world,scene);advanceScene(scene,1.01);assert.equal(world.phase,'battle');
+});
+
+test('reward text stays in sync during pause, resume and resize without rebuilding its labels',()=>{
+  const g=graphicsRecorder(),{world,scene}=app.seedRenderer(g,390,844,true);
+  world.beginUpgrade();advanceScene(scene,.7);
+  const nodes=[...element('#choice-labels').children],alphas=nodes.map(node=>node.style.opacity),born=world.choices.map(choice=>choice.born);
+  clickAction('pause');advanceScene(scene,.8);
+  assert.deepEqual(nodes.map(node=>node.style.opacity),alphas);assert.deepEqual(world.choices.map(choice=>choice.born),born);
+  world.resize(844,390);scene.update(0,0);
+  assert.deepEqual(element('#choice-labels').children,nodes);assert.deepEqual(nodes.map(node=>node.style.opacity),alphas);
+  nodes.forEach((node,i)=>near(parseFloat(node.style.left),world.choices[i].x));
+  clickAction('resume');app.advanceUi(.42);waitForChoose(world,scene);advanceScene(scene,.45);
+  assert.deepEqual(element('#choice-labels').children,nodes);assert.ok(nodes.every(node=>node.style.opacity==='1'));
+  clickAction('pause');scene.update(0,0);const tops=nodes.map(node=>node.style.top);
+  advanceScene(scene,.8);assert.deepEqual(nodes.map(node=>node.style.top),tops,'idle float freezes with the game');
+  clickAction('resume');app.advanceUi(.42);chooseByContact(world,scene);assert.equal(element('#choice-labels').children.length,0);
+});
+
+test('reduced motion retains a continuous reward fade with no idle floating',async()=>{
+  await withReloadedEntry({juice:.6,expressions:false},true,fresh=>{
+    const g=graphicsRecorder(),{world,scene}=fresh.seedRenderer(g,390,844,true);
+    world.beginStartingUpgrades();assertRewardEntry(world,scene,g,{reduced:true});
+  });
+});
+
+test('the final Boss collision sprays proportionally more enemy shards from its actual contact with the incoming direction',t=>{
+  t.after(()=>app.setFeedbackStrength(.6));
+  for(const strength of [.6,1]){
+    const {world,scene,events}=finalBossCollision(app,strength);
+    const kills=events.filter(event=>event.type==='bossDefeated');assert.equal(kills.length,1);
+    const event=kills[0],shards=scene.effects.filter(effect=>effect.type==='shard');
+    near(event.r/world.unit,2);near(event.referenceRadius/world.unit,.8);
+    const ordinary=impactShards({...event,type:'kill',r:event.referenceRadius},0xe88c72,{strength});
+    assert.equal(shards.length,Math.round(ordinary.length*(event.r/event.referenceRadius)));
+    assert.ok(shards.length>ordinary.length);
+    near(event.nx,0);near(event.ny,-1);near(event.impactVx,0);near(event.impactVy,-world.baseSpeed);
+    assert.ok(event.contactY>event.y,'contact is on the lower side hit by the upward launch');
+    for(const shard of shards){
+      near(shard.x,event.contactX);near(shard.y,event.contactY);assert.ok(shard.vy<0,'all fragments fan along the killing hit');
+      assert.equal(shard.color,0xe88c72);assert.ok(shard.total>=.5&&shard.total<=.62);
+    }
+    assert.ok(shards.some(shard=>shard.vx<0)&&shards.some(shard=>shard.vx>0));
+    scene.update(0,0);assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,shards.length,'each defeat emits only one spray');
+    advanceScene(scene,.65);assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,0,'victory slow motion does not retain particles indefinitely');
+  }
+});
+
+function modernCampaignRun(level=1,width=390,height=844){
+  const g=graphicsRecorder(),{scene}=app.seedLevelRenderer(g,width,height,level);
+  app.enterCampaign(level);
+  const offer=app.readRestart().campaignOffer,upgrade=offer.choices[0];
+  clickAction('campaign-upgrade',{upgrade:upgrade.id});app.advanceUi(.65);
+  return {g,scene,world:app.readRestart().world,upgrade};
+}
+
+test('task7 cancelling preflight never starts an attempt and its two choices exclude unrelated upgrades',()=>{
+  const {scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,1);
+  const before=JSON.stringify(app.readRestart().campaignProgress),stored=saved.get('qiuqiule-campaign');
+  app.enterCampaign(1);
+  const offer=app.readRestart().campaignOffer;
+  assert.equal(offer.choices.length,2);
+  assert.ok(offer.choices.every(choice=>['rubber','energy','bank','pierce'].includes(choice.id)));
+  assert.equal(element('#campaign-level-title').textContent,'1 · 破墙');
+  assert.equal(element('#campaign-level-goal').textContent,'清空砖墙 · 14 发');
+  clickAction('campaign-cancel');scene.update(0,0);
+  const state=app.readRestart();
+  assert.equal(state.campaignOffer,null);assert.equal(state.selector.phase,'idle');
+  assert.equal(state.world,null);assert.equal(state.screen,'levels');
+  assert.equal(JSON.stringify(state.campaignProgress),before);
+  assert.equal(saved.get('qiuqiule-campaign'),stored);
+});
+
+test('task7 modern restart records abandonment and reopens a fresh single-use two-choice offer',()=>{
+  const {world,scene,upgrade}=modernCampaignRun(1);
+  assert.equal(world.upgradeId,upgrade.id);assert.equal(world.shoot(0,world.maxPull),true);
+  advanceScene(scene,.05);clickAction('pause');app.advanceUi(.42);
+  clickRestart();
+  let state=app.readRestart();assert.equal(state.screen,'levels');assert.equal(state.world,null);
+  assert.equal(levelRecord(state.campaignProgress,1).attempts,1);
+  assert.equal(levelRecord(state.campaignProgress,1).abandoned,1);
+  assert.equal(levelRecord(state.campaignProgress,1).losses,0);
+  app.advanceUi(.65);state=app.readRestart();assert.equal(state.campaignOffer.choices.length,2);
+  const chosen=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:chosen.id});
+  const next=app.readRestart().world;
+  assert.notEqual(next,world);assert.equal(next.level,1);assert.equal(next.shotsUsed,0);
+  assert.equal(next.remaining,next.budget);assert.equal(next.upgradeId,chosen.id);
+  assert.deepEqual(next.buffs,{[chosen.id]:1});assert.equal(levelRecord(app.readRestart().campaignProgress,1).attempts,2);
+  clickAction('campaign-upgrade',{upgrade:chosen.id});
+  assert.equal(app.readRestart().world,next,'a stale second click cannot reselect or start another attempt');
+  assert.equal(levelRecord(app.readRestart().campaignProgress,1).attempts,2);
+});
+
+test('task7 pause, background and orientation preserve a live shot and persist its abandonment checkpoint',t=>{
+  const {world,scene,g,upgrade}=modernCampaignRun(10),pointer=inputCanvas();
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;});
+  app.mountSceneBoundary(pointer.canvas,g);
+  assert.equal(world.shoot(world.maxPull,0),true);advanceScene(scene,.1);
+  const used=world.shotsUsed,remaining=world.remaining,shotTime=world.shotTime;
+  clickAction('pause');const elapsed=world.elapsed;app.advanceUi(.42);
+  const attempt=app.readRestart().campaignAttemptId;
+  advanceScene(scene,.3);near(world.elapsed,elapsed);near(world.shotTime,shotTime);
+  document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();
+  const checkpoint=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),10);
+  near(checkpoint.activeElapsed,elapsed);assert.equal(checkpoint.activeAttempt,attempt);
+  assert.equal(checkpoint.losses,0);assert.equal(checkpoint.abandoned,0);
+  window.innerWidth=844;window.innerHeight=390;resize();
+  assert.equal(world.width,844);assert.equal(world.height,390);
+  assert.equal(world.shotsUsed,used);assert.equal(world.remaining,remaining);assert.equal(world.upgradeId,upgrade.id);
+  document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();
+  clickAction('resume');app.advanceUi(.42);advanceScene(scene,.05);
+  assert.ok(world.elapsed>elapsed);assert.equal(app.readRestart().campaignAttemptId,attempt);
+  assert.equal(world.shotsUsed,used);assert.equal(world.remaining,remaining);
+});
+
+test('task7 actual last-brick impact wins on the last budgeted launch before exhaustion can overwrite it',()=>{
+  const {world,scene}=app.seedCampaignRenderer(graphicsRecorder(),390,844,1);
+  world.remaining=1;world.shotsUsed=world.budget-1;world.enemies=[];
+  assert.equal(world.shoot(0,world.maxPull),true);assert.equal(world.remaining,0);
+  const bricks=world.statics.filter(body=>body.kind==='brick'),last=bricks.at(-1);
+  for(const brick of bricks.slice(0,-1))while(brick.hp>0)world.rules.onStaticHit(brick,{normalSpeed:world.baseSpeed});
+  Object.assign(world.player,{x:last.x,y:last.y+last.height/2+world.player.r+.5,vx:0,vy:-world.unit*20,feedbackFreeze:0});
+  world.step(1/120);scene.update(0,0);
+  assert.equal(last.hp,0);assert.equal(world.phase,'campaign-celebrate');assert.equal(world.completed,true);
+  assert.equal(world.shotsUsed,world.budget);assert.equal(world.resultRating,1);
+  for(let frame=0;frame<240&&world.phase!=='over';frame++)scene.update(0,1000/120);
+  assert.equal(world.phase,'over');assert.equal(app.readRestart().result?.completed,true);
+  const record=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),1);
+  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,1);
+  assert.equal(element('#campaign-rating').attributes['aria-label'],'本关评分 1 点，共三点');
+  scene.update(0,0);assert.equal(levelRecord(app.readRestart().campaignProgress,1).wins,1);
+});
+
+test('task7 genuine missed launches create losses and reveal skip only after three completed failed attempts',()=>{
+  let {world,scene}=modernCampaignRun(1);
+  for(let attempt=1;attempt<=3;attempt++){
+    world.remaining=1;world.shotsUsed=world.budget-1;
+    assert.equal(world.shoot(-7,0),true);
+    // A low-power shot remains safely below the wall and settles naturally.
+    for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
+    assert.equal(world.phase,'over');assert.equal(world.completed,false);
+    assert.equal(levelRecord(app.readRestart().campaignProgress,1).failStreak,attempt);
+    app.advanceUi(.82);clickRestart();app.advanceUi(.65);
+    assert.equal(element('#campaign-skip').hidden,attempt<3);
+    if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
+  }
+  clickAction('campaign-skip');
+  const state=app.readRestart(),record=levelRecord(state.campaignProgress,1);
+  assert.equal(state.campaignProgress.completed,0);assert.equal(state.campaignProgress.unlocked,2);
+  assert.equal(record.skipped,true);assert.equal(record.rating,0);assert.equal(record.cleared,false);
+});
+
+test('task11 selection shows all new classes and migrated completions without inventing scoring dots',()=>{
+  const {scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,10);
+  scene.update(0,0);
+  const markup=element('#level-orbs').innerHTML;
+  assert.doesNotMatch(markup,/旧版/);
+  assert.equal(levelRecord(app.readRestart().campaignProgress,9).cleared,true);
+  assert.equal(levelRecord(app.readRestart().campaignProgress,9).rating,0);
+  assert.equal(levelRecord(app.readRestart().campaignProgress,10).cleared,false);
+  assert.equal(levelRecord(app.readRestart().campaignProgress,10).rating,0);
+});
+
+test('task7 first teaching is recorded once for each class and vanishes at its first launch',()=>{
+  const {world,scene}=modernCampaignRun(1);
+  assert.equal(world.tutorialVisible,true);assert.equal(app.readRestart().campaignProgress.tutorials.wall,true);
+  assert.equal(world.shoot(-7,0),true);assert.equal(world.tutorialVisible,false);
+  advanceScene(scene,.05);clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
+  clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);
+  assert.equal(app.readRestart().world.tutorialVisible,false,'replaying an already introduced class does not repeat teaching');
+  assert.equal(levelRecord(app.readRestart().campaignProgress,1).attempts,2);
+  const later=modernCampaignRun(11);assert.equal(later.world.tutorialVisible,false,'higher difficulty has no first-appearance guide');
+});
+
+test('task7 pause-home and pause-restart cannot bypass frenzy or its remaining-ball scoring before skin unlock',()=>{
+  for(const action of ['home','restart']){
+    app.seedSkins();
+    const {world,scene}=modernCampaignRun(10);app.seedSkins(null,9);app.seedCampaignAttempt();
+    world.shoot(-world.maxPull,0);
+    const targets=world.statics.filter(pin=>pin.target),last=targets.at(-1);
+    for(const pin of targets.slice(0,-1))world.rules.onStaticHit(pin,{normalSpeed:world.baseSpeed});
+    Object.assign(world.player,{x:last.x,y:last.y+last.r+world.player.r+.5,vx:0,vy:-world.unit*20,feedbackFreeze:0});
+    world.step(1/120);scene.update(0,0);assert.equal(world.phase,'campaign-celebrate');
+    const score=world.score,bonus=world.celebration.bonusRemaining,elapsed=world.celebration.elapsed;
+    clickAction('pause');app.advanceUi(.42);advanceScene(scene,.2);
+    near(world.celebration.elapsed,elapsed);assert.equal(app.readSkins().skinUnlock,null);
+    clickAction(action);assert.equal(app.readRestart().world,world);assert.equal(world.phase,'campaign-celebrate');
+    assert.equal(app.readRestart().result,null);assert.equal(app.readSkins().skinUnlock,null);
+    app.advanceUi(.42);
+    for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
+    assert.equal(world.phase,'over');assert.equal(world.score,score+bonus*10);
+    assert.equal(app.readSkins().skinUnlock.sides,6);
+    const record=levelRecord(app.readRestart().campaignProgress,10);
+    assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.abandoned,0);
+  }
+  app.seedSkins();
+});
+
+test('task7 trial uses the full frenzy/result/restart path without touching formal progress or skins',()=>{
+  app.seedRenderer(graphicsRecorder());app.seedSkins(null,0);
+  const beforeProgress=JSON.stringify(app.readRestart().campaignProgress),beforeSkins=JSON.stringify(app.readSkins().skins);
+  const savedProgress=saved.get('qiuqiule-campaign'),savedSkins=saved.get('qiuqiule-skins');
+  app.runCampaignTrial(10,'energy');
+  const state=app.readRestart(),world=state.world,scene=state.scene;
+  assert.equal(app.isFeedbackDemo(),true);assert.equal(world.level,10);assert.equal(world.upgradeId,'energy');
+  assert.equal(state.campaignAttemptId,null);assert.equal(element('#campaign-demo-panel').hidden,true);
+  finishCampaign(world,scene);
+  assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readRestart().result?.completed,true);
+  assert.equal(JSON.stringify(app.readRestart().campaignProgress),beforeProgress);
+  assert.equal(JSON.stringify(app.readSkins().skins),beforeSkins);
+  assert.equal(saved.get('qiuqiule-campaign'),savedProgress);assert.equal(saved.get('qiuqiule-skins'),savedSkins);
+  app.advanceUi(.82);clickRestart();
+  const retry=app.readRestart().world;
+  assert.notEqual(retry,world);assert.equal(retry.level,10);assert.equal(retry.upgradeId,'energy');
+  assert.equal(retry.shotsUsed,0);assert.equal(retry.remaining,retry.budget);assert.equal(app.isFeedbackDemo(),true);
+  assert.equal(saved.get('qiuqiule-campaign'),savedProgress);assert.equal(saved.get('qiuqiule-skins'),savedSkins);
+});
+
+test('task7 skipped milestone holes grant each exact base skin once when that milestone is truly won',()=>{
+  try{
+    app.seedSkins();let run=app.seedCampaignRenderer(graphicsRecorder(),390,844,20);
+    app.seedSkins(null,9);app.seedCampaignAttempt({completed:9,unlocked:20});
+    finishCampaign(run.world,run.scene);
+    assert.equal(app.readSkins().skinUnlock.sides,7);
+    const after20=app.readRestart().campaignProgress;
+    assert.equal(after20.completed,9);assert.equal(after20.unlocked,21);
+    assert.equal(levelRecord(after20,10).cleared,false);
+    assert.deepEqual(app.readSkins().skins.owned,[7],'winning 20 must not silently grant the skipped level-10 hexagon');
+    app.advanceUi(1.66);clickAction('close');app.advanceUi(.62);
+    run=app.seedCampaignRenderer(graphicsRecorder(),390,844,10);app.seedCampaignAttempt(after20);
+    finishCampaign(run.world,run.scene);
+    assert.equal(app.readSkins().skinUnlock.sides,6,'returning to skipped 10 still awards its previously unowned polygon');
+    assert.equal(levelRecord(app.readRestart().campaignProgress,10).cleared,true);
+    assert.equal(levelRecord(app.readRestart().campaignProgress,20).cleared,true);
+    assert.equal(app.readRestart().campaignProgress.completed,10,'the outstanding 11–19 gap stays incomplete');
+    app.advanceUi(1.66);clickAction('close');app.advanceUi(.62);
+    const retained=app.readRestart().campaignProgress;
+    run=app.seedCampaignRenderer(graphicsRecorder(),390,844,10);app.seedCampaignAttempt(retained);
+    finishCampaign(run.world,run.scene);
+    assert.equal(app.readSkins().skinUnlock,null,'the already owned hexagon never repeats its first-unlock popup');
+  }finally{app.seedSkins();}
+});
+
+const task8UpgradeIds=['density','rubber','bank','steady'];
+const optionValues=selector=>[...element(selector).innerHTML.matchAll(/<option value="([^"]+)"/g)].map(match=>match[1]);
+function changeCampaignDemoLevel(level){
+  const select=element('#campaign-demo-level');select.id='campaign-demo-level';select.value=String(level);
+  select.onchange?.({target:select});
+  for(const handler of listeners.get('change')||[])handler({target:select});
+}
+function assertFiniteScene(g){
+  for(const shape of g.shapes){
+    assert.ok(Number.isFinite(shape.alpha),'shape alpha must be finite');
+    if(shape.points)for(const point of shape.points)assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y),'no Infinity-HP body may produce NaN vertices');
+    else for(const key of ['x','y','width','height','r'])if(key in shape)assert.ok(Number.isFinite(shape[key]),key);
+  }
+}
+
+test('task8 all twenty pool/golf levels offer class-filtered upgrades, precise goals and usable budget HUDs',()=>{
+  for(const r of [4,8])for(let k=0;k<10;k++){
+    const level=10*k+r,{scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,level);
+    app.enterCampaign(level);let state=app.readRestart();const choices=state.campaignOffer.choices;
+    assert.equal(choices.length,2);assert.equal(new Set(choices.map(choice=>choice.id)).size,2);
+    assert.ok(choices.every(choice=>task8UpgradeIds.includes(choice.id)));
+    assert.equal(element('#campaign-level-title').textContent,`${level} · ${r===4?'落袋':'推杆'}`);
+    const goal=element('#campaign-level-goal').textContent;
+    assert.match(goal,r===4?/清空目标球/:/标准杆/);
+    clickAction('campaign-upgrade',{upgrade:choices[0].id});app.advanceUi(.65);state=app.readRestart();
+    const world=state.world;assert.equal(world.config.r,r);assert.equal(world.config.k,k);
+    assert.ok(goal.includes(`${world.budget} 发`));
+    if(r===8)assert.ok(goal.includes(`标准杆 ${world.config.par}`));
+    scene.update(0,0);const hud=element('#campaign-goal').textContent;
+    assert.equal(element('#campaign-goal').hidden,false);assert.ok(hud.includes(`${world.remaining}/${world.budget}`));
+    assert.match(hud,r===4?/球/:/标准杆/);
+    assert.equal(element('#stage-progress').attributes['aria-label'],`剩余 ${world.remaining} 发，共 ${world.budget} 发`);
+    assert.equal(levelRecord(state.campaignProgress,level).attempts,1);
+    assert.equal(levelRecord(state.campaignProgress,level).upgradeChoices[choices[0].id],1);
+  }
+});
+
+test('task11 acceptance menu exposes all one hundred implemented levels with filtered upgrades',()=>{
+  app.seedRenderer(graphicsRecorder());app.installCampaignControls();
+  const expected=Array.from({length:100},(_,i)=>String(i+1));
+  const actual=optionValues('#campaign-demo-level');
+  assert.equal(element('#campaign-demo-level').value,'5');
+  assert.equal(actual.length,100);assert.equal(new Set(actual).size,100);assert.deepEqual(actual,expected);
+  for(const level of [1,2,3,4,5,6,7,8,9,10,92,93,94,95,96,97,98,99]){
+    changeCampaignDemoLevel(level);
+    const ids=optionValues('#campaign-demo-upgrade');
+    assert.deepEqual(new Set(ids),new Set([5,9].includes(level%10)?['gravity','density','growth','pulse']:[3,7].includes(level%10)?['split','energy','breath','pulse']:[2,4,8].includes(level%10)?task8UpgradeIds:['rubber','energy','bank','pierce']));
+    assert.ok(ids.includes(element('#campaign-demo-upgrade').value),'a changed class has a valid selected upgrade');
+  }
+  clickAction('campaign-demo-close');
+});
+
+test('task8 infinite-health pool targets and golf obstacles keep finite visible geometry after real collisions',()=>{
+  for(const level of [4,8,94,98]){
+    const g=graphicsRecorder(),{world,scene}=app.seedCampaignRenderer(g,390,844,level);
+    app.setFeedbackStrength(1);scene.update(0,0);assertFiniteScene(g);
+    assert.ok(world.enemies.length>0);const enemy=world.enemies[0],player=world.player;
+    assert.equal(enemy.hp,Infinity);assert.equal(enemy.maxHp,Infinity);
+    assert.equal(world.shoot(-world.maxPull,0),true);
+    Object.assign(enemy,{x:player.x+player.r+enemy.r-.2,y:player.y,vx:0,vy:0,born:1,solid:true});
+    player.vx=world.baseSpeed;player.vy=0;scene.update(0,1000/120);
+    assert.equal(enemy.hp,Infinity,'ordinary collision cannot destroy a pocket ball or roaming obstacle');
+    assertFiniteScene(g);
+    assert.ok(g.shapes.some(shape=>shape.color===0xe88c72&&shape.alpha>0),'targets and obstacles remain visible');
+  }
+  app.setFeedbackStrength(.6);
+});
+
+test('task8 restarting either class records one abandonment then reapplies just its new per-level upgrade',()=>{
+  for(const level of [4,8]){
+    const {world,scene,upgrade}=modernCampaignRun(level);
+    assert.equal(world.upgradeId,upgrade.id);assert.equal(world.shoot(-7,0),true);
+    advanceScene(scene,.05);clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
+    let state=app.readRestart(),record=levelRecord(state.campaignProgress,level);
+    assert.equal(record.attempts,1);assert.equal(record.abandoned,1);assert.equal(record.losses,0);
+    assert.equal(state.campaignOffer.choices.length,2);
+    const nextUpgrade=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:nextUpgrade.id});app.advanceUi(.65);
+    state=app.readRestart();const next=state.world;
+    assert.notEqual(next,world);assert.equal(next.level,level);assert.equal(next.shotsUsed,0);
+    assert.equal(next.remaining,next.budget);assert.equal(next.upgradeId,nextUpgrade.id);
+    assert.deepEqual(next.buffs,{[nextUpgrade.id]:1});assert.equal(levelRecord(state.campaignProgress,level).attempts,2);
+  }
+});
+
+function placeAtZoneEntry(world,body,zone,speedUnits){
+  const toward={x:world.width/2-zone.x,y:world.height/2-zone.y};
+  const distance=Math.hypot(toward.x,toward.y),nx=distance>1e-8?toward.x/distance:1,ny=distance>1e-8?toward.y/distance:0;
+  Object.assign(body,{x:zone.x+nx*(zone.r+.05),y:zone.y+ny*(zone.r+.05),
+    vx:-nx*world.unit*speedUnits,vy:-ny*world.unit*speedUnits,feedbackFreeze:0,pendingVx:0,pendingVy:0});
+}
+function finishTask8Scene(world,scene){
+  for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
+  assert.equal(world.phase,'over');assert.equal(world.completed,true);
+}
+
+test('task8 actual pool pocket crossings update score once, remove captured targets and prioritize last-budget victory',()=>{
+  const {world,scene,g}=modernCampaignRun(4),audio=app.recordTones();
+  try{
+    world.remaining=1;world.shotsUsed=world.budget-1;
+    assert.equal(world.shoot(-world.maxPull*.2,0),true);world.player.vx=world.player.vy=0;
+    const pocket=world.zones.filter(zone=>zone.kind==='pocket').sort((a,b)=>Math.abs(a.y-world.height/2)-Math.abs(b.y-world.height/2))[0];
+    assert.ok(pocket);assert.equal(world.zones.filter(zone=>zone.kind==='pocket').length,6);
+    const targets=world.enemies.slice(),events=observeWorldEvents(world);
+    for(const target of targets){
+      placeAtZoneEntry(world,target,pocket,8);world.step(1/120);scene.update(0,0);
+      assert.ok(target.captured||target.active===false||target.hp<=0,'target leaves active collision after its real pocket entry');
+      assert.ok(!world.enemies.includes(target)||target.captured||target.active===false);
+      assertFiniteScene(g);
+    }
+    assert.equal(world.remaining,0);assert.equal(world.completed,true);assert.equal(world.phase,'campaign-celebrate');
+    assert.equal(events.filter(event=>event.type==='campaignPocket').length,targets.length);
+    const pocketSounds=audio.calls.filter(args=>args[1]===.12&&args[3]===.035);
+    assert.equal(pocketSounds.length,targets.length,'each real pocket emits one sound');
+    const before=world.score;scene.update(0,0);assert.equal(world.score,before,'painting a captured target never re-awards points');
+    finishTask8Scene(world,scene);assert.equal(app.readRestart().result?.completed,true);
+    assert.equal(world.resultRating,1);const record=levelRecord(app.readRestart().campaignProgress,4);
+    assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,1);
+    assert.equal(app.readSkins().skinUnlock,null,'r4 is not a skin milestone');
+  }finally{audio.restore();}
+});
+
+test('task8 real golf hole-in-one earns a result crown and one completion chord',()=>{
+  app.seedSkins();const {world,scene,g}=modernCampaignRun(8);
+  const audio=app.recordBossVictory();
+  try{
+    const hole=world.zones.find(zone=>zone.kind==='hole');assert.ok(hole);
+    world.enemies=[];world.statics=[];
+    assert.equal(world.shoot(-world.maxPull*.2,0),true);
+    placeAtZoneEntry(world,world.player,hole,8);world.step(1/120);scene.update(0,0);
+    assert.equal(world.phase,'campaign-celebrate');assert.equal(world.completed,true);
+    assert.equal(world.golfHoleInOne,true);assert.equal(world.player.captured,true);
+    assertFiniteScene(g);assert.equal(audio.calls.length,1);
+    advanceScene(scene,.24);assert.equal(crownShapes(g).length,1,'the hole-in-one peak keeps its crown after the captured player disappears');
+    finishTask8Scene(world,scene);app.advanceUi(.82);
+    const state=app.readRestart();assert.equal(state.result.golfHoleInOne,true);
+    assert.equal(element('#ui-ball .ui-result-crown').style.display,'');
+    assert.equal(world.resultRating,3);assert.equal(levelRecord(state.campaignProgress,8).rating,3);
+    scene.update(0,0);assert.equal(audio.calls.length,1,'the result does not play the peak chord again');
+  }finally{audio.restore();app.seedSkins();}
+});
+
+test('task8 over-speed golf entry produces one rim cue and no clear before a later slow entry',()=>{
+  const {world,scene,g}=modernCampaignRun(8),hole=world.zones.find(zone=>zone.kind==='hole');
+  world.enemies=[];world.statics=[];const audio=app.recordTones(),events=observeWorldEvents(world);
+  try{
+    world.shoot(-world.maxPull,0);placeAtZoneEntry(world,world.player,hole,20);
+    world.step(1/120);scene.update(0,0);
+    assert.equal(world.completed,false);assert.equal(world.phase,'battle');assert.equal(!!world.player.captured,false);
+    assert.equal(events.filter(event=>event.type==='campaignRim').length,1);
+    assert.equal(audio.calls.filter(args=>args[0]===880&&args[1]===.07).length,1);
+    scene.update(0,0);assert.equal(events.filter(event=>event.type==='campaignRim').length,1);
+    assertFiniteScene(g);
+    // Leave the zone before the next approach, then make a valid low-speed crossing.
+    Object.assign(world.player,{x:world.width/2,y:world.height*.72,vx:0,vy:0});world.step(1/120);
+    placeAtZoneEntry(world,world.player,hole,8);world.step(1/120);scene.update(0,0);
+    assert.equal(world.completed,true);assert.equal(world.phase,'campaign-celebrate');
+  }finally{audio.restore();}
+});
+
+test('task8 pause, background and both orientations preserve pool and moving-hole golf attempts',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;});
+  for(const level of [94,98]){
+    const {world,scene,g,upgrade}=modernCampaignRun(level),pointer=inputCanvas();let resize;
+    window.innerWidth=390;window.innerHeight=844;
+    window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+    app.mountSceneBoundary(pointer.canvas,g);
+    assert.equal(world.shoot(-world.maxPull*.5,0),true);advanceScene(scene,.08);
+    const remaining=world.remaining,used=world.shotsUsed,shotTime=world.shotTime,attempt=app.readRestart().campaignAttemptId;
+    clickAction('pause');app.advanceUi(.42);const elapsed=world.elapsed,hole=world.zones.find(zone=>zone.kind==='hole');
+    const holePosition=hole&&{x:hole.x,y:hole.y};advanceScene(scene,.4);
+    near(world.elapsed,elapsed);near(world.shotTime,shotTime);
+    if(hole)assert.deepEqual({x:hole.x,y:hole.y},holePosition,'moving hole freezes with pause');
+    document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();
+    const checkpoint=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),level);
+    near(checkpoint.activeElapsed,elapsed);assert.equal(checkpoint.activeAttempt,attempt);assert.equal(checkpoint.losses,0);
+    for(const [width,height] of [[844,390],[320,568],[390,844]]){
+      window.innerWidth=width;window.innerHeight=height;resize();scene.update(0,0);
+      assert.equal(world.width,width);assert.equal(world.height,height);assertFiniteScene(g);
+      assert.equal(world.remaining,remaining);assert.equal(world.shotsUsed,used);assert.equal(world.upgradeId,upgrade.id);
+      assert.ok(world.zones.every(zone=>Number.isFinite(zone.x)&&Number.isFinite(zone.y)&&zone.r>0));
+      if(hole)assert.equal(world.config.par,5);
+    }
+    document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();
+    clickAction('resume');app.advanceUi(.42);advanceScene(scene,.05);
+    assert.ok(world.elapsed>elapsed);assert.equal(app.readRestart().campaignAttemptId,attempt);
+    assert.equal(world.remaining,remaining);assert.equal(world.shotsUsed,used);
+  }
+});
+
+test('task8 pool and golf failed launches enable a zero-rating skip only after three real losses',()=>{
+  for(const level of [4,8]){
+    let {world,scene}=modernCampaignRun(level);
+    for(let attempt=1;attempt<=3;attempt++){
+      world.remaining=1;world.shotsUsed=world.budget-1;assert.equal(world.shoot(-7,0),true);
+      for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
+      assert.equal(world.phase,'over');assert.equal(world.completed,false);
+      const record=levelRecord(app.readRestart().campaignProgress,level);
+      assert.equal(record.losses,attempt);assert.equal(record.failStreak,attempt);assert.equal(record.rating,0);
+      app.advanceUi(.82);clickRestart();app.advanceUi(.65);
+      assert.equal(element('#campaign-skip').hidden,attempt<3);
+      if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
+    }
+    clickAction('campaign-skip');const progress=app.readRestart().campaignProgress,record=levelRecord(progress,level);
+    assert.equal(record.skipped,true);assert.equal(record.cleared,false);assert.equal(record.rating,0);
+    assert.equal(progress.completed,level-1);assert.equal(progress.unlocked,level+1);
+    assert.equal(levelRecord(progress,level-1).rating,0,'migrated earlier completions retain unknown ratings');
+    app.advanceUi(.65);app.enterCampaign(level);
+    assert.equal(app.readRestart().campaignOffer?.level,level,'a skipped stage remains selectable');
+    clickAction('campaign-cancel');
+  }
+});
+
+test('task8 shrinking golf capture draws one matching skin/photo and hides its original physical body',()=>{
+  app.seedSkins({enabled:true,sides:8,unlocked:8});const {world,scene,g}=modernCampaignRun(8);
+  const photo=app.recordPlayerPhoto();
+  try{
+    const hole=world.zones.find(zone=>zone.kind==='hole'),physicalRadius=world.player.r;
+    world.enemies=[];world.statics=[];world.shoot(-world.maxPull*.2,0);
+    placeAtZoneEntry(world,world.player,hole,8);world.step(1/120);scene.update(0,0);
+    assert.equal(world.player.captured,true);assert.ok(world.golfCapture);
+    photo.calls.length=0;g.clear();scene.drawArena();
+    assert.equal(photo.calls.length,1,'the regular body is hidden while its capture snapshot is drawn once');
+    assert.deepEqual(photo.calls[0].contour,app.readSkins().active);
+    const first=photo.calls[0].pose;near(first.r,physicalRadius);
+    world.feedbackTime=world.golfCapture.at+.11;photo.calls.length=0;g.clear();scene.drawArena();
+    assert.equal(photo.calls.length,1);assert.ok(photo.calls[0].pose.r>0&&photo.calls[0].pose.r<first.r);
+    assert.ok(photo.calls[0].options.alpha>0&&photo.calls[0].options.alpha<1);
+    near(world.player.r,physicalRadius);assertFiniteScene(g);
+    world.feedbackTime=world.golfCapture.at+.23;photo.calls.length=0;g.clear();scene.drawArena();
+    assert.equal(photo.calls.length,0,'after the capture fade neither full-size nor duplicate photo survives');
+    near(world.player.r,physicalRadius);
+  }finally{photo.restore();app.seedSkins();}
+});
+
+test('task8 full pool and golf trial victories, result and restart leave formal records and skins untouched',()=>{
+  for(const level of [4,8]){
+    app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:6,unlocked:6},10);
+    const initialProgress=JSON.stringify(app.readRestart().campaignProgress),initialSkins=JSON.stringify(app.readSkins().skins);
+    const storedProgress=saved.get('qiuqiule-campaign'),storedSkins=saved.get('qiuqiule-skins');
+    app.runCampaignTrial(level,'steady');let {world,scene}=app.readRestart();
+    assert.equal(world.upgradeId,'steady');assert.equal(app.readRestart().campaignAttemptId,null);assert.equal(app.isFeedbackDemo(),true);
+    world.shoot(-world.maxPull*.2,0);
+    if(level===4){
+      world.player.vx=world.player.vy=0;const pocket=world.zones.find(zone=>zone.kind==='pocket');
+      for(const target of [...world.enemies]){placeAtZoneEntry(world,target,pocket,8);world.step(1/120);scene.update(0,0);}
+    }else{
+      world.enemies=[];world.statics=[];placeAtZoneEntry(world,world.player,world.zones.find(zone=>zone.kind==='hole'),8);
+      world.step(1/120);scene.update(0,0);
+    }
+    finishTask8Scene(world,scene);assert.equal(app.readRestart().result?.completed,true);assert.equal(app.readSkins().skinUnlock,null);
+    assert.equal(JSON.stringify(app.readRestart().campaignProgress),initialProgress);assert.equal(JSON.stringify(app.readSkins().skins),initialSkins);
+    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+    app.advanceUi(.82);clickRestart();const retry=app.readRestart().world;
+    assert.notEqual(retry,world);assert.equal(retry.level,level);assert.equal(retry.upgradeId,'steady');assert.equal(retry.shotsUsed,0);
+    assert.equal(retry.remaining,retry.budget);assert.equal(app.isFeedbackDemo(),true);assert.equal(app.readRestart().campaignAttemptId,null);
+    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+  }
+  app.seedSkins();
+});
+
+const task9UpgradeIds=level=>level%10===2?['density','rubber','bank','steady']:['rubber','energy','bank','pierce'];
+
+test('task9 all twenty bowling and pinball tiers expose the right goal, budget unit and one local upgrade',()=>{
+  for(const r of [2,6])for(let k=0;k<10;k++){
+    const level=k*10+r,{scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,level);
+    const before=JSON.stringify(app.readRestart().campaignProgress),stored=saved.get('qiuqiule-campaign');
+    app.enterCampaign(level);let state=app.readRestart();
+    assert.equal(state.campaignOffer.choices.length,2);
+    assert.equal(new Set(state.campaignOffer.choices.map(choice=>choice.id)).size,2);
+    assert.ok(state.campaignOffer.choices.every(choice=>task9UpgradeIds(level).includes(choice.id)));
+    assert.equal(element('#campaign-level-title').textContent,`${level} · ${r===2?'十瓶':'弹珠'}`);
+    assert.equal(JSON.stringify(state.campaignProgress),before,'preflight creates no attempt or teaching record');
+    clickAction('campaign-cancel');assert.equal(saved.get('qiuqiule-campaign'),stored);
+    assert.equal(JSON.stringify(app.readRestart().campaignProgress),before);
+    app.enterCampaign(level);const choice=app.readRestart().campaignOffer.choices[0],goal=element('#campaign-level-goal').textContent;
+    clickAction('campaign-upgrade',{upgrade:choice.id});app.advanceUi(.65);state=app.readRestart();
+    const world=state.world;assert.equal(world.config.r,r);assert.equal(world.config.k,k);assert.equal(world.upgradeId,choice.id);
+    assert.deepEqual(world.buffs,{[choice.id]:1});assert.equal(world.remaining,world.budget);
+    if(r===2){assert.ok(goal.includes(`击倒 ${world.config.requiredPins} 瓶`));assert.ok(goal.includes(`${world.config.rounds} 轮`));assert.ok(goal.includes(`${world.budget} 发`));}
+    else{assert.ok(goal.includes(`击破 ${world.config.jackpotGoal} 个大奖`));assert.ok(goal.includes(`${world.budget} 球`));}
+    scene.update(0,0);const hud=element('#campaign-goal').textContent;
+    assert.equal(element('#campaign-goal').hidden,false);assert.ok(hud.includes(`${world.remaining}/${world.budget}`));
+    assert.match(hud,r===2?/轮.*瓶/:/大奖/);
+    assert.equal(element('#stage-progress').attributes['aria-label'],`剩余 ${world.remaining} ${r===2?'发':'球'}，共 ${world.budget} ${r===2?'发':'球'}`);
+    const record=levelRecord(state.campaignProgress,level);
+    assert.equal(record.attempts,1);assert.equal(record.upgradeChoices[choice.id],1);assert.equal(record.rating,0);
+    assert.equal(!!state.campaignProgress.tutorials[world.config.classId],k===0);
+    const remaining=world.remaining;assert.equal(world.shoot(-7,0),true);scene.update(0,0);
+    assert.equal(world.remaining,remaining-(r===2?1:0),'pinball budgets lives rather than launched strokes');
+    assert.equal(world.shotsUsed,1);assert.equal(world.tutorialVisible,false);
+  }
+});
+
+test('task9 restarting each new class abandons once and reapplies only its new two-choice selection',()=>{
+  for(const level of [2,6]){
+    const {world,scene}=modernCampaignRun(level);world.shoot(-7,0);advanceScene(scene,.05);
+    clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
+    let state=app.readRestart(),record=levelRecord(state.campaignProgress,level);
+    assert.equal(record.attempts,1);assert.equal(record.abandoned,1);assert.equal(record.losses,0);assert.equal(record.failStreak,0);
+    assert.equal(state.campaignOffer.choices.length,2);assert.ok(state.campaignOffer.choices.every(choice=>task9UpgradeIds(level).includes(choice.id)));
+    const choice=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:choice.id});app.advanceUi(.65);
+    state=app.readRestart();const retry=state.world;
+    assert.notEqual(retry,world);assert.equal(retry.level,level);assert.equal(retry.shotsUsed,0);assert.equal(retry.remaining,retry.budget);
+    assert.deepEqual(retry.buffs,{[choice.id]:1});assert.equal(retry.tutorialVisible,false);
+    assert.equal(state.scene.effects.length,0);assert.equal(state.scene.impactGhosts.length,0);
+    assert.equal(levelRecord(state.campaignProgress,level).attempts,2);
+    assert.equal(retry.bowlingStrikes||retry.pinballJackpots||0,0,'a fresh run carries no previous class award');
+  }
+});
+
+test('task11 remapping old unlocked stages to all new classes preserves historical clears without fabricated ratings',()=>{
+  for(const raw of [100,{completed:99,unlocked:100}]){
+    app.seedLevelRenderer(graphicsRecorder(),390,844,100);app.setCampaignProgress(raw);
+    const initial=app.readRestart().campaignProgress;
+    assert.equal(initial.completed,99);assert.equal(initial.unlocked,100);assert.equal(levelRecord(initial,100).cleared,false);
+    for(const level of [2,3,5,6,7,9,92,93,95,96,97,99]){
+      assert.equal(levelRecord(initial,level).cleared,true);assert.equal(levelRecord(initial,level).rating,0);
+      app.enterCampaign(level);assert.equal(app.readRestart().campaignOffer.level,level);
+      clickAction('campaign-cancel');
+    }
+    app.enterCampaign(6);clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);
+    const progress=app.readRestart().campaignProgress,record=levelRecord(progress,6);
+    assert.equal(progress.completed,99);assert.equal(progress.unlocked,100);assert.equal(record.attempts,1);
+    assert.equal(record.cleared,true);assert.equal(record.rating,0);assert.equal(record.firstClearTime,null);
+    assert.equal(levelRecord(progress,2).attempts,0);assert.equal(levelRecord(progress,96).rating,0);
+  }
+});
+
+test('task11 all one hundred implemented trials keep attempts, ratings, teaching and skins isolated through pause and restart',()=>{
+  app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:8,unlocked:8},30);
+  const progress=JSON.stringify(app.readRestart().campaignProgress),skins=JSON.stringify(app.readSkins().skins);
+  const storedProgress=saved.get('qiuqiule-campaign'),storedSkins=saved.get('qiuqiule-skins');
+  const levels=Array.from({length:100},(_,i)=>i+1);
+  for(const level of levels){
+    const upgrade=[5,9].includes(level%10)?'gravity':[3,7].includes(level%10)?'split':[2,4,8].includes(level%10)?'steady':'energy';
+    app.runCampaignTrial(level,upgrade);let state=app.readRestart();const world=state.world;
+    assert.equal(world.level,level);assert.equal(world.upgradeId,upgrade);assert.equal(state.campaignAttemptId,null);
+    assert.equal(app.isFeedbackDemo(),true);world.shoot(-7,0);advanceScene(state.scene,.025);
+    clickAction('pause');app.advanceUi(.42);app.saveCampaignCheckpoint();clickRestart();
+    state=app.readRestart();assert.notEqual(state.world,world);assert.equal(state.world.level,level);
+    assert.equal(state.world.shotsUsed,0);assert.equal(state.world.upgradeId,upgrade);assert.equal(state.campaignAttemptId,null);
+    assert.equal(JSON.stringify(state.campaignProgress),progress);assert.equal(JSON.stringify(app.readSkins().skins),skins);
+    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+  }
+  app.seedSkins();
+});
+
+test('task9 pause, background and phone rotation retain bowling rounds and pinball lives in the same attempt',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;});
+  for(const level of [92,96]){
+    const {world,scene,g,upgrade}=modernCampaignRun(level),pointer=inputCanvas();let resize;
+    window.innerWidth=390;window.innerHeight=844;
+    window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+    app.mountSceneBoundary(pointer.canvas,g);assert.equal(world.shoot(-7,0),true);advanceScene(scene,.05);
+    const counters={remaining:world.remaining,shots:world.shotsUsed,round:world.bowlingRound,pins:world.bowlingPinsDown,jackpots:world.pinballJackpots};
+    const attempt=app.readRestart().campaignAttemptId;clickAction('pause');app.advanceUi(.42);
+    const elapsed=world.elapsed,shotTime=world.shotTime,feedbackTime=world.feedbackTime;
+    advanceScene(scene,.35);near(world.elapsed,elapsed);near(world.shotTime,shotTime);near(world.feedbackTime,feedbackTime);
+    document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();
+    const checkpoint=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),level);
+    assert.equal(checkpoint.activeAttempt,attempt);near(checkpoint.activeElapsed,elapsed);assert.equal(checkpoint.losses,0);assert.equal(checkpoint.abandoned,0);
+    for(const [width,height] of [[844,390],[320,568],[390,844]]){
+      window.innerWidth=width;window.innerHeight=height;resize();scene.update(0,0);assertFiniteScene(g);
+      assert.equal(world.width,width);assert.equal(world.height,height);assert.equal(world.upgradeId,upgrade.id);
+      assert.deepEqual({remaining:world.remaining,shots:world.shotsUsed,round:world.bowlingRound,pins:world.bowlingPinsDown,jackpots:world.pinballJackpots},counters);
+      assert.ok(world.zones.every(zone=>Number.isFinite(zone.x)&&Number.isFinite(zone.y)));
+    }
+    document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();clickAction('resume');app.advanceUi(.42);
+    advanceScene(scene,.05);assert.ok(world.elapsed>elapsed);assert.equal(app.readRestart().campaignAttemptId,attempt);
+    assert.equal(world.remaining,counters.remaining);assert.equal(world.shotsUsed,counters.shots);
+  }
+});
+
+function nearestBowlingShot(world){
+  const p=world.player,target=world.enemies.filter(pin=>pin.pinHP>0).sort((a,b)=>Math.hypot(a.x-p.x,a.y-p.y)-Math.hypot(b.x-p.x,b.y-p.y))[0];
+  assert.ok(target);const dx=p.x-target.x,dy=p.y-target.y,d=Math.hypot(dx,dy);
+  assert.equal(world.shoot(dx/d*world.maxPull,dy/d*world.maxPull),true);
+}
+function finishBowlingScene(world,scene){
+  for(let frame=0;frame<7200&&world.phase!=='over';frame++){
+    if(world.ready)nearestBowlingShot(world);
+    scene.update(0,1000/120);
+  }
+  assert.equal(world.phase,'over');assert.equal(world.completed,true);
+}
+
+function hitCampaignStaticFromBelow(world,shape,actor=world.player){
+  const edge=shape.shape==='rect'?shape.height/2:shape.r;
+  Object.assign(actor,{x:shape.x,y:shape.y+edge+actor.r+.5,vx:0,vy:0,feedbackFreeze:0,pendingVx:0,pendingVy:0});
+  // A separate outside step ends the previous contact; the following impact
+  // goes through the actual swept/static collision loop.
+  world.step(1/120);Object.assign(actor,{vx:0,vy:-20*world.unit,feedbackFreeze:0});world.step(1/120);
+}
+function preparePinballLastJackpot(world){
+  const contact={normalSpeed:world.baseSpeed,nx:0,ny:1,impactVx:0,impactVy:-world.baseSpeed};
+  if(!world.shotActive)assert.equal(world.shoot(-world.maxPull*.2,0),true);
+  // This is an explicit last-object boundary fixture, not a playable route.
+  // Earlier groups enter through the class rule so its private counters agree.
+  for(let group=0;group<world.config.jackpotGoal;group++){
+    for(const target of world.statics.filter(shape=>shape.kind==='pinball-target'&&shape.active&&!shape.dead))world.rules.onStaticHit(target,contact,world.player);
+    const jackpot=world.statics.find(shape=>shape.kind==='jackpot');assert.ok(jackpot.active);
+    const hits=group===world.config.jackpotGoal-1?2:3;
+    for(let hit=0;hit<hits;hit++)world.rules.onStaticHit(jackpot,contact,world.player);
+    if(group<world.config.jackpotGoal-1)world.rules.onTick(world.config.respawnDelay);
+  }
+  const last=world.statics.find(shape=>shape.kind==='jackpot');assert.equal(last.hp,1);return last;
+}
+function drainPinballBody(world,body=world.player){
+  const drain=world.zones.find(zone=>zone.kind==='drain');assert.ok(drain);
+  Object.assign(body,{x:drain.x,y:drain.y-drain.height/2-.25,vx:0,vy:world.unit*20,
+    feedbackFreeze:0,pendingVx:0,pendingVy:0});
+  world.step(1/120);
+}
+
+test('task9 a normal bowling route chains real strikes, shows a temporary crown and records its three-round result once',()=>{
+  app.seedSkins();const random=Math.random;let run;
+  try{Math.random=()=>0;run=modernCampaignRun(2);}finally{Math.random=random;}
+  const {world,scene,g}=run,events=observeWorldEvents(world),audio=app.recordTones();
+  try{
+    assert.equal(world.upgradeId,'density');nearestBowlingShot(world);
+    for(let frame=0;frame<1200&&world.bowlingStrikes===0;frame++)scene.update(0,1000/120);
+    assert.equal(world.bowlingStrikes,1);assert.equal(world.bowlingPinsDown,10);assert.equal(world.shotsUsed,1);
+    assert.equal(world.bowlingFrames[0].strike,true);assert.equal(world.completed,false);assert.equal(app.readRestart().result,null);
+    assert.equal(world.remaining,world.budget-2,'a strike closes the unused second slot without counting a second launch');
+    advanceScene(scene,.15);assert.equal(crownShapes(g).length,1);assertFiniteScene(g);
+    assert.equal(audio.calls.filter(args=>args[0]===660&&args[1]===.12&&args[3]===.03).length,1);
+    advanceScene(scene,.7);assert.equal(crownShapes(g).length,0);assert.equal(world.bowlingRound,2);assert.equal(world.bowlingShot,0);
+    assert.equal(world.enemies.filter(pin=>pin.pinHP>0).length,10);assert.equal(world.ready,true);
+    finishBowlingScene(world,scene);app.advanceUi(.82);
+    assert.equal(world.bowlingCompletedRounds,3);assert.equal(world.bowlingPinsDown,30);assert.equal(world.bowlingStrikes,3);
+    assert.equal(world.shotsUsed,3);assert.equal(world.remaining,0);assert.equal(world.resultRating,3);assert.equal(world.score,450);
+    assert.equal(events.filter(event=>event.type==='campaignStrike').length,3);assert.equal(events.filter(event=>event.type==='over').length,1);
+    const state=app.readRestart(),record=levelRecord(state.campaignProgress,2);
+    assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,3);assert.equal(record.bestScore,450);
+    assert.ok(record.firstClearTime>0);assert.equal(state.campaignProgress.completed,2);assert.equal(state.campaignProgress.unlocked,3);
+    assert.equal(element('#result-reason').textContent,'30瓶 · 3次全倒');assert.equal(element('#ui-ball .ui-result-crown').style.display,'none');
+    assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readSkins().skins.unlocked,0);
+    scene.update(0,0);assert.equal(levelRecord(app.readRestart().campaignProgress,2).wins,1);
+  }finally{audio.restore();app.seedSkins();}
+});
+
+test('task9 bowling can win by a real final-budget spare after all six normal launches',()=>{
+  app.seedSkins();const random=Math.random;let run;
+  try{Math.random=()=>0;run=modernCampaignRun(2);}finally{Math.random=random;}
+  const {world,scene}=run;let finalLiveBudget=false;
+  for(let frame=0;frame<7200&&world.phase!=='over';frame++){
+    if(world.ready){
+      if(world.bowlingShot===0)assert.equal(world.shoot(-7,0),true);
+      else nearestBowlingShot(world);
+      if(world.shotsUsed===world.budget){
+        assert.equal(world.remaining,0);assert.equal(world.completed,false);assert.equal(world.phase,'battle');
+        assert.ok(world.enemies.some(pin=>pin.pinHP>0));finalLiveBudget=true;
+      }
+    }
+    scene.update(0,1000/120);
+  }
+  assert.equal(finalLiveBudget,true);assert.equal(world.phase,'over');assert.equal(world.completed,true);
+  assert.equal(world.shotsUsed,6);assert.equal(world.bowlingStrikes,0);assert.equal(world.bowlingSpares,3);
+  assert.equal(world.bowlingPinsDown,30);assert.equal(world.score,360);assert.equal(world.resultRating,1);
+  const record=levelRecord(app.readRestart().campaignProgress,2);
+  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,1);
+  assert.equal(app.readSkins().skinUnlock,null);
+});
+
+test('task9 the real final jackpot hit wins with zero lives before exhaustion and saves one exact result',()=>{
+  app.seedSkins();const {world,scene,g}=modernCampaignRun(6),events=observeWorldEvents(world),audio=app.recordTones();
+  try{
+    const last=preparePinballLastJackpot(world);world.remaining=0;
+    hitCampaignStaticFromBelow(world,last);scene.update(0,0);
+    assert.equal(last.hp,0);assert.equal(world.pinballJackpots,world.config.jackpotGoal);
+    assert.equal(world.phase,'campaign-celebrate');assert.equal(world.completed,true);assert.equal(world.resultRating,1);
+    advanceScene(scene,.15);assert.equal(crownShapes(g).length,1);assertFiniteScene(g);
+    assert.equal(events.filter(event=>event.type==='campaignJackpot').length,world.config.jackpotGoal);
+    assert.equal(audio.calls.filter(args=>args[0]===660&&args[1]===.12&&args[3]===.03).length,world.config.jackpotGoal);
+    const score=world.score;scene.update(0,0);assert.equal(world.score,score);
+    finishTask8Scene(world,scene);app.advanceUi(.82);
+    const state=app.readRestart(),record=levelRecord(state.campaignProgress,6);
+    assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,1);assert.equal(record.bestScore,score);
+    assert.equal(record.firstClearTime,world.elapsed);assert.equal(record.lastClearTime,world.elapsed);
+    assert.equal(element('#result-reason').textContent,'剩余 0 球');assert.equal(element('#ui-ball .ui-result-crown').style.display,'none');
+    assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readSkins().skins.unlocked,0);
+    assert.equal(events.filter(event=>event.type==='over').length,1);
+    scene.update(0,0);assert.equal(levelRecord(app.readRestart().campaignProgress,6).wins,1);
+  }finally{audio.restore();app.seedSkins();}
+});
+
+test('task9 five real bumper contacts earn a matching eyeless split and auxiliary drain costs no life',()=>{
+  app.seedSkins({enabled:true,sides:8,unlocked:8});const {world,scene,g}=modernCampaignRun(6);
+  const events=observeWorldEvents(world),audio=app.recordTones();let photo;
+  try{
+    assert.equal(world.shoot(-world.maxPull*.2,0),true);const bumper=world.statics.find(shape=>shape.kind==='bumper');
+    for(let hit=0;hit<5;hit++){hitCampaignStaticFromBelow(world,bumper);scene.update(0,0);}
+    assert.equal(world.pinballState.bumperHits,5);assert.equal(world.pinballState.multiballReady,true);
+    assert.equal(events.filter(event=>event.type==='campaignBumperRun').length,1);assert.ok(scene.wallFlashes.some(flash=>flash.shockwave));
+    assert.equal(audio.calls.filter(args=>args[1]===.07&&args[3]===.025).length,5);
+    world.player.vx=world.player.vy=0;advanceScene(scene,.45);assert.equal(world.ready,true);
+    const lives=world.remaining;assert.equal(world.shoot(-world.maxPull*.3,0),true);assert.equal(world.auxiliaries.length,1);
+    const child=world.auxiliaries[0];assert.ok(child.isAuxiliary&&child.isPlayer);assert.ok(child.r<world.player.r);
+    assert.equal(world.remaining,lives);assert.equal(world.pinballState.multiballReady,false);
+    for(const [index,body] of [world.player,child].entries())Object.assign(body,{x:100+index*150,y:570,vx:0,vy:0,squash:0,angle:0,roll:0,feedbackFreeze:0});
+    scene.resetFeedback();scene.update(0,0);
+    for(const body of [world.player,child]){
+      const shape=g.shapes.find(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points?.length===193&&Math.hypot(outlineBounds(shape).cx-body.x,outlineBounds(shape).cy-body.y)<body.r*.1);
+      assert.ok(shape);assertSameContour(shape.points.slice(0,-1).map(point=>({x:(point.x-body.x)/body.r,y:(point.y-body.y)/body.r})),app.readSkins().active);
+      assert.equal(playerEyes(g,body).length,body.isAuxiliary?0:2);
+    }
+    photo=app.recordCompositePhotos(true);scene.update(0,0);
+    assert.ok(photo.visible.has('main'));assert.ok(photo.visible.has(0));assert.equal(photo.aux.at(-1).slot,0);
+    assert.deepEqual(photo.main.at(-1).contour,photo.aux.at(-1).contour);
+    // The saved main ball may leave while its earned child is still rolling.
+    // Its independent photo and high-speed trail must remain visible.
+    Object.assign(child,{vx:0,vy:-world.unit*40});drainPinballBody(world,world.player);scene.update(0,0);
+    assert.equal(world.player.captured,true);assert.equal(world.remaining,lives);assert.equal(world.auxiliaries.length,1);
+    advanceScene(scene,.06);assert.ok(cometShapes(g).length>0);assert.equal(photo.visible.has(0),true);assert.equal(photo.visible.has('main'),false);
+    assert.equal(events.filter(event=>event.type==='campaignBallSave').length,1);
+    drainPinballBody(world,child);scene.update(0,0);
+    assert.equal(world.remaining,lives);assert.equal(world.auxiliaries.length,0);
+    assert.equal(events.filter(event=>event.type==='campaignDrain'&&event.auxiliary).length,1);
+    assert.equal(photo.visible.has(0),false);advanceScene(scene,.45);assert.equal(photo.visible.has('main'),true);
+  }finally{photo?.restore();audio.restore();app.seedSkins();}
+});
+
+test('task9 completed bowling failures and expired-save pinball drains unlock skip only after three losses',()=>{
+  for(const level of [2,6]){
+    let {world,scene}=modernCampaignRun(level);
+    for(let attempt=1;attempt<=3;attempt++){
+      if(level===2){
+        for(let frame=0;frame<4800&&world.phase!=='over';frame++){
+          if(world.ready)assert.equal(world.shoot(-7,0),true);
+          scene.update(0,1000/120);
+        }
+        assert.equal(world.bowlingCompletedRounds,world.config.rounds);
+      }else{
+        // Prepare the last-life/expired-protection boundary, then use a real
+        // downward drain crossing to trigger the loss and its persisted result.
+        world.remaining=1;assert.equal(world.shoot(-world.maxPull*.2,0),true);
+        world.rules.onTick(world.config.ballSaveDuration);assert.equal(world.pinballState.saveRemaining,0);
+        drainPinballBody(world);scene.update(0,0);
+      }
+      assert.equal(world.phase,'over');assert.equal(world.completed,false);
+      const record=levelRecord(app.readRestart().campaignProgress,level);
+      assert.equal(record.losses,attempt);assert.equal(record.failStreak,attempt);assert.equal(record.abandoned,0);assert.equal(record.rating,0);
+      app.advanceUi(.82);clickRestart();app.advanceUi(.65);assert.equal(element('#campaign-skip').hidden,attempt<3);
+      if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
+    }
+    clickAction('campaign-skip');const progress=app.readRestart().campaignProgress,record=levelRecord(progress,level);
+    assert.equal(record.skipped,true);assert.equal(record.cleared,false);assert.equal(record.rating,0);
+    assert.equal(progress.completed,level-1);assert.equal(progress.unlocked,level+1);
+    app.advanceUi(.65);app.enterCampaign(level);assert.equal(app.readRestart().campaignOffer?.level,level);clickAction('campaign-cancel');
+  }
+});
+
+test('task9 trial bowling wins and final jackpot collisions finish and restart without saving awards or new skins',()=>{
+  for(const level of [2,6]){
+    app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:8,unlocked:8},30);
+    const progress=JSON.stringify(app.readRestart().campaignProgress),skins=JSON.stringify(app.readSkins().skins);
+    const storedProgress=saved.get('qiuqiule-campaign'),storedSkins=saved.get('qiuqiule-skins');
+    const upgrade=level===2?'density':'energy';app.runCampaignTrial(level,upgrade);const {world,scene}=app.readRestart();
+    if(level===2)finishBowlingScene(world,scene);
+    else{const last=preparePinballLastJackpot(world);hitCampaignStaticFromBelow(world,last);scene.update(0,0);finishTask8Scene(world,scene);}
+    assert.equal(app.readRestart().result?.completed,true);assert.equal(world.resultRating,3);assert.equal(app.readSkins().skinUnlock,null);
+    assert.equal(JSON.stringify(app.readRestart().campaignProgress),progress);assert.equal(JSON.stringify(app.readSkins().skins),skins);
+    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+    app.advanceUi(.82);clickRestart();const state=app.readRestart();
+    assert.notEqual(state.world,world);assert.equal(state.world.level,level);assert.equal(state.world.upgradeId,upgrade);
+    assert.equal(state.world.shotsUsed,0);assert.equal(state.campaignAttemptId,null);assert.equal(app.isFeedbackDemo(),true);
+    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+  }
+  app.seedSkins();
+});
+
+test('task9 actual bowling and pinball kills respect reduced-motion particle limits without camera or slow-motion effects',async()=>{
+  await withReloadedEntry({juice:1,expressions:false},true,fresh=>{
+    for(const level of [2,6]){
+      const g=graphicsRecorder(),{world,scene}=fresh.seedCampaignRenderer(g,390,844,level);fresh.setFeedbackStrength(1);
+      const counts=[],particles=scene.particles;
+      scene.particles=function(event,...args){
+        const before=this.effects.length;const value=particles.call(this,event,...args);
+        if(event.type==='kill')counts.push(this.effects.length-before);return value;
+      };
+      if(level===2){
+        world.shoot(0,world.maxPull);
+        for(let frame=0;frame<1200&&world.bowlingStrikes===0;frame++)scene.update(0,1000/120);
+        assert.equal(world.bowlingStrikes,1);advanceScene(scene,.1);
+      }else{
+        world.shoot(-world.maxPull*.2,0);hitCampaignStaticFromBelow(world,world.statics.find(shape=>shape.kind==='pinball-target'));
+        scene.update(0,0);advanceScene(scene,.1);
+      }
+      assert.ok(counts.length>0);assert.ok(counts.every(count=>count>0&&count<=5));
+      assert.equal(world.presentationTimeScale,1);assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);
+      assertFiniteScene(g);assert.equal(element('#game').style.transform,'none');
+    }
+  });
+});
+
+const task10Upgrades=['split','energy','breath','pulse'];
+
+test('task10 all twenty bricks and glass tiers enter through two local choices with accurate goals and budget units',()=>{
+  for(const r of [3,7])for(let k=0;k<10;k++){
+    const level=k*10+r,{scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,level);
+    const before=JSON.stringify(app.readRestart().campaignProgress),stored=saved.get('qiuqiule-campaign');
+    app.enterCampaign(level);let state=app.readRestart();
+    assert.equal(state.campaignOffer.choices.length,2);assert.equal(new Set(state.campaignOffer.choices.map(choice=>choice.id)).size,2);
+    assert.ok(state.campaignOffer.choices.every(choice=>task10Upgrades.includes(choice.id)));
+    assert.equal(element('#campaign-level-title').textContent,`${level} · ${r===3?'落砖':'碎屏'}`);
+    assert.equal(JSON.stringify(state.campaignProgress),before);clickAction('campaign-cancel');
+    assert.equal(saved.get('qiuqiule-campaign'),stored);assert.equal(JSON.stringify(app.readRestart().campaignProgress),before);
+    app.enterCampaign(level);const choice=app.readRestart().campaignOffer.choices[0],goal=element('#campaign-level-goal').textContent;
+    clickAction('campaign-upgrade',{upgrade:choice.id});app.advanceUi(.65);state=app.readRestart();const world=state.world;
+    assert.equal(world.config.r,r);assert.equal(world.config.k,k);assert.equal(world.upgradeId,choice.id);assert.deepEqual(world.buffs,{[choice.id]:1});
+    assert.equal(world.budget,r===3?25+5*k:5-Math.floor(k/4));assert.equal(world.remaining,world.budget);
+    if(r===3){assert.ok(goal.includes(String(30+10*k)));assert.match(goal,/砖/);assert.ok(goal.includes(String(world.budget)));assert.match(goal,/回合/);}
+    else{assert.match(goal,/60.*秒|60\s*s/);assert.match(goal,/漏/);assert.ok(goal.includes(String(world.budget)));}
+    scene.update(0,0);const hud=element('#campaign-goal').textContent;
+    assert.equal(element('#campaign-goal').hidden,false);assert.match(hud,r===3?/砖|回合/:/秒|漏/);
+    const aria=element('#stage-progress').attributes['aria-label'];assert.match(aria,r===3?/回合/:/漏/);
+    assert.ok(aria.includes(String(world.budget)));assert.equal(levelRecord(state.campaignProgress,level).attempts,1);
+    assert.equal(levelRecord(state.campaignProgress,level).upgradeChoices[choice.id],1);assert.equal(levelRecord(state.campaignProgress,level).rating,0);
+    assert.equal(!!state.campaignProgress.tutorials[world.config.classId],k===0);
+    const remaining=world.remaining;assert.equal(world.shoot(-7,0),true);scene.update(0,0);
+    assert.equal(world.remaining,remaining-(r===3?1:0));assert.equal(world.tutorialVisible,false);
+  }
+});
+
+test('task10 restart records one abandonment and removes the previous volley and selected upgrade',()=>{
+  for(const level of [3,7]){
+    const {world,scene}=modernCampaignRun(level);assert.equal(world.shoot(-7,0),true);advanceScene(scene,.05);
+    clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
+    let state=app.readRestart(),record=levelRecord(state.campaignProgress,level);
+    assert.equal(record.attempts,1);assert.equal(record.abandoned,1);assert.equal(record.losses,0);assert.equal(record.rating,0);
+    const choices=state.campaignOffer.choices;assert.equal(choices.length,2);assert.ok(choices.every(choice=>task10Upgrades.includes(choice.id)));
+    const choice=choices[0];clickAction('campaign-upgrade',{upgrade:choice.id});app.advanceUi(.65);state=app.readRestart();
+    assert.notEqual(state.world,world);assert.equal(state.world.level,level);assert.equal(state.world.shotsUsed,0);assert.equal(state.world.remaining,state.world.budget);
+    assert.deepEqual(state.world.buffs,{[choice.id]:1});assert.equal(state.world.auxiliaries.length,0);assert.equal(state.world.tutorialVisible,false);
+    assert.equal(state.scene.effects.length,0);assert.equal(state.scene.impactGhosts.length,0);assert.equal(levelRecord(state.campaignProgress,level).attempts,2);
+  }
+});
+
+test('task10 pause, background and orientation preserve the active attempt, timer, round and volley',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;});
+  for(const level of [93,97]){
+    const {world,scene,g,upgrade}=modernCampaignRun(level),pointer=inputCanvas();let resize;
+    window.innerWidth=390;window.innerHeight=844;
+    window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+    app.mountSceneBoundary(pointer.canvas,g);world.shoot(-7,0);advanceScene(scene,.05);
+    const counters={remaining:world.remaining,shots:world.shotsUsed,round:world.bricksRound,broken:world.bricksBroken,
+      glassClock:world.glassClock,misses:world.glassState?.misses,actors:world.auxiliaries.length};
+    const attempt=app.readRestart().campaignAttemptId;clickAction('pause');app.advanceUi(.42);
+    const elapsed=world.elapsed,shotTime=world.shotTime;advanceScene(scene,.35);near(world.elapsed,elapsed);near(world.shotTime,shotTime);
+    document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();
+    const checkpoint=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),level);near(checkpoint.activeElapsed,elapsed);
+    assert.equal(checkpoint.activeAttempt,attempt);assert.equal(checkpoint.losses,0);assert.equal(checkpoint.abandoned,0);
+    for(const [width,height] of [[844,390],[320,568],[390,844]]){
+      window.innerWidth=width;window.innerHeight=height;resize();scene.update(0,0);assertFiniteScene(g);
+      assert.equal(world.width,width);assert.equal(world.height,height);assert.equal(world.upgradeId,upgrade.id);
+      assert.deepEqual({remaining:world.remaining,shots:world.shotsUsed,round:world.bricksRound,broken:world.bricksBroken,
+        glassClock:world.glassClock,misses:world.glassState?.misses,actors:world.auxiliaries.length},counters);
+    }
+    document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();clickAction('resume');app.advanceUi(.42);
+    advanceScene(scene,.05);assert.ok(world.elapsed>elapsed);assert.equal(app.readRestart().campaignAttemptId,attempt);
+    assert.equal(world.remaining,counters.remaining);assert.equal(world.shotsUsed,counters.shots);
+  }
+});
+
+function lastBrickBoundary(world){
+  // Prepare the last brick and final budgeted round only. The terminal hit is
+  // still performed by a real emitted small ball through the collision loop.
+  world.bricksBroken=world.config.goal-1;world.remaining=1;world.shotsUsed=world.budget-1;
+  const last=world.statics.filter(body=>body.kind==='number-brick'&&!body.dead).sort((a,b)=>b.gridRow-a.gridRow)[0];
+  assert.ok(last);last.hp=1;
+  assert.equal(world.shoot(0,world.maxPull),true);assert.equal(world.remaining,0);
+  assert.equal(world.phase,'battle');const actor=world.auxiliaries[0];assert.ok(actor?.isAuxiliary);
+  hitCampaignStaticFromBelow(world,last,actor);return last;
+}
+
+test('task10 a real small-ball final brick wins on the exhausted last round and saves one rating without a skin award',()=>{
+  app.seedSkins();const {world,scene,g}=modernCampaignRun(3),events=observeWorldEvents(world);
+  lastBrickBoundary(world);scene.update(0,0);
+  assert.equal(world.bricksBroken,world.config.goal);assert.equal(world.completed,true);assert.equal(world.phase,'campaign-celebrate');
+  assert.equal(world.resultRating,1);assert.equal(world.remaining,0);assert.equal(world.shotsUsed,world.budget);assertFiniteScene(g);
+  finishTask8Scene(world,scene);app.advanceUi(.82);
+  const record=levelRecord(app.readRestart().campaignProgress,3);
+  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,1);assert.equal(record.bestScore,world.score);
+  assert.ok(record.firstClearTime>0);assert.equal(element('#campaign-rating').attributes['aria-label'],'本关评分 1 点，共三点');
+  assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readSkins().skins.unlocked,0);
+  assert.equal(events.filter(event=>event.type==='over').length,1);scene.update(0,0);
+  assert.equal(levelRecord(app.readRestart().campaignProgress,3).wins,1);
+});
+
+function glassBoundaryRows(world,clock,misses){
+  // Advance only the class clock for a declared deadline fixture. This does
+  // not stand in for the separate ordinary-play route test.
+  world.rules.onTick(clock-world.glassClock);
+  const panes=world.statics.filter(body=>body.kind==='glass'&&!body.dead);
+  assert.ok(panes.length>=misses+1);
+  for(const pane of panes)Object.assign(pane,{active:false});
+  for(const pane of panes.slice(0,misses))Object.assign(pane,{active:true,y:world.glassBoard.bottom-pane.r});
+  const last=panes[misses];Object.assign(last,{active:true,y:world.glassBoard.top});
+  world.rules.onAfterTick();return [last];
+}
+
+test('task10 glass may launch with exactly zero allowance left and wins at sixty seconds without an extra miss',()=>{
+  app.seedSkins();const {world,scene,g}=modernCampaignRun(7),events=observeWorldEvents(world);
+  glassBoundaryRows(world,59.99,world.budget);scene.update(0,0);
+  assert.equal(world.glassState.misses,world.budget);assert.equal(world.remaining,0);assert.equal(world.completed,false);assert.equal(world.ready,true);
+  assert.equal(world.shoot(-7,0),true);assert.equal(world.remaining,0);
+  scene.update(0,1000/60);assert.equal(world.glassClock,60);assert.equal(world.completed,true);assert.equal(world.phase,'campaign-celebrate');
+  assertFiniteScene(g);finishTask8Scene(world,scene);app.advanceUi(.82);
+  assert.equal(world.resultRating,1);const record=levelRecord(app.readRestart().campaignProgress,7);
+  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,1);
+  assert.equal(element('#result-reason').textContent,`漏 ${world.budget} 颗`);assert.equal(app.readSkins().skinUnlock,null);
+  assert.equal(events.filter(event=>event.type==='over').length,1);
+});
+
+test('task10 glass resolves the same deadline contact before judging an allowed or excess miss',()=>{
+  for(const saveByHit of [true,false]){
+    const {world,scene}=modernCampaignRun(7);
+    const panes=glassBoundaryRows(world,60-1/120,world.budget),last=panes[0];
+    Object.assign(last,{active:true,hp:1,dead:false,x:world.player.x,y:world.glassBoard.bottom-last.r-.005});
+    assert.equal(world.shoot(0,world.maxPull),true);
+    if(saveByHit)Object.assign(world.player,{x:last.x,y:last.y+last.r+world.player.r-.1,vx:0,vy:-world.unit*20,feedbackFreeze:0,pendingVx:0,pendingVy:0});
+    else Object.assign(world.player,{x:world.arenaBounds.left+world.player.r,y:world.glassBoard.bottom,vx:0,vy:0,feedbackFreeze:0});
+    scene.update(0,1000/60);
+    near(world.glassClock,60);
+    assert.equal(world.completed,saveByHit);assert.equal(world.glassState.misses,world.budget+(saveByHit?0:1));
+    if(saveByHit){assert.equal(world.phase,'campaign-celebrate');finishTask8Scene(world,scene);}
+    else assert.equal(world.phase,'over');
+    const record=levelRecord(app.readRestart().campaignProgress,7);
+    assert.equal(record.wins,saveByHit?1:0);assert.equal(record.losses,saveByHit?0:1);assert.equal(record.rating,saveByHit?1:0);
+  }
+});
+
+test('task10 numbered bricks reuse text nodes through HP changes and row movement and destroy them on exit',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;});
+  const g=graphicsRecorder(),{world,scene}=app.seedCampaignRenderer(g,390,844,93);
+  window.innerWidth=390;window.innerHeight=844;window.devicePixelRatio=2;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+  app.mountSceneBoundary(inputCanvas().canvas,g);scene.update(0,0);
+  const bricks=world.statics.filter(body=>body.kind==='number-brick'&&!body.dead);
+  const target=bricks.sort((a,b)=>b.gridRow-a.gridRow)[0],key=`campaign-hp-${target.id}`,label=scene.campaignLabels.get(key);
+  assert.ok(label);assert.equal(label.text,String(Math.ceil(target.hp)));assert.match(label.style.fontFamily,/GameSans/);
+  assert.equal(label.style.fontStyle,'normal');assert.equal(label.style.resolution,label.scale);assert.ok(label.scale>1,'high-DPI text is rasterized at the actual canvas scale');
+  const original=new Map(scene.campaignLabels),created=scene.testLabels.length;
+  for(let frame=0;frame<12;frame++)scene.update(0,0);
+  assert.equal(scene.testLabels.length,created);for(const [id,node] of original)assert.equal(scene.campaignLabels.get(id),node);
+  assert.equal(world.shoot(0,world.maxPull),true);const actor=world.auxiliaries[0],hp=target.hp;
+  hitCampaignStaticFromBelow(world,target,actor);scene.update(0,0);
+  assert.equal(target.hp,hp-1);assert.equal(scene.campaignLabels.get(key),label);assert.equal(label.text,String(Math.ceil(target.hp)));
+  while(target.hp>0){hitCampaignStaticFromBelow(world,target,actor);scene.update(0,0);}
+  assert.equal(label.destroyed,true);assert.equal(scene.campaignLabels.has(key),false);
+  for(let frame=0;frame<1200&&!world.bricksShift&&world.phase==='battle';frame++)scene.update(0,1000/120);
+  assert.ok(world.bricksShift);const moving=world.statics.find(body=>body.kind==='number-brick'&&!body.dead&&body.shiftFromX!==undefined);
+  const movingKey=`campaign-hp-${moving.id}`,movingNode=scene.campaignLabels.get(movingKey);assert.ok(movingNode);
+  const from={x:moving.x,y:moving.y};advanceScene(scene,.1);
+  assert.equal(scene.campaignLabels.get(movingKey),movingNode);near(movingNode.x,moving.x*movingNode.scale);near(movingNode.y,moving.y*movingNode.scale);
+  assert.ok(Math.hypot(moving.x-from.x,moving.y-from.y)>0,'the existing label follows its shifting brick');
+  const beforeDpr=world.statics.map(body=>({id:body.id,x:body.x,y:body.y,r:body.r})),oldNodes=[...scene.campaignLabels.values()];
+  window.devicePixelRatio=3;resize();assert.equal(scene.campaignLabels.size,0);assert.ok(oldNodes.every(node=>node.destroyed));
+  scene.update(0,0);const crisp=scene.campaignLabels.get(movingKey);
+  assert.notEqual(crisp,movingNode);assert.equal(crisp.style.resolution,3);assert.equal(crisp.scale,3);
+  assert.deepEqual(world.statics.map(body=>({id:body.id,x:body.x,y:body.y,r:body.r})),beforeDpr,'changing only DPI cannot move a collider');
+  near(crisp.x,moving.x*3);near(crisp.y,moving.y*3);
+  const exiting=[...scene.campaignLabels.values()];clickAction('pause');app.advanceUi(.42);clickAction('home');app.advanceUi(.82);clickAction('home');app.advanceUi(.65);scene.update(0,0);
+  assert.equal(app.readRestart().screen,'home');assert.equal(scene.campaignLabels.size,0);assert.ok(exiting.every(node=>node.destroyed));
+});
+
+test('task10 a capped twenty-ball volley and its returning snapshots retain independent matching photos without eyes',()=>{
+  app.seedSkins({enabled:true,sides:8,unlocked:8});const g=graphicsRecorder(),{world,scene}=app.seedCampaignRenderer(g,390,844,93);
+  let photo;
+  try{
+    world.bricksBallCount=world.config.ballCap;assert.equal(world.config.ballCap,20);
+    assert.equal(world.shoot(-world.maxPull,0),true);advanceScene(scene,2.4);
+    assert.equal(world.auxiliaries.length,20);assert.equal(world.bricksQueue,0);assert.equal(world.player.captured,true);
+    scene.resetFeedback();scene.update(0,0);
+    for(const actor of world.auxiliaries){assert.ok(actor.isPlayer&&actor.isAuxiliary);near(actor.r,world.unit*.5);assert.equal(playerEyes(g,actor).length,0);}
+    photo=app.recordCompositePhotos(true);scene.update(0,0);
+    assert.equal(photo.main.length,0);assert.equal(photo.aux.length,20);assert.equal(new Set(photo.aux.map(call=>call.slot)).size,20);
+    assert.ok(photo.aux.every(call=>call.contour===app.readSkins().active));
+    for(let frame=0;frame<800&&!world.bricksReturns.length;frame++)scene.update(0,1000/120);
+    assert.equal(world.auxiliaries.length,0);assert.equal(world.bricksReturns.length,20);assert.equal(world.ready,false);
+    photo.aux.length=0;scene.update(0,0);assert.equal(photo.aux.length,20);assert.equal(new Set(photo.aux.map(call=>call.slot)).size,20);
+    const radii=world.bricksReturns.map(item=>item.bodySnapshot.r);advanceScene(scene,.17);
+    assert.ok(photo.aux.some(call=>call.options.alpha>0&&call.options.alpha<1));
+    assert.deepEqual(world.bricksReturns.map(item=>item.bodySnapshot.r),radii);assertFiniteScene(g);
+    advanceScene(scene,.5);assert.equal(world.bricksReturns.length,0);assert.equal(world.ready,true);
+    assert.equal([...photo.visible].filter(slot=>typeof slot==='number').length,0);assert.equal(photo.visible.has('main'),true);
+  }finally{photo?.restore();app.seedSkins();}
+});
+
+test('task10 glass return locks launches, pauses with the world and resumes to the same launch point',()=>{
+  const {world,scene,g}=modernCampaignRun(7);assert.equal(world.shoot(-7,0),true);
+  for(let frame=0;frame<1200&&!world.glassReturn;frame++)scene.update(0,1000/120);
+  assert.ok(world.glassReturn);assert.equal(world.ready,false);assert.equal(world.shoot(-7,0),false);
+  advanceScene(scene,.1);const returnAge=world.glassReturn.elapsed,clock=world.glassClock,shots=world.shotsUsed;
+  const pose={x:world.player.x,y:world.player.y};clickAction('pause');app.advanceUi(.42);advanceScene(scene,.4);
+  near(world.glassClock,clock);near(world.glassReturn.elapsed,returnAge);assert.deepEqual({x:world.player.x,y:world.player.y},pose);
+  clickAction('resume');app.advanceUi(.42);advanceScene(scene,.35);
+  assert.equal(world.glassReturn,null);assert.equal(world.ready,true);assert.equal(world.shotsUsed,shots);
+  near(world.player.x,world.glassBoard.start.x);near(world.player.y,world.glassBoard.start.y);assertFiniteScene(g);
+});
+
+test('task10 final-round failures and excess misses grant a zero-rating skip after three losses only',()=>{
+  for(const level of [3,7]){
+    let {world,scene}=modernCampaignRun(level);
+    for(let attempt=1;attempt<=3;attempt++){
+      if(level===3){
+        world.remaining=1;world.shotsUsed=world.budget-1;assert.equal(world.shoot(-7,0),true);
+        for(let frame=0;frame<1200&&world.phase!=='over';frame++)scene.update(0,1000/120);
+      }else{
+        const [last]=glassBoundaryRows(world,30,world.budget);
+        Object.assign(last,{y:world.glassBoard.bottom-last.r-.001});scene.update(0,1000/120);
+      }
+      assert.equal(world.phase,'over');assert.equal(world.completed,false);
+      const record=levelRecord(app.readRestart().campaignProgress,level);
+      assert.equal(record.losses,attempt);assert.equal(record.failStreak,attempt);assert.equal(record.abandoned,0);assert.equal(record.rating,0);
+      app.advanceUi(.82);clickRestart();app.advanceUi(.65);assert.equal(element('#campaign-skip').hidden,attempt<3);
+      if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
+    }
+    clickAction('campaign-skip');const progress=app.readRestart().campaignProgress,record=levelRecord(progress,level);
+    assert.equal(record.skipped,true);assert.equal(record.cleared,false);assert.equal(record.rating,0);
+    assert.equal(progress.completed,level-1);assert.equal(progress.unlocked,level+1);
+    app.advanceUi(.65);app.enterCampaign(level);assert.equal(app.readRestart().campaignOffer.level,level);clickAction('campaign-cancel');
+  }
+});
+
+test('task10 trial terminal hits and sixty-second settlements leave all formal records and skins untouched',()=>{
+  for(const level of [3,7]){
+    app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:8,unlocked:8},30);
+    const progress=JSON.stringify(app.readRestart().campaignProgress),skins=JSON.stringify(app.readSkins().skins);
+    const storedProgress=saved.get('qiuqiule-campaign'),storedSkins=saved.get('qiuqiule-skins');
+    app.runCampaignTrial(level,'energy');const {world,scene}=app.readRestart();
+    if(level===3)lastBrickBoundary(world);
+    else{glassBoundaryRows(world,59.99,1);world.step(.02);}
+    scene.update(0,0);finishTask8Scene(world,scene);assert.equal(app.readRestart().result?.completed,true);
+    assert.equal(world.resultRating,level===3?1:2);assert.equal(app.readSkins().skinUnlock,null);
+    assert.equal(JSON.stringify(app.readRestart().campaignProgress),progress);assert.equal(JSON.stringify(app.readSkins().skins),skins);
+    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+    app.advanceUi(.82);clickRestart();const state=app.readRestart();
+    assert.notEqual(state.world,world);assert.equal(state.world.level,level);assert.equal(state.world.upgradeId,'energy');
+    assert.equal(state.world.shotsUsed,0);assert.equal(state.campaignAttemptId,null);assert.equal(app.isFeedbackDemo(),true);
+    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+  }
+  app.seedSkins();
+});
+
+test('task10 an ordinary aimed glass run survives all sixty simulated seconds and records its real timed result',()=>{
+  app.seedSkins();const random=Math.random;let run;
+  try{Math.random=()=>.3;run=modernCampaignRun(7);}finally{Math.random=random;}
+  const {world,scene,g}=run,events=observeWorldEvents(world);app.setFeedbackStrength(.6);
+  assert.equal(world.upgradeId,'energy');let peakActors=1;
+  // This complete route uses only public launches at live pane positions and
+  // normal scene updates. It never moves targets or adjusts clocks/budgets.
+  for(let frame=0;frame<14400&&world.phase!=='over';frame++){
+    if(world.ready){
+      const target=world.statics.filter(body=>body.kind==='glass'&&body.active!==false&&!body.dead).sort((a,b)=>b.y-a.y)[0];
+      if(target){
+        const p=world.player,distance=Math.hypot(target.x-p.x,target.y-p.y);
+        const arrival=distance/(world.baseSpeed*Math.sqrt(world.energy/world.density)+target.vy);
+        const angle=Math.atan2(target.y+target.vy*arrival-p.y,target.x-p.x);
+        assert.equal(world.shoot(-Math.cos(angle)*world.maxPull,-Math.sin(angle)*world.maxPull),true);
+      }
+    }
+    scene.update(0,1000/120);peakActors=Math.max(peakActors,1+world.auxiliaries.length);
+  }
+  assert.equal(world.phase,'over');assert.equal(world.completed,true);near(world.glassClock,60);
+  assert.ok(world.glassState.misses<=world.budget);assert.equal(world.remaining,world.budget-world.glassState.misses);
+  assert.ok(world.glassState.kills>10);assert.ok(peakActors<=3);assert.equal(events.filter(event=>event.type==='campaignGlassRush').length,1);
+  assert.equal(events.filter(event=>event.type==='over').length,1);assertFiniteScene(g);
+  const record=levelRecord(app.readRestart().campaignProgress,7);
+  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,world.resultRating);assert.ok(record.rating>=1);
+  near(record.firstClearTime,60);assert.equal(record.bestScore,world.score);assert.equal(app.readSkins().skinUnlock,null);
+});
+
+const task11Upgrades=['gravity','density','growth','pulse'];
+
+test('task11 all twenty merge and chain levels use two local choices, first teaching and useful unlimited-launch HUDs',()=>{
+  for(let k=0;k<10;k++)for(const r of [5,9]){
+    const level=k*10+r,g=graphicsRecorder(),{scene}=app.seedLevelRenderer(g,390,844,level);
+    const before=JSON.stringify(app.readRestart().campaignProgress),stored=saved.get('qiuqiule-campaign');
+    app.enterCampaign(level);let state=app.readRestart();
+    assert.equal(state.campaignOffer.level,level);assert.equal(state.campaignOffer.choices.length,2);
+    assert.equal(new Set(state.campaignOffer.choices.map(choice=>choice.id)).size,2);
+    assert.ok(state.campaignOffer.choices.every(choice=>task11Upgrades.includes(choice.id)));
+    assert.equal(element('#campaign-level-title').textContent,`${level} · ${r===5?'合成':'链球'}`);
+    const goal=element('#campaign-level-goal').textContent;
+    assert.doesNotMatch(goal,/Infinity|NaN|undefined|余.*发/);
+    assert.ok(goal.includes(String(r===5?2+Math.floor(k/3):20+5*k)));
+    assert.match(goal,r===5?/最大|合成/:/60.*秒/);
+    assert.equal((element('#campaign-upgrades').innerHTML.match(/<small>/g)||[]).length,2,'both offered upgrades explain their effect');
+    clickAction('campaign-cancel');assert.equal(JSON.stringify(app.readRestart().campaignProgress),before);
+    assert.equal(saved.get('qiuqiule-campaign'),stored,'declining an offer writes no attempt or teaching');
+    app.enterCampaign(level);const choice=app.readRestart().campaignOffer.choices[0];
+    clickAction('campaign-upgrade',{upgrade:choice.id});app.advanceUi(.65);state=app.readRestart();const world=state.world;
+    assert.equal(world.config.classId,r===5?'merge':'chain');assert.equal(world.config.k,k);assert.equal(world.config.implemented,true);
+    assert.equal(world.budget,r===5?42:60);assert.ok(Number.isFinite(world.remaining));assert.equal(world.upgradeId,choice.id);
+    assert.deepEqual(world.buffs,{[choice.id]:1});assert.equal(world.tutorialVisible,k===0);
+    assert.equal(!!state.campaignProgress.tutorials[world.config.classId],k===0);
+    scene.update(0,0);assertFiniteScene(g);const hud=element('#campaign-goal').textContent;
+    assert.equal(element('#campaign-goal').hidden,false);assert.doesNotMatch(hud,/Infinity|NaN|undefined|余.*发/);
+    assert.match(hud,r===5?/覆盖|合成|最大/:/秒/);
+    assert.doesNotMatch(element('#stage-progress').attributes['aria-label']||'',/Infinity|NaN|undefined/);
+    const record=levelRecord(state.campaignProgress,level);
+    assert.equal(record.attempts,1);assert.equal(record.upgradeChoices[choice.id],1);assert.equal(record.rating,0);
+    const remaining=world.remaining;assert.equal(world.shoot(-7,0),true);assert.equal(world.remaining,remaining,'a launch consumes no pressure or time allowance');assert.equal(world.tutorialVisible,false);
+    assert.equal(world.shotsUsed,1);scene.update(0,0);assertFiniteScene(g);
+  }
+});
+
+test('task11 pause, background and rotation preserve merge pressure and chain progress in the same attempt',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;});
+  const counters=world=>({shots:world.shotsUsed,remaining:world.remaining,mergeMade:world.mergeMade,mergeCount:world.mergeCount,
+    mergeElapsed:world.mergeElapsed,mergeClock:world.mergeState?.elapsed,mergeClears:world.mergeClears,coverage:world.mergeCoverage,
+    chainElapsed:world.chainState?.elapsed,removed:world.chainState?.cleared,maxChain:world.chainState?.maxChain,
+    liveCount:world.chainState?.liveCount,headProgress:world.chainState?.headProgress});
+  for(const level of [95,99])for(const [portraitWidth,portraitHeight] of [[390,844],[320,568]]){
+    const {world,scene,g,upgrade}=modernCampaignRun(level,portraitWidth,portraitHeight),pointer=inputCanvas();let resize;
+    window.innerWidth=portraitWidth;window.innerHeight=portraitHeight;
+    window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+    app.mountSceneBoundary(pointer.canvas,g);assert.equal(world.shoot(-7,0),true);advanceScene(scene,.05);
+    clickAction('pause');app.advanceUi(.42);const before=counters(world),elapsed=world.elapsed,attempt=app.readRestart().campaignAttemptId;
+    advanceScene(scene,.35);assert.deepEqual(counters(world),before);near(world.elapsed,elapsed);
+    document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();
+    const checkpoint=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),level);
+    assert.equal(checkpoint.activeAttempt,attempt);near(checkpoint.activeElapsed,elapsed);assert.equal(checkpoint.losses,0);assert.equal(checkpoint.abandoned,0);
+    for(const [width,height] of [[portraitHeight,portraitWidth],[portraitWidth,portraitHeight]]){
+      window.innerWidth=width;window.innerHeight=height;resize();scene.update(0,0);assertFiniteScene(g);
+      assert.equal(world.width,width);assert.equal(world.height,height);assert.equal(world.upgradeId,upgrade.id);
+      const after=counters(world),expected={...before};
+      for(const key of ['coverage','remaining','headProgress']){near(after[key]??0,expected[key]??0);delete after[key];delete expected[key];}
+      assert.deepEqual(after,expected);
+      assert.ok(world.campaignBodies.every(body=>[body.x,body.y,body.r,body.vx,body.vy].every(Number.isFinite)));
+    }
+    document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();clickAction('resume');app.advanceUi(.42);
+    advanceScene(scene,.05);assert.ok(world.elapsed>elapsed);assert.equal(app.readRestart().campaignAttemptId,attempt);
+    assert.ok(Number.isFinite(world.remaining));assert.equal(world.shotsUsed,before.shots);
+  }
+});
+
+test('task11 restart removes a live merge or chain and records abandonment before a fresh local choice',()=>{
+  for(const level of [5,9]){
+    const {world,scene}=modernCampaignRun(level);assert.equal(world.shoot(-7,0),true);advanceScene(scene,.05);
+    clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
+    let state=app.readRestart(),record=levelRecord(state.campaignProgress,level);
+    assert.equal(state.world,null);assert.equal(record.attempts,1);assert.equal(record.abandoned,1);assert.equal(record.losses,0);assert.equal(record.failStreak,0);
+    assert.equal(state.campaignOffer.choices.length,2);assert.ok(state.campaignOffer.choices.every(choice=>task11Upgrades.includes(choice.id)));
+    const choice=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:choice.id});app.advanceUi(.65);state=app.readRestart();
+    assert.notEqual(state.world,world);assert.equal(state.world.level,level);assert.equal(state.world.shotsUsed,0);assert.equal(state.world.budget,level===5?42:60);assert.ok(Number.isFinite(state.world.remaining));
+    assert.deepEqual(state.world.buffs,{[choice.id]:1});assert.equal(state.world.tutorialVisible,false);assert.equal(state.world.completed,false);
+    assert.equal(state.world.mergeMade||state.world.chainState?.cleared||0,0);assert.equal(state.world.score,0);
+    assert.equal(state.scene.effects.length,0);assert.equal(state.scene.impactGhosts.length,0);
+    record=levelRecord(state.campaignProgress,level);assert.equal(record.attempts,2);assert.equal(record.rating,0);assert.equal(record.wins,0);
+  }
+});
+
+function mergeBoundaryBall(world,level,x,y,velocity={}){
+  const radius=[.55,.75,1,1.3,1.65][level-1],mass=.55**2*2**(level-1);
+  const body=world.makeBody(x,y,radius*world.unit,mass/radius**2);
+  Object.assign(body,{kind:'merge-ball',mergeLevel:level,mass,density:mass/radius**2,hp:Infinity,maxHp:Infinity,
+    active:true,solid:true,born:1,drag:1.2,mergeAt:-Infinity,mergeChain:0,vx:0,vy:0,...velocity});
+  world.enemies.push(body);return body;
+}
+function mergePressureBoundary(world,{finalMerge=false,elapsed=1}={}){
+  // A declared near-terminal state checks ordering and save/UI integration.
+  // Sixteen legal L4 radii cover 43.34% of the 14u square. The actual pair
+  // collision below leaves >42% even after producing its L5 child.
+  world.enemies=[];world.mergeElapsed=elapsed;world.elapsed=elapsed;world.time=elapsed;
+  world.mergeSpawnClock=0;const b=world.arenaBounds,u=world.unit,cx=(b.left+b.right)/2,cy=(b.top+b.bottom)/2;
+  for(let row=0;row<4;row++)for(let col=0;col<4;col++)mergeBoundaryBall(world,4,cx+(col-1.5)*2.7*u,cy+(row-1.5)*2.7*u);
+  Object.assign(world.player,{x:b.left+world.player.r+.02*u,y:b.bottom-world.player.r-.02*u,vx:0,vy:0});
+  if(finalMerge){
+    world.mergeMade=world.config.targetMax-1;
+    const [a,c]=world.enemies;c.x=a.x+a.r+c.r-.01*u;a.vx=3*u;
+  }
+  world.step(1/120);
+}
+
+test('task11 an actual last L4 merge wins before simultaneous full pressure and persists each timed rating once',()=>{
+  for(const [elapsed,rating] of [[59,3],[89,2],[100,1]]){
+    app.seedSkins();const {world,scene,g}=modernCampaignRun(5),events=observeWorldEvents(world);
+    mergePressureBoundary(world,{finalMerge:true,elapsed});scene.update(0,0);
+    assert.equal(world.mergeMade,world.config.targetMax);assert.equal(world.mergeCount,1);
+    assert.ok(world.mergeCoverage>=world.config.coverageLimit,'victory ordering is tested while pressure also reaches its loss limit');
+    assert.equal(world.completed,true);assert.equal(world.phase,'campaign-celebrate');assert.equal(world.resultRating,rating);
+    assert.equal(events.filter(event=>event.type==='campaignMerge').length,1);assertFiniteScene(g);
+    finishTask8Scene(world,scene);app.advanceUi(.82);
+    const record=levelRecord(app.readRestart().campaignProgress,5);
+    assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,rating);assert.equal(record.bestScore,world.score);
+    assert.ok(record.firstClearTime>=elapsed);assert.equal(element('#campaign-rating').attributes['aria-label'],`本关评分 ${rating} 点，共三点`);
+    assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readSkins().skins.unlocked,0);
+    assert.equal(events.filter(event=>event.type==='over').length,1);scene.update(0,0);
+    assert.equal(levelRecord(app.readRestart().campaignProgress,5).wins,1);
+  }
+});
+
+test('task11 actual pressure failures reveal a zero-rating skip only after three completed losses',()=>{
+  let {world,scene}=modernCampaignRun(5);
+  for(let attempt=1;attempt<=3;attempt++){
+    mergePressureBoundary(world);scene.update(0,0);
+    assert.equal(world.phase,'over');assert.equal(world.completed,false);assert.ok(world.mergeCoverage>=.42);
+    const record=levelRecord(app.readRestart().campaignProgress,5);
+    assert.equal(record.losses,attempt);assert.equal(record.failStreak,attempt);assert.equal(record.abandoned,0);assert.equal(record.rating,0);
+    app.advanceUi(.82);clickRestart();app.advanceUi(.65);assert.equal(element('#campaign-skip').hidden,attempt<3);
+    if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
+  }
+  clickAction('campaign-skip');const state=app.readRestart(),record=levelRecord(state.campaignProgress,5);
+  assert.equal(record.skipped,true);assert.equal(record.cleared,false);assert.equal(record.rating,0);
+  assert.equal(state.campaignProgress.completed,4);assert.equal(state.campaignProgress.unlocked,6);
+  app.advanceUi(.65);app.enterCampaign(5);assert.equal(app.readRestart().campaignOffer.level,5);clickAction('campaign-cancel');
+});
+
+function mergeClearBoundary(world){
+  // Two legal maximum-size bodies touch through the real dynamic-contact path.
+  world.enemies=[];const b=world.arenaBounds,x=(b.left+b.right)/2,y=(b.top+b.bottom)/2,r=1.65*world.unit;
+  mergeBoundaryBall(world,5,x-r+.005*world.unit,y);mergeBoundaryBall(world,5,x+r-.005*world.unit,y);
+  world.step(1/120);
+}
+
+test('task11 real maximum merges emit inward fragments once and retain 120 Hz real-time scheduling during slow motion',()=>{
+  const {world,scene,g}=modernCampaignRun(5),events=observeWorldEvents(world),tones=app.recordTones();
+  app.setFeedbackStrength(1);
+  try{
+    mergeClearBoundary(world);scene.update(0,0);const event=events.find(event=>event.type==='campaignMergeClear');
+    assert.ok(event);assert.equal(world.mergeClears,1);assert.equal(world.mergeMade,0);assert.equal(world.score,500);
+    assert.equal(events.filter(event=>event.type==='kill').length,0);assert.equal(scene.impactGhosts.length,0);
+    const fragments=scene.effects.filter(effect=>effect.type==='shard');assert.ok(fragments.length>0&&fragments.length<=10);
+    for(const fragment of fragments)assert.ok((event.x-fragment.x)*fragment.vx+(event.y-fragment.y)*fragment.vy>0,'merge fragments move into the shared centre');
+    assert.ok([660,880,1100].every(frequency=>tones.calls.some(call=>call[0]===frequency)));
+    assert.ok(scene.zoomPulse);near(world.presentationTimeScale,.3);
+    const calls=[],step=world.step;world.step=function(dt,dragging,options){calls.push({dt,scale:options.timeScale});return step.call(this,dt,dragging,options);};
+    advanceScene(scene,.05);assert.equal(calls.length,6,'slow motion still schedules six real ticks in 50 ms');
+    calls.forEach(call=>{near(call.scale,.3);near(call.dt,.3/120);});
+    assertFiniteScene(g);advanceScene(scene,.5);assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,0);
+    assert.equal(events.filter(event=>event.type==='campaignMergeClear').length,1);assert.equal(world.score,500);
+  }finally{tones.restore();app.setFeedbackStrength(.6);}
+});
+
+test('task11 reduced-motion maximum merges retain sparse inward fragments and sound without camera or slow motion',async()=>{
+  await withReloadedEntry({juice:1,expressions:false},true,fresh=>{
+    const g=graphicsRecorder(),{world,scene}=fresh.seedCampaignRenderer(g,390,844,5),events=observeWorldEvents(world),tones=fresh.recordTones();
+    fresh.setFeedbackStrength(1);
+    try{
+      mergeClearBoundary(world);scene.update(0,0);const event=events.find(event=>event.type==='campaignMergeClear');assert.ok(event);
+      const fragments=scene.effects.filter(effect=>effect.type==='shard');assert.ok(fragments.length>0&&fragments.length<=4);
+      for(const fragment of fragments)assert.ok((event.x-fragment.x)*fragment.vx+(event.y-fragment.y)*fragment.vy>0);
+      assert.equal(events.filter(event=>event.type==='kill').length,0);assert.equal(world.presentationTimeScale,1);
+      assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);assert.equal(element('#game').style.transform,'none');
+      assert.ok(tones.calls.some(call=>call[0]===880));assertFiniteScene(g);
+    }finally{tones.restore();}
+  });
+});
+
+function chainDeadlineBoundary(world){
+  // This explicit deadline fixture does not stand in for a full play route.
+  // Advance the mode clock, then clear the visible queue through mode hit hooks
+  // so the next real step tests survival at sixty seconds without a hole hit.
+  assert.equal(world.shoot(-7,0),true);world.rules.onTick(59.99);
+  world.elapsed=59.99;world.time=59.99;
+  for(const bead of [...world.chainBeads])if(bead.active!==false&&!bead.dead)
+    world.rules.onStaticHit(bead,{normalSpeed:world.baseSpeed,impactVx:0,impactVy:-world.baseSpeed,attacker:world.player});
+  world.rules.onAfterTick();assert.equal(world.chainState.liveCount,0);
+  assert.ok(world.chainState.cleared<world.config.goal,'this fixture reaches the timer route, not the removal goal');
+  world.step(.02);
+}
+
+test('task11 a sixty-second chain win at 99 unlocks 100 without awarding the final base skin before Peggle frenzy',()=>{
+  try{
+    app.seedSkins({enabled:true,sides:8,unlocked:14},98);
+    let {world,scene}=modernCampaignRun(99);const events=observeWorldEvents(world);
+    chainDeadlineBoundary(world);scene.update(0,0);assert.equal(world.completed,true);near(world.chainState.elapsed,60);
+    finishTask8Scene(world,scene);app.advanceUi(.82);let state=app.readRestart();
+    assert.equal(state.campaignProgress.completed,99);assert.equal(state.campaignProgress.unlocked,100);
+    assert.equal(levelRecord(state.campaignProgress,99).wins,1);assert.equal(levelRecord(state.campaignProgress,99).rating,1);
+    assert.equal(levelRecord(state.campaignProgress,100).cleared,false);assert.equal(levelRecord(state.campaignProgress,100).rating,0);
+    assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readSkins().skins.unlocked,14);
+    assert.equal(events.filter(event=>event.type==='over').length,1);const after99=state.campaignProgress;
+    ({world,scene}=app.seedCampaignRenderer(graphicsRecorder(),390,844,100));app.seedCampaignAttempt(after99);
+    finishCampaign(world,scene);state=app.readRestart();
+    assert.equal(state.campaignProgress.completed,100);assert.equal(state.campaignProgress.unlocked,100);
+    assert.equal(levelRecord(state.campaignProgress,100).wins,1);assert.equal(app.readSkins().skinUnlock.sides,15);
+    assert.equal(state.result,null);assert.equal(app.readSkins().skins.unlocked,15);
+    app.advanceUi(1.66);clickAction('close');app.advanceUi(.62);const completed=app.readRestart().campaignProgress;
+    ({world,scene}=app.seedCampaignRenderer(graphicsRecorder(),390,844,100));app.seedCampaignAttempt(completed);
+    finishCampaign(world,scene);assert.equal(app.readSkins().skinUnlock,null,'the final polygon is awarded only once');
+    assert.equal(app.readRestart().result?.completed,true);assert.equal(levelRecord(app.readRestart().campaignProgress,100).wins,2);
+  }finally{app.seedSkins();}
+});
+
+test('task11 merge and chain trial terminal paths never save ratings, attempts, teaching or skins',()=>{
+  for(const level of [5,99]){
+    app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:8,unlocked:8},30);
+    const progress=JSON.stringify(app.readRestart().campaignProgress),skins=JSON.stringify(app.readSkins().skins);
+    const storedProgress=saved.get('qiuqiule-campaign'),storedSkins=saved.get('qiuqiule-skins');
+    app.runCampaignTrial(level,'growth');const {world,scene}=app.readRestart();
+    if(level===5)mergePressureBoundary(world,{finalMerge:true});else chainDeadlineBoundary(world);
+    scene.update(0,0);finishTask8Scene(world,scene);assert.equal(app.readRestart().result?.completed,true);
+    assert.equal(app.readSkins().skinUnlock,null);assert.equal(JSON.stringify(app.readRestart().campaignProgress),progress);
+    assert.equal(JSON.stringify(app.readSkins().skins),skins);assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+    app.advanceUi(.82);clickRestart();const state=app.readRestart();
+    assert.notEqual(state.world,world);assert.equal(state.world.level,level);assert.equal(state.world.upgradeId,'growth');
+    assert.equal(state.world.shotsUsed,0);assert.equal(state.campaignAttemptId,null);assert.equal(app.isFeedbackDemo(),true);
+    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
+  }
+  app.seedSkins();
+});
+
+test('task11 three ordinary unattended chain losses unlock skipping while retaining a replayable zero-rating stage',()=>{
+  let {world,scene}=modernCampaignRun(9);
+  for(let attempt=1;attempt<=3;attempt++){
+    // No state fixture: an untouched chain really progresses into its hole.
+    for(let frame=0;frame<10000&&world.phase==='battle';frame++)world.step(1/120);
+    scene.update(0,0);assert.equal(world.phase,'over');assert.equal(world.completed,false);
+    assert.ok(world.chainState.headDistance>=world.chainTrack.length-1e-6);assert.equal(world.chainState.cleared,0);
+    assert.ok(world.chainState.elapsed>0&&world.chainState.elapsed<60);assert.equal(world.shotsUsed,0);
+    const record=levelRecord(app.readRestart().campaignProgress,9);
+    assert.equal(record.losses,attempt);assert.equal(record.failStreak,attempt);assert.equal(record.abandoned,0);assert.equal(record.rating,0);
+    app.advanceUi(.82);clickRestart();app.advanceUi(.65);assert.equal(element('#campaign-skip').hidden,attempt<3);
+    if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
+  }
+  clickAction('campaign-skip');const state=app.readRestart(),record=levelRecord(state.campaignProgress,9);
+  assert.equal(record.skipped,true);assert.equal(record.cleared,false);assert.equal(record.rating,0);
+  assert.equal(state.campaignProgress.completed,8);assert.equal(state.campaignProgress.unlocked,10);
+  app.advanceUi(.65);app.enterCampaign(9);assert.equal(app.readRestart().campaignOffer.level,9);clickAction('campaign-cancel');
+});
+
+function seededCampaignRun(level,upgradeId,seed){
+  const g=graphicsRecorder(),{scene}=app.seedLevelRenderer(g,390,844,level),random=Math.random;
+  try{
+    Math.random=()=> (task11Upgrades.indexOf(upgradeId)+.1)/task11Upgrades.length;app.enterCampaign(level);
+    assert.ok(app.readRestart().campaignOffer.choices.some(choice=>choice.id===upgradeId));
+    Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/2**32;};
+    clickAction('campaign-upgrade',{upgrade:upgradeId});
+  }finally{Math.random=random;}
+  app.advanceUi(.65);return {g,scene,world:app.readRestart().world};
+}
+
+test('task11 a full aimed chain run reaches its real result through scene updates and saves the earned score',()=>{
+  app.seedSkins();const {world,scene,g}=seededCampaignRun(49,'growth',737),events=observeWorldEvents(world);app.setFeedbackStrength(.6);
+  // Complete ordinary play: aim from the current player position at the
+  // moving chain head. No targets, clocks, awards or positions are altered.
+  for(let frame=0;frame<16000&&world.phase!=='over';frame++){
+    if(world.ready){
+      const target=world.chainBeads.filter(bead=>bead.active!==false&&!bead.dead).at(-1);
+      if(target){
+        const p=world.player,track=world.chainTrack,distance=Math.hypot(target.x-p.x,target.y-p.y),arrival=distance/world.baseSpeed;
+        const predicted=target.angle+world.config.advanceSpeed*world.unit*arrival/track.radius;
+        const angle=Math.atan2(track.cy+Math.sin(predicted)*track.radius-p.y,track.cx+Math.cos(predicted)*track.radius-p.x);
+        assert.equal(world.shoot(-Math.cos(angle)*world.maxPull,-Math.sin(angle)*world.maxPull),true);
+      }
+    }
+    scene.update(0,1000/120);
+  }
+  assert.equal(world.phase,'over');assert.equal(world.completed,true,JSON.stringify({state:world.chainState,shots:world.shotsUsed,upgrade:world.upgradeId}));assert.ok(world.chainState.cleared>20);
+  if(world.chainState.cleared<world.config.goal)near(world.chainState.elapsed,60);
+  assert.ok(world.shotsUsed>=5);assert.equal(events.filter(event=>event.type==='over').length,1);assertFiniteScene(g);
+  const record=levelRecord(app.readRestart().campaignProgress,49);
+  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,world.resultRating);
+  assert.equal(record.bestScore,world.score);assert.ok(record.firstClearTime>0);assert.equal(app.readSkins().skinUnlock,null);
+  assert.equal(element('#result-reason').textContent,world.resultSummary);
+});
+
+function chainCascadeBoundary(world){
+  // Arrange a declared three-cascade boundary from legal bead sizes. The
+  // separator is removed by an actual radial player collision, not a hook.
+  const pattern=[0,0,1,1,0,0,2,0,1,0,1,2];assert.equal(world.chainBeads.length,pattern.length);
+  world.chainBeads.forEach((bead,index)=>{
+    const size=pattern[index];bead.sizeIndex=size;bead.r=[.6,.85,1.1][size]*world.unit;bead.mass=(bead.r/world.unit)**2;
+  });
+  world.rules.onTick(1/120);const target=world.chainBeads[6],track=world.chainTrack;
+  assert.equal(target.active,true);assert.equal(world.shoot(-world.maxPull,0),true);
+  const nx=(target.x-track.cx)/track.radius,ny=(target.y-track.cy)/track.radius,p=world.player;
+  Object.assign(p,{x:target.x-nx*(target.r+p.r+.01*world.unit),y:target.y-ny*(target.r+p.r+.01*world.unit),
+    vx:nx*world.unit*20,vy:ny*world.unit*20,feedbackFreeze:0});
+  world.step(1/120);return target;
+}
+
+test('task11 real three-cascade audio plays separate notes, pauses in background and never leaks across restart',()=>{
+  const tones=app.recordTones(),frequencies=[1,2,3].map(level=>440*2**(level/12));
+  const notes=()=>tones.calls.filter(call=>frequencies.some(frequency=>Math.abs(call[0]-frequency)<1e-8)&&call[1]===.12&&call[3]===.035);
+  try{
+    let {world,scene}=seededCampaignRun(9,'density',733),events=observeWorldEvents(world);
+    const target=chainCascadeBoundary(world);scene.update(0,0);
+    assert.equal(target.dead,true);assert.equal(world.chainState.maxChain,3);
+    assert.deepEqual(events.filter(event=>event.type==='campaignChainMatch').map(event=>event.level),[1,2,3]);
+    assert.equal(notes().length,1,'same-frame cascade events start one note, not a chord');near(notes()[0][0],frequencies[0]);
+    advanceScene(scene,.04);assert.equal(notes().length,1);advanceScene(scene,.04);assert.equal(notes().length,2);near(notes()[1][0],frequencies[1]);
+    clickAction('pause');app.advanceUi(.42);advanceScene(scene,.2);assert.equal(notes().length,2);
+    document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();advanceScene(scene,.2);assert.equal(notes().length,2);
+    document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();clickAction('resume');app.advanceUi(.42);
+    advanceScene(scene,.08);assert.equal(notes().length,3);near(notes()[2][0],frequencies[2]);
+    ({world,scene}=seededCampaignRun(9,'density',733));chainCascadeBoundary(world);scene.update(0,0);assert.equal(notes().length,4);
+    clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
+    clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);advanceScene(scene,.3);
+    assert.equal(notes().length,4,'unplayed cascade notes are cancelled with their old run');
+  }finally{document.hidden=false;tones.restore();}
+});
+
+test('task11 a smaller physical viewport recomputes true merge pressure without settling during resize',t=>{
+  const {world,scene,g}=modernCampaignRun(5),pointer=inputCanvas();
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;});
+  window.innerWidth=390;window.innerHeight=844;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};app.mountSceneBoundary(pointer.canvas,g);
+  // A resize boundary only: fourteen legal L4 balls fit below 42% on the
+  // original board. Cross-device area changes are distinct from rotation.
+  world.enemies=[];const b=world.arenaBounds,u=world.unit,cx=(b.left+b.right)/2,cy=(b.top+b.bottom)/2;
+  for(let index=0;index<14;index++)mergeBoundaryBall(world,4,cx+(index%4-1.5)*2.7*u,cy+(Math.floor(index/4)-1.5)*2.7*u);
+  world.mergeMade=1;world.mergeElapsed=12;world.elapsed=12;world.time=12;world.rules.onAfterTick();
+  assert.ok(world.mergeCoverage<.42);const bodies=new Map(world.campaignBodies.map(body=>[body.id,{r:body.r,mass:body.mass}]));
+  window.innerWidth=320;window.innerHeight=568;resize();scene.update(0,0);
+  assert.equal(world.phase,'battle');assert.equal(app.readRestart().result,null);assert.equal(world.mergeMade,1);near(world.mergeElapsed,12);
+  assert.ok(world.mergeCoverage>.42);const area=world.enemies.reduce((sum,body)=>sum+Math.PI*body.r**2,0);
+  near(world.mergeCoverage,area/(world.arenaBounds.width*world.arenaBounds.height));
+  for(const body of world.campaignBodies){near(body.r,bodies.get(body.id).r*world.unit/u);near(body.mass,bodies.get(body.id).mass);}
+  assert.equal(levelRecord(app.readRestart().campaignProgress,5).losses,0);assertFiniteScene(g);
+  scene.update(0,1000/120);assert.equal(world.phase,'over');assert.equal(world.completed,false);
+  assert.equal(levelRecord(app.readRestart().campaignProgress,5).losses,1);
+});
+
+test('task11 a full aimed merge run creates its maximum balls through real scene physics and saves its earned result',()=>{
+  app.seedSkins();const {world,scene,g}=seededCampaignRun(5,'density',733),events=observeWorldEvents(world);app.setFeedbackStrength(.6);
+  // Ordinary play from the untouched starting layout: push the largest live
+  // body, preferring the nearest equal-level choice, with a full pull.
+  for(let frame=0;frame<24000&&world.phase!=='over';frame++){
+    if(world.ready){
+      const p=world.player,target=world.enemies.filter(body=>body.active!==false&&body.hp>0)
+        .sort((a,b)=>b.mergeLevel-a.mergeLevel||Math.hypot(a.x-p.x,a.y-p.y)-Math.hypot(b.x-p.x,b.y-p.y))[0];
+      if(target){
+        const angle=Math.atan2(target.y-p.y,target.x-p.x);
+        assert.equal(world.shoot(-Math.cos(angle)*world.maxPull,-Math.sin(angle)*world.maxPull),true);
+      }
+    }
+    scene.update(0,1000/120);
+  }
+  assert.equal(world.phase,'over');assert.equal(world.completed,true,JSON.stringify({state:world.mergeState,shots:world.shotsUsed}));
+  assert.equal(world.mergeMade,world.config.targetMax);assert.ok(world.shotsUsed>1);assert.ok(world.mergeCount>5);
+  assert.ok(events.some(event=>event.type==='campaignMerge'&&event.level===5));assert.equal(events.filter(event=>event.type==='over').length,1);
+  assert.ok(world.mergeCoverage<world.config.coverageLimit);assertFiniteScene(g);
+  const record=levelRecord(app.readRestart().campaignProgress,5);
+  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,world.resultRating);assert.equal(record.bestScore,world.score);
+  assert.ok(record.firstClearTime>=world.mergeElapsed);assert.equal(app.readSkins().skinUnlock,null);assert.equal(element('#result-reason').textContent,world.resultSummary);
 });

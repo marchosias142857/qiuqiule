@@ -5,6 +5,8 @@ const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 
 // The same map is used by the body boundary and every pixel-mesh vertex. Roll
 // belongs to the skin; impact and drag deformation stay in their world axis.
+// The final flight map stretches along velocity and compresses the perpendicular
+// axis by its reciprocal, so it does not change the deformed silhouette's area.
 export function transformSkinPoint(point,pose={}){
   const roll=pose.roll||0,rc=Math.cos(roll),rs=Math.sin(roll);
   const x=point.x*rc-point.y*rs,y=point.x*rs+point.y*rc;
@@ -18,7 +20,14 @@ export function transformSkinPoint(point,pose={}){
   const squash=pose.squash||0;
   lx*=1-squash;ly*=1+squash*.7;
   const r=pose.r??1;
-  return {x:(pose.x||0)+(lx*c-ly*s)*r,y:(pose.y||0)+(lx*s+ly*c)*r};
+  let dx=(lx*c-ly*s)*r,dy=(lx*s+ly*c)*r;
+  const stretch=clamp(pose.flightStretch||0,0,.12);
+  if(stretch){
+    const turn=pose.flightAngle||0,fc=Math.cos(turn),fs=Math.sin(turn),scale=1+stretch;
+    const along=(dx*fc+dy*fs)*scale,across=(-dx*fs+dy*fc)/scale;
+    dx=along*fc-across*fs;dy=along*fs+across*fc;
+  }
+  return {x:(pose.x||0)+dx,y:(pose.y||0)+dy};
 }
 
 export function projectSkinContour(contour,pose={}){

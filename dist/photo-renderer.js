@@ -1,5 +1,5 @@
 import {skinContour} from './skins.js';
-import {paintPhoto} from './skin-render.js';
+import {paintPhoto,projectSkinContour,contourPath} from './skin-render.js';
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const SHAPES=[0,6,7,8,9,10,11,12,13,14,15];
@@ -8,6 +8,7 @@ attribute vec2 a_point;
 attribute vec2 a_uv;
 uniform vec4 u_turn;
 uniform vec3 u_shape;
+uniform vec3 u_flight;
 varying mediump vec2 v_uv;
 void main(){
   vec2 p=vec2(a_point.x*u_turn.x-a_point.y*u_turn.y,
@@ -18,20 +19,30 @@ void main(){
   if(radius>0.000000000001){
     float front=max(0.0,local.x/radius);
     float weight=front*front*front;
+    float full=clamp((u_shape.x-0.8)/0.2,0.0,1.0);
+    float tip=full*full*(3.0-2.0*full);
     local.x+=0.95*u_shape.x*weight*(2.0-front)*radius;
-    local.y*=1.0-0.15*u_shape.x*weight;
+    local.y*=(1.0-0.15*u_shape.x*weight)*(1.0-0.03*tip*weight);
   }
   local*=vec2(1.0-u_shape.y,1.0+0.7*u_shape.y);
   p=vec2(local.x*u_turn.z-local.y*u_turn.w,
-         local.x*u_turn.w+local.y*u_turn.z)/u_shape.z;
+         local.x*u_turn.w+local.y*u_turn.z);
+  local=vec2((p.x*u_flight.x+p.y*u_flight.y)*u_flight.z,
+             (-p.x*u_flight.y+p.y*u_flight.x)/u_flight.z);
+  p=vec2(local.x*u_flight.x-local.y*u_flight.y,
+         local.x*u_flight.y+local.y*u_flight.x)/u_shape.z;
   gl_Position=vec4(p.x,-p.y,0.0,1.0);
   v_uv=a_uv;
 }`;
 const FRAGMENT=`
 precision mediump float;
 uniform sampler2D u_image;
+uniform vec4 u_base;
 varying mediump vec2 v_uv;
-void main(){gl_FragColor=texture2D(u_image,v_uv);}
+void main(){
+  vec4 photo=texture2D(u_image,v_uv);
+  gl_FragColor=photo+u_base*(1.0-photo.a);
+}
 `;
 
 /** Precompute one shared-edge fan. UVs stay in the original image space. */
@@ -62,17 +73,19 @@ export function photoMeshData(contour,reuse){
 export function photoFrame(mesh,pose,scale=1,maxPixels=1024){
   const r=Number.isFinite(pose.r)?Math.max(0,pose.r):1,squash=pose.squash||0;
   const stretch=Math.max(1.5,Math.abs(1-squash),Math.abs(1+squash*.7));
-  const halfUnit=mesh.radius*1.95*stretch+.04;
+  // Reserve the maximum flight stretch once, not a changing canvas allocation
+  // on every deceleration frame. The GPU pixel cap still applies unchanged.
+  const halfUnit=mesh.radius*1.95*stretch*1.12+.04;
   const size=Math.max(1,2*r*halfUnit);
   const pixels=Math.min(maxPixels,Math.max(32,Math.ceil(size*clamp(scale||1,1,3)/32)*32));
   return {halfUnit,size,pixels,left:(pose.x||0)-size/2,top:(pose.y||0)-size/2};
 }
 
-/** Caches image pixels and the eleven skin meshes once. Continuous deformation
+/** Caches image pixels and all eleven skin meshes once. Continuous deformation
  * is a handful of uniforms and one GPU draw, never an atlas of all drag poses. */
 export class PhotoRenderer {
-  constructor(canvas,{maxPixels=1024}={}){
-    this.canvas=canvas;this.maxPixels=clamp(maxPixels,128,2048);
+  constructor(canvas,{maxPixels=1024,prefer2d=false}={}){
+    this.prefer2d=prefer2d;this.canvas=canvas;this.maxPixels=clamp(maxPixels,128,2048);
     this.image=null;this.meshes=new Map();this.dynamic=null;
     this.gl=null;this.glAcquired=false;this.lost=false;
     this.program=null;this.texture=null;this.fallback=null;this.context2d=null;
@@ -108,6 +121,7 @@ export class PhotoRenderer {
     const height=image.naturalHeight||image.videoHeight||image.height;
     if(!(width>0&&height>0))return false;
     this.image=image;
+    if(this.prefer2d){this._activateFallback();return this.backend!=='none';}
     try{
       if(this.lost)throw new Error('Context unavailable');
       if(!this.gl){
@@ -147,7 +161,8 @@ export class PhotoRenderer {
     }
     this.locations={point:gl.getAttribLocation(this.program,'a_point'),uv:gl.getAttribLocation(this.program,'a_uv'),
       turn:gl.getUniformLocation(this.program,'u_turn'),shape:gl.getUniformLocation(this.program,'u_shape'),
-      image:gl.getUniformLocation(this.program,'u_image')};
+      flight:gl.getUniformLocation(this.program,'u_flight'),
+      image:gl.getUniformLocation(this.program,'u_image'),base:gl.getUniformLocation(this.program,'u_base')};
     this.texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,this.texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);
@@ -175,7 +190,7 @@ export class PhotoRenderer {
         this.fallback=owner.createElement('canvas');
         this.fallback.hidden=true;
         this.fallback.setAttribute?.('aria-hidden','true');
-        this.fallback.id='player-photo-fallback';
+        this.fallback.id=(this.canvas.id||'player-photo')+'-fallback';
         this.canvas.parentNode?.insertBefore(this.fallback,this.canvas.nextSibling);
       }
       surface=this.fallback;this.canvas.hidden=true;
@@ -200,7 +215,7 @@ export class PhotoRenderer {
     this.dynamic=mesh;return mesh;
   }
 
-  draw(contour,pose={}, {scale=1,clip=null}={}){
+  draw(contour,pose={}, {scale=1,clip=null,alpha=1,baseColor=null}={}){
     if(!this.image||this.backend==='none'||!(pose.r>0)){this.hide();return false;}
     const mesh=this._mesh(contour);
     if(!mesh){this.hide();return false;}
@@ -209,15 +224,18 @@ export class PhotoRenderer {
     Object.assign(style,{position:'fixed',inset:'auto',left:'0',top:'0',
       transform:`translate3d(${frame.left}px,${frame.top}px,0)`,
       width:frame.size+'px',height:frame.size+'px',pointerEvents:'none',zIndex:this.canvas.style.zIndex||'3'});
+    style.opacity=String(clamp(Number.isFinite(alpha)?alpha:1,0,1));
     style.clipPath=clip?`inset(${Math.max(0,clip.top-frame.top)}px ${Math.max(0,frame.left+frame.size-clip.right)}px ${Math.max(0,frame.top+frame.size-clip.bottom)}px ${Math.max(0,clip.left-frame.left)}px)`:'none';
     surface.hidden=false;
     const resized=surface.width!==frame.pixels||surface.height!==frame.pixels;
     if(resized){surface.width=surface.height=frame.pixels;this.lastDraw=null;}
     const roll=pose.roll||0,angle=pose.deformAngle??pose.angle??0;
     const pull=clamp(pose.pullAmount||0,0,1),squash=pose.squash||0;
+    const flightStretch=clamp(pose.flightStretch||0,0,.12),flightAngle=flightStretch?pose.flightAngle||0:0;
     const meshContour=this.backend==='2d'
       ?Math.abs(squash)>.3||pose.r>96?contour:pose.r>48?mesh.coarse96:mesh.coarse64:null;
-    const key=[mesh,frame.halfUnit,frame.pixels,roll,angle,pull,squash,meshContour?.length||0];
+    const base=Number.isFinite(baseColor)?clamp(Math.floor(baseColor),0,0xffffff):null;
+    const key=[mesh,frame.halfUnit,frame.pixels,roll,angle,pull,squash,flightStretch,flightAngle,meshContour?.length||0,base];
     if(this.lastDraw&&key.every((value,i)=>value===this.lastDraw[i]))return true;
     let drawCalls=1;
     if(this.backend==='webgl'){
@@ -228,8 +246,11 @@ export class PhotoRenderer {
       gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.disable(gl.DEPTH_TEST);gl.disable(gl.SCISSOR_TEST);
       gl.useProgram(this.program);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.texture);
       gl.uniform1i(this.locations.image,0);
+      gl.uniform4f(this.locations.base,base===null?0:(base>>16&255)/255,
+        base===null?0:(base>>8&255)/255,base===null?0:(base&255)/255,base===null?0:1);
       gl.uniform4f(this.locations.turn,Math.cos(roll),Math.sin(roll),Math.cos(angle),Math.sin(angle));
       gl.uniform3f(this.locations.shape,pull,squash,frame.halfUnit);
+      gl.uniform3f(this.locations.flight,Math.cos(flightAngle),Math.sin(flightAngle),1+flightStretch);
       gl.bindBuffer(gl.ARRAY_BUFFER,mesh.buffer);
       gl.enableVertexAttribArray(this.locations.point);gl.vertexAttribPointer(this.locations.point,2,gl.FLOAT,false,16,0);
       gl.enableVertexAttribArray(this.locations.uv);gl.vertexAttribPointer(this.locations.uv,2,gl.FLOAT,false,16,8);
@@ -240,6 +261,10 @@ export class PhotoRenderer {
       // wedges; large or strongly squashed poses retain the full fan.
       ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,frame.pixels,frame.pixels);
       ctx.setTransform(factor,0,0,factor,0,0);
+      if(base!==null){
+        ctx.fillStyle='#'+base.toString(16).padStart(6,'0');
+        contourPath(ctx,projectSkinContour(contour,{...pose,x:frame.size/2,y:frame.size/2}));ctx.fill();
+      }
       paintPhoto(ctx,this.image,contour,{...pose,x:frame.size/2,y:frame.size/2},{meshContour});
       drawCalls=pull>1e-6?meshContour.length:1;
     }
@@ -275,4 +300,41 @@ export class PhotoRenderer {
     this.clear();this.canvas.removeEventListener?.('webglcontextlost',this.onLost);
     this.canvas.removeEventListener?.('webglcontextrestored',this.onRestored);
   }
+}
+
+// Endless split shots keep two slots; campaign streams can opt into twenty.
+// Reuse canvases across shots and limit GPU contexts to two; extra slots use
+// cached 2D surfaces, so a stream cannot evict the game renderer context.
+export class AuxiliaryPhotoPool {
+  constructor(ownerDocument,{before=null,maxPixels=512,maxSlots=2}={}){
+    this.document=ownerDocument;this.before=before;this.maxPixels=maxPixels;this.maxSlots=clamp(Math.floor(maxSlots)||2,1,20);
+    this.slots=[];this.image=null;
+  }
+
+  setImage(image){
+    if(image===this.image)return;
+    this.image=image;
+    if(!image){this.release();return;}
+    for(const slot of this.slots)slot?.renderer.setImage(image);
+  }
+
+  draw(index,contour,pose,options={}){
+    if(!this.image||!Number.isInteger(index)||index<0||index>=this.maxSlots)return false;
+    let slot=this.slots[index];
+    if(!slot){
+      const canvas=this.document.createElement('canvas');
+      canvas.id='player-aux-photo-'+index;canvas.setAttribute('aria-hidden','true');
+      Object.assign(canvas.style,{position:'fixed',left:'0',top:'0',pointerEvents:'none',zIndex:'3'});
+      canvas.width=canvas.height=1;canvas.hidden=true;
+      if(this.before?.parentNode?.insertBefore)this.before.parentNode.insertBefore(canvas,this.before);
+      else this.document.body.append(canvas);
+      const renderer=new PhotoRenderer(canvas,{maxPixels:this.maxPixels,prefer2d:index>=2});renderer.setImage(this.image);
+      slot={canvas,renderer};this.slots[index]=slot;
+    }
+    return slot.renderer.draw(contour,pose,options);
+  }
+
+  hide(){for(const slot of this.slots)slot?.renderer.hide();}
+  release(){for(const slot of this.slots){slot?.renderer.dispose();slot?.canvas.remove?.();}this.slots=[];}
+  dispose(){this.image=null;this.release();}
 }

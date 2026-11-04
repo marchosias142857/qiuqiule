@@ -1,3 +1,5 @@
+import {skinOptions} from './skins.js';
+
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const IMAGE_KEY='qiuqiule-appearance';
 const isAppearanceURL=value=>typeof value==='string'&&/^data:image\/(?:png|jpeg|webp);base64,/.test(value);
@@ -64,19 +66,23 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onError=()=>{}})
   let repeatTimer=null,repeatStarted=0,crop=null,sourceURL=null,loadGeneration=0,saving=false,restoreFocus=null;
   const pointers=new Map();
   const refresh=()=>{
-    const state=getState(),unlocked=state.unlocked>=6,active=unlocked&&state.enabled;
+    const state=getState(),options=skinOptions(state),unlocked=options.length>0,active=unlocked&&state.enabled;
+    const index=options.findIndex(option=>option.sides===state.sides);
     $('skin-lock').hidden=unlocked;toggle.hidden=!unlocked;
     toggle.setAttribute('aria-checked',String(active));
     $('skin-infinity').hidden=active;$('skin-stepper').hidden=!active;
     $('skin-sides').textContent=String(state.sides);
-    minus.disabled=!active||state.sides<=6;plus.disabled=!active||state.sides>=state.unlocked;
+    $('skin-sides').setAttribute('aria-label',`${state.sides}边形，基础外形`);
+    minus.setAttribute('aria-label','上一个外形');plus.setAttribute('aria-label','下一个外形');
+    minus.disabled=!active||index<=0;plus.disabled=!active||index>=options.length-1;
     $('appearance-clear').hidden=!state.image;
   };
   const stopRepeat=()=>{clearTimeout(repeatTimer);repeatTimer=null;};
   const step=delta=>{
-    const state=getState();if(!state.enabled||state.unlocked<6)return false;
-    const next=clamp(state.sides+delta,6,state.unlocked);if(next===state.sides)return false;
-    onSides(next);refresh();return true;
+    const state=getState(),options=skinOptions(state);if(!state.enabled||!options.length)return false;
+    const index=options.findIndex(option=>option.sides===state.sides);
+    const next=clamp(index+delta,0,options.length-1);if(next===index)return false;
+    onSides(options[next]);refresh();return true;
   };
   for(const [button,delta] of [[minus,-1],[plus,1]]){
     button.addEventListener('pointerdown',event=>{

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PhotoRenderer,photoMeshData,photoFrame} from '../dist/photo-renderer.js';
+import {PhotoRenderer,AuxiliaryPhotoPool,photoMeshData,photoFrame} from '../dist/photo-renderer.js';
 import {skinContour,morphSkinContour} from '../dist/skins.js';
 import {transformSkinPoint} from '../dist/skin-render.js';
 
@@ -37,7 +37,7 @@ function graphics(){
 function context2d(){
   const calls=[],ctx={calls,globalAlpha:1};
   for(const name of ['setTransform','clearRect','save','restore','beginPath','closePath','moveTo',
-    'lineTo','clip','transform','drawImage'])ctx[name]=(...args)=>calls.push([name,...args]);
+    'lineTo','clip','transform','drawImage','fill'])ctx[name]=(...args)=>calls.push([name,...args]);
   return ctx;
 }
 
@@ -109,6 +109,128 @@ test('image upload and eleven prewarmed meshes are reused across movement and de
   assert.equal(gl.calls.filter(c=>c[0]==='drawArrays').length,renderer.stats.drawCalls);
   assert.ok(gl.calls.filter(c=>c[0]==='drawArrays').every(c=>c[1]==='TRIANGLE_FAN'&&c[3]===194));
   renderer.setImage(photo);assert.equal(renderer.stats.textureUploads,1);
+});
+
+test('flight uniforms invalidate only the retained raster and never upload image or mesh again',()=>{
+  const gl=graphics(),canvas=surface(gl),renderer=new PhotoRenderer(canvas);renderer.setImage(photo);
+  const contour=skinContour(7);
+  renderer.draw(contour,pose);
+  const size=canvas.width,initial=renderer.stats;
+  assert.deepEqual(gl.calls.findLast(c=>c[0]==='uniform3f'&&c[1]==='u_flight'),['uniform3f','u_flight',1,0,1]);
+  renderer.draw(contour,{...pose,flightStretch:.12,flightAngle:Math.PI/2});
+  const uniform=gl.calls.findLast(c=>c[0]==='uniform3f'&&c[1]==='u_flight');
+  near(uniform[2],0);near(uniform[3],1);near(uniform[4],1.12);
+  assert.equal(renderer.stats.frames,initial.frames+1);
+  assert.equal(canvas.width,size,'changing flight stretch must not resize the photo canvas');
+  renderer.draw(contour,{...pose,flightStretch:.12,flightAngle:Math.PI/2,x:400,y:500});
+  assert.equal(renderer.stats.frames,initial.frames+1,'pure translation reuses the stretched raster');
+  renderer.draw(contour,{...pose,flightStretch:.06,flightAngle:Math.PI/2});
+  renderer.draw(contour,{...pose,flightStretch:.06,flightAngle:-.6});
+  assert.equal(renderer.stats.frames,initial.frames+3,'both velocity magnitude and direction redraw');
+  assert.equal(renderer.stats.textureUploads,initial.textureUploads);
+  assert.equal(renderer.stats.meshUploads,initial.meshUploads);
+  assert.equal(gl.calls.filter(c=>c[0]==='texImage2D').length,1);
+});
+
+test('the circle and all campaign skins use prewarmed meshes and retain one transient morph buffer',()=>{
+  const gl=graphics(),renderer=new PhotoRenderer(surface(gl));renderer.setImage(photo);
+  const initial=renderer.stats;
+  for(const sides of [0,6,7,8,9,10,11,12,13,14,15])for(let i=0;i<8;i++)
+    renderer.draw(skinContour(sides),{...pose,roll:i*.1,pullAmount:i/8});
+  assert.equal(renderer.stats.textureUploads,1);
+  assert.equal(renderer.stats.meshUploads,initial.meshUploads);
+  assert.equal(renderer.stats.cachedMeshes,11);assert.equal(renderer.stats.transientMeshes,0);
+  for(let i=1;i<20;i++)renderer.draw(morphSkinContour(7,8,i/20),pose);
+  assert.equal(renderer.stats.transientMeshes,1);assert.equal(gl.buffers.size,12);
+  renderer.clear();assert.equal(gl.buffers.size,0);assert.equal(gl.textures.size,0);
+  const fallback=new PhotoRenderer(surface(null));fallback.setImage(photo);
+  assert.equal(fallback.stats.cachedMeshes,11);
+  for(const sides of [0,6,7,8,9,10,11,12,13,14,15])fallback.draw(skinContour(sides),{...pose,pullAmount:.8});
+  assert.equal(fallback.stats.transientMeshes,0);
+});
+
+test('photo base color and opacity update both backends without reuploading pixels or geometry',()=>{
+  const gl=graphics(),canvas=surface(gl),renderer=new PhotoRenderer(canvas);renderer.setImage(photo);
+  const contour=skinContour(6);
+  renderer.draw(contour,pose);
+  assert.deepEqual(gl.calls.findLast(call=>call[0]==='uniform4f'&&call[1]==='u_base'),['uniform4f','u_base',0,0,0,0]);
+  renderer.draw(contour,pose,{baseColor:0x336699,alpha:.4});
+  assert.deepEqual(gl.calls.findLast(call=>call[0]==='uniform4f'&&call[1]==='u_base'),['uniform4f','u_base',.2,.4,.6,1]);
+  assert.equal(canvas.style.opacity,'0.4');
+  const before=renderer.stats;
+  renderer.draw(contour,pose,{baseColor:0x336699,alpha:.1});
+  assert.equal(canvas.style.opacity,'0.1');assert.equal(renderer.stats.frames,before.frames,'fade uses composition, not rerasterization');
+  renderer.draw(contour,pose,{baseColor:0x669933});
+  assert.equal(renderer.stats.frames,before.frames+1);assert.equal(renderer.stats.textureUploads,1);assert.equal(renderer.stats.meshUploads,11);
+  const fallbackCanvas=surface(null),fallback=new PhotoRenderer(fallbackCanvas);fallback.setImage(photo);
+  fallback.draw(contour,pose,{baseColor:0x336699,alpha:.4});
+  assert.equal(fallbackCanvas.style.opacity,'0.4');assert.equal(fallbackCanvas.ctx.fillStyle,'#336699');
+  const fill=fallbackCanvas.ctx.calls.findIndex(call=>call[0]==='fill'),image=fallbackCanvas.ctx.calls.findIndex(call=>call[0]==='drawImage');
+  assert.ok(fill>=0&&fill<image,'the opaque player base is below the image inside its own canvas');
+  assert.equal(fallbackCanvas.ctx.calls.filter(call=>call[0]==='lineTo').length,contour.length*2-2,'base and photo clip share the full contour');
+});
+
+test('two companion photo slots are lazy, ordered before the main photo and reused across motion and shots',()=>{
+  const canvases=[],order=[],main={parentNode:{insertBefore(canvas,before){assert.equal(before,main);order.push(canvas);}}};
+  const owner={createElement(){const gl=graphics(),canvas=surface(gl);canvas.testGl=gl;canvases.push(canvas);return canvas;},body:{append(){assert.fail('companions must be below the main canvas');}}};
+  const pool=new AuxiliaryPhotoPool(owner,{before:main,maxPixels:512});pool.setImage(photo);
+  assert.equal(canvases.length,0);assert.equal(pool.draw(2,skinContour(0),pose),false);
+  const contour=skinContour(8);
+  for(const index of [0,1])pool.draw(index,contour,{...pose,r:26},{scale:3,baseColor:0x252720});
+  assert.equal(canvases.length,2);assert.deepEqual(order,canvases);
+  assert.deepEqual(canvases.map(canvas=>canvas.id),['player-aux-photo-0','player-aux-photo-1']);
+  for(let shot=0;shot<5;shot++)for(let frame=0;frame<12;frame++){
+    pool.hide();
+    for(const index of [0,1])pool.draw(index,contour,{...pose,r:26,x:frame*20+index*40,roll:frame*.2,flightStretch:.1},{scale:3,baseColor:0x252720});
+  }
+  assert.equal(canvases.length,2);
+  for(const slot of pool.slots){
+    assert.equal(slot.renderer.stats.textureUploads,1);assert.equal(slot.renderer.stats.meshUploads,11);
+    assert.ok(slot.canvas.width<=512&&slot.canvas.height<=512);assert.equal(slot.canvas.hidden,false);
+  }
+  pool.hide();assert.ok(canvases.every(canvas=>canvas.hidden));
+  const replacement={width:128,height:128};pool.setImage(replacement);
+  assert.ok(pool.slots.every(slot=>slot.renderer.image===replacement&&slot.renderer.stats.textureUploads===2));
+  pool.setImage(null);
+  assert.equal(pool.slots.length,0);assert.equal(pool.draw(0,contour,pose),false);
+  for(const canvas of canvases){assert.equal(canvas.removed,true);assert.equal(canvas.testGl.textures.size,0);assert.equal(canvas.testGl.buffers.size,0);assert.equal(canvas.events.size,0);}
+});
+
+test('a lost companion context has a unique fallback and deleting the photo prevents restoration',()=>{
+  const canvases=[],owner={createElement(){const canvas=surface(graphics());canvases.push(canvas);return canvas;},body:{append(){}}};
+  const pool=new AuxiliaryPhotoPool(owner);pool.setImage(photo);
+  pool.draw(0,skinContour(6),pose,{baseColor:0x252720});pool.draw(1,skinContour(6),pose,{baseColor:0x252720});
+  const renderer=pool.slots[1].renderer;
+  canvases[1].events.get('webglcontextlost')({preventDefault(){}});
+  assert.equal(renderer.fallback.id,'player-aux-photo-1-fallback');
+  pool.draw(1,skinContour(6),pose,{baseColor:0x252720});assert.equal(renderer.backend,'2d');
+  const fallback=renderer.fallback;
+  pool.setImage(null);assert.equal(fallback.removed,true);assert.equal(renderer.image,null);
+  renderer.onRestored();assert.equal(renderer.backend,'none');assert.equal(renderer.stats.textureUploads,1);
+});
+
+test('flight reserve contains rotated full-charge silhouettes and the fallback cache follows velocity',()=>{
+  for(const sides of [0,6,15]){
+    const contour=skinContour(sides),mesh=photoMeshData(contour),baseline=photoFrame(mesh,pose,3);
+    for(const flightStretch of [0,.06,.12])for(const flightAngle of [0,1.3,-2.2]){
+      const p={...pose,pullAmount:1,squash:-.25,roll:.7,deformAngle:-.8,flightStretch,flightAngle};
+      const frame=photoFrame(mesh,p,3);
+      assert.equal(frame.pixels,baseline.pixels);assert.equal(frame.size,baseline.size);
+      for(const point of contour){
+        const projected=transformSkinPoint(point,p);
+        assert.ok(projected.x>frame.left&&projected.x<frame.left+frame.size);
+        assert.ok(projected.y>frame.top&&projected.y<frame.top+frame.size);
+      }
+    }
+  }
+  const canvas=surface(null),renderer=new PhotoRenderer(canvas);renderer.setImage(photo);
+  const contour=skinContour(0);
+  renderer.draw(contour,{...pose,flightStretch:.1,flightAngle:.2});
+  renderer.draw(contour,{...pose,flightStretch:.1,flightAngle:.2,x:500});
+  assert.equal(renderer.stats.drawCalls,1);
+  renderer.draw(contour,{...pose,flightStretch:.1,flightAngle:.3});
+  assert.equal(renderer.stats.drawCalls,2);
+  assert.equal(canvas.ctx.calls.filter(c=>c[0]==='drawImage').length,2,'flight preserves the affine fallback fast path');
 });
 
 test('morphs reuse one dynamic GPU buffer instead of accumulating transient frames',()=>{
@@ -195,4 +317,22 @@ test('fallback sampling changes at radius thresholds even within the same backin
     renderer.draw(contour,{...pose,r:after,pullAmount:.8,x:pose.x+20});
     assert.equal(renderer.stats.drawCalls-start,firstCount+nextCount,'position-only movement still reuses the selected sampling tier');
   }
+});
+
+test('campaign photos support twenty reusable small balls without opening twenty GPU contexts',()=>{
+  const canvases=[],owner={createElement(){const canvas=surface(graphics());canvases.push(canvas);return canvas;},body:{append(){}}};
+  const pool=new AuxiliaryPhotoPool(owner,{maxSlots:20,maxPixels:512});pool.setImage(photo);
+  const contour=skinContour(15);
+  for(let index=0;index<20;index++)assert.equal(pool.draw(index,contour,{...pose,r:12,x:index*20},{scale:3,baseColor:0x252720,alpha:.7}),true);
+  assert.equal(canvases.length,20);assert.equal(pool.draw(20,contour,pose),false);
+  assert.equal(pool.slots.filter(s=>s.renderer.backend==='webgl').length,2);
+  assert.equal(pool.slots.filter(s=>s.renderer.backend==='2d').length,18);
+  for(const slot of pool.slots){assert.ok(slot.canvas.width<=512);assert.equal(slot.canvas.style.opacity,'0.7');}
+  const counts=pool.slots.map(s=>s.renderer.stats.frames);
+  pool.hide();
+  for(let index=0;index<20;index++)pool.draw(index,contour,{...pose,r:12,x:index*20+5},{scale:3,baseColor:0x252720,alpha:.3});
+  assert.equal(canvases.length,20);assert.deepEqual(pool.slots.map(s=>s.renderer.stats.frames),counts,'motion/return fade reuses the raster');
+  const replacement={width:256,height:256};pool.setImage(replacement);
+  assert.ok(pool.slots.every(s=>s.renderer.image===replacement));
+  pool.dispose();assert.equal(pool.slots.length,0);assert.ok(canvases.every(c=>c.removed&&c.events.size===0));
 });

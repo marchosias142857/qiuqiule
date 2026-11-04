@@ -1,0 +1,72 @@
+{
+  "target_version": "5.2.1",
+  "status": "implemented_user_selected_A",
+  "selected_font": {
+    "option": "A",
+    "name": "寒蝉全圆体",
+    "release": "v3.200",
+    "weight": "Regular",
+    "asset": "dist/fonts/qiuqiule-ui.woff2",
+    "selection": "User replied A after reviewing actual font samples."
+  },
+  "buff_change": "Newly acquired density/energy: base .35/.30 + floor((stage-1)/5)*.15; existing stacks unchanged. 83 focused tests pass.",
+  "font_scope": "Every displayed text including score, level numbers, buff labels, menus and unlock heading uses the selected font. Original 球球了 SVG logo preserved.",
+  "implementation_notes": [
+    "Subset font bundled with OFL; metadata in docs/font-subset.json.",
+    "DOM, SVG, Canvas and Phaser use GameSans, Regular. Boot waits for the bundled face.",
+    "Buff polygon icons use SVG to avoid unsupported icon glyphs.",
+    "Unlock title uses actual font glyphs; reward ball midpoint recomputed from text ink bounds."
+  ],
+  "preview_comparison_library_file_id": "libfile_c36752a8458c8191bd1dcf22ed327f4e",
+  "candidates": [
+    {
+      "name": "寒蝉全圆体",
+      "file": "ChillRoundF-v3.200.ttf",
+      "weight": "Regular",
+      "source": "https://github.com/Warren2060/ChillRound",
+      "download": "https://github.com/Warren2060/ChillRound/releases/download/v3.200/ChillRoundF_v3.200.zip",
+      "license": "ChillRound-OFL.txt",
+      "notes": "圆润轻巧，最贴近圆球几何和极简界面。",
+      "option": "A",
+      "preview_library_file_id": "libfile_19e21297e9b48191a78e2d0a00501071",
+      "sha256": "7ccfc2cd0e971edeac7f65516df8db379f0f84d0d8ff79ee4dfe377956418d3b"
+    },
+    {
+      "name": "寒蝉圆黑体",
+      "file": "ChillRoundGothic_Medium.otf",
+      "alternate": "ChillRoundGothic_Medium.otf",
+      "weight": "Medium",
+      "source": "https://github.com/Warren2060/ChillRoundGothic",
+      "download": "https://github.com/Warren2060/ChillRoundGothic/releases/download/v3.750/ChillRoundGothic.v3.75.zip",
+      "license": "License.txt",
+      "notes": "思源黑体结构的圆角版，正文和小字号最稳。",
+      "option": "B",
+      "preview_library_file_id": "libfile_7733bdcd4d108191a774b1ccf0b41cf8",
+      "sha256": "401edab0771f03bd9a5fcdb51d9850c08ac2417c9dacc7843ac4dc6342838253"
+    },
+    {
+      "name": "猫啃什锦黑",
+      "file": "MaokenAssortedSans.ttf",
+      "weight": "Regular",
+      "source": "https://github.com/maoken-fonts/MaokenAssortedSans",
+      "download": "https://github.com/maoken-fonts/MaokenAssortedSans/releases/download/v1.70/MaokenAssortedSans.ttf",
+      "license": "MaokenAssortedSans-OFL.txt",
+      "notes": "马克笔手绘感，活泼明显，长说明文需验读。",
+      "option": "C",
+      "preview_library_file_id": "libfile_4f37593cc0fc819187928a4ad8138c90",
+      "sha256": "29b4fea4dfaf50be4b9ede602cc713eca1e411e0b498b74e8ea41f2c68f6fb90"
+    },
+    {
+      "name": "小赖字体",
+      "file": "Xiaolai-Regular.ttf",
+      "weight": "Regular",
+      "source": "https://github.com/lxgw/kose-font",
+      "download": "https://github.com/lxgw/kose-font/releases/download/v3.126/Xiaolai-Regular.ttf",
+      "license": "Xiaolai-OFL.txt",
+      "notes": "自然圆润手写，轻松亲切。",
+      "option": "D",
+      "preview_library_file_id": "libfile_9c8ca677ffb48191b22def3e6cab4e6e",
+      "sha256": "e2f68daf0e72777a8cf58bc83de1b98634b251e537ddbfca24b0ae50d1802da2"
+    }
+  ]
+}

@@ -7,6 +7,28 @@ import {transformSkinPoint,projectSkinContour,photoMesh,expandTriangleClip,paint
 const near=(a,b,tolerance=1e-8)=>assert.ok(Math.abs(a-b)<tolerance,`${a} != ${b}`);
 const circle=Array.from({length:192},(_,i)=>({x:Math.cos(i/192*Math.PI*2),y:Math.sin(i/192*Math.PI*2)}));
 
+test('flight stretch lengthens along velocity and preserves area at every heading',()=>{
+  const area=points=>Math.abs(points.reduce((sum,p,i)=>{
+    const q=points[(i+1)%points.length];return sum+p.x*q.y-p.y*q.x;
+  },0)/2);
+  const base={x:203,y:97,r:29,roll:.53,pullAmount:.9,deformAngle:1.1,squash:.18};
+  const baseline=projectSkinContour(circle,base),before=area(baseline);
+  for(const flightAngle of [0,.4,Math.PI/2,2.7])for(const flightStretch of [.01,.06,.12]){
+    const p={...base,flightAngle,flightStretch},after=projectSkinContour(circle,p);
+    near(area(after),before,1e-8);
+    for(let i=0;i<baseline.length;i++){
+      const c=Math.cos(flightAngle),s=Math.sin(flightAngle);
+      const a={x:baseline[i].x-base.x,y:baseline[i].y-base.y};
+      const b={x:after[i].x-base.x,y:after[i].y-base.y};
+      near(b.x*c+b.y*s,(a.x*c+a.y*s)*(1+flightStretch));
+      near(-b.x*s+b.y*c,(-a.x*s+a.y*c)/(1+flightStretch));
+    }
+  }
+  assert.deepEqual(projectSkinContour(circle,{...base,flightStretch:0,flightAngle:2.1}),baseline);
+  assert.deepEqual(projectSkinContour(circle,{...base,flightStretch:-.1}),baseline);
+  assert.deepEqual(projectSkinContour(circle,{...base,flightStretch:2}),projectSkinContour(circle,{...base,flightStretch:.12}));
+});
+
 test('circle deformation is the existing pull map in every direction and size',()=>{
   for(const angle of [-2.7,0,.6,2.2])for(const amount of [0,.3,1])for(const t of [-2,-.3,0,1.4]){
     const pose={x:120,y:230,r:37,deformAngle:angle,pullAmount:amount,squash:0};
@@ -29,7 +51,7 @@ test('photo interior follows drag instead of leaving the image fixed under a mas
 });
 
 test('photo mesh and skin contour share every edge and remain continuous at all seams',()=>{
-  const pose={x:200,y:140,r:58,pullAmount:.8,deformAngle:2.1,roll:.7,squash:-.12};
+  const pose={x:200,y:140,r:58,pullAmount:.8,deformAngle:2.1,roll:.7,squash:-.12,flightStretch:.12,flightAngle:-.6};
   const contour=circle.map(p=>({x:p.x*1.05,y:p.y*.95}));
   const boundary=projectSkinContour(contour,pose),mesh=photoMesh(contour,pose);
   assert.equal(mesh.length,contour.length);
@@ -116,6 +138,19 @@ test('photo painting accepts DPR transforms, uses an affine fast path and reject
   const pulled=mockContext();paintPhoto(pulled,image,circle,{x:70,y:80,r:35,pullAmount:.8});
   assert.ok(pulled.calls.filter(c=>c[0]==='drawImage').length>1);
   assert.equal(pulled.calls.filter(c=>c[0]==='save').length,pulled.calls.filter(c=>c[0]==='restore').length);
+});
+
+test('flight deformation keeps the Canvas photo affine path aligned to the exact contour',()=>{
+  const ctx=mockContext(),pose={x:70,y:80,r:35,roll:.3,squash:.1,flightStretch:.12,flightAngle:1.4};
+  paintPhoto(ctx,{width:512,height:512},circle,pose);
+  const [name,a,b,c,d,e,f]=ctx.calls.find(call=>call[0]==='transform');
+  assert.equal(name,'transform');
+  assert.equal(ctx.calls.filter(call=>call[0]==='drawImage').length,1,'flight alone must retain the one-draw fast path');
+  near(a*d-b*c,pose.r**2*(1-pose.squash)*(1+.7*pose.squash));
+  for(const point of circle){
+    const exact=transformSkinPoint(point,pose);
+    near(a*point.x+c*point.y+e,exact.x);near(b*point.x+d*point.y+f,exact.y);
+  }
 });
 
 test('radiance stays centred on the player and can be generated once for a sprite',()=>{
