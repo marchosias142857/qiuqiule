@@ -1035,7 +1035,7 @@ function drawDragGuide(g,p){
   if(screen==='play'&&world.mode==='campaign'&&world.config?.implemented&&!world.isCampaignOffer){
     drawCampaignAim(g,world,drag,{player:p,color});
   }else if(screen==='play'&&world.continuousControl){
-    const guide=aimGuide({player:p,drag,maxPull:world.maxPull,unit:world.unit});
+    const guide=aimGuide({player:p,drag,maxPull:world.maxPull});
     for(const point of guide.points){g.fillStyle(color,point.alpha);g.fillCircle(point.x,point.y,point.r);}
     if(guide.arrow){const a=guide.arrow;g.lineStyle(a.width,color,a.alpha);g.beginPath();g.moveTo(a.left.x,a.left.y);g.lineTo(a.tip.x,a.tip.y);g.lineTo(a.right.x,a.right.y);g.strokePath();}
   }else{
@@ -2261,7 +2261,7 @@ function startUpgradeDemo(kind){
 function exportAimStatistics(){
   const link=document.createElement('a');
   link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(aimStatistics(),null,2));
-  link.download='qiuqiule-aim-v7.8.0.json';
+  link.download='qiuqiule-aim-v7.8.1.json';
   document.body.append(link);link.click();link.remove();
 }
 
@@ -2311,7 +2311,7 @@ document.addEventListener('click',e=>{
   if(action==='settings')openSettings();
   if(action==='help')openHelp();
   if(action==='export-aim')exportAimStatistics();
-  if(action==='export-campaign'){const link=document.createElement('a');link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(campaignProgress,null,2));link.download='qiuqiule-campaign-v7.8.0.json';document.body.append(link);link.click();link.remove();}
+  if(action==='export-campaign'){const link=document.createElement('a');link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(campaignProgress,null,2));link.download='qiuqiule-campaign-v7.8.1.json';document.body.append(link);link.click();link.remove();}
   if(action==='sound'){settings.sound=!settings.sound;applyTheme();}
   if(action==='haptic'){settings.haptic=!settings.haptic;applyTheme();vibrate(10);}
   if(action==='expressions'){settings.expressions=!settings.expressions;applyTheme();}

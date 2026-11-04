@@ -21,22 +21,14 @@ test('low-speed guide retains seven points, original spacing, fade and launch ar
   assert.equal(arrow.width,1.4);assert.equal(arrow.alpha,.35);
 });
 
-test('only speeds above twenty units redirect and fade the first three points',()=>{
-  for(const speed of [0,399.999,400]){
-    const result=guide({player:{...player,vx:speed,vy:0}});
-    assert.ok(result.points.every(p=>p.direction==='aim'));
+test('speed and current travel direction never split the guide or change its fade',()=>{
+  const stationary=guide();
+  for(const units of [0,19.999,20,20.001,40,80]){
+    for(const [vx,vy] of [[1,0],[0,-1],[-.6,.8]]){
+      const moving=guide({player:Object.freeze({...player,vx:vx*units*20,vy:vy*units*20})});
+      assert.deepEqual(moving,stationary,`${units} units/s must retain the complete launch guide`);
+    }
   }
-  const slow=guide(),fast=guide({player:{...player,vx:300,vy:400.1}});
-  const speed=Math.hypot(300,400.1);
-  for(let index=0;index<7;index++){
-    const point=fast.points[index];
-    if(index<3){
-      const distance=player.r+12+(index+1)*16;
-      near(point.x,player.x+300/speed*distance);near(point.y,player.y+400.1/speed*distance);
-      near(point.alpha,slow.points[index].alpha*.45);assert.equal(point.direction,'velocity');
-    }else assert.deepEqual(point,slow.points[index]);
-  }
-  assert.deepEqual(fast.arrow,slow.arrow,'momentum never turns the actual launch arrow');
 });
 
 test('guide handles short drags, power cap, arbitrary headings and never mutates inputs',()=>{

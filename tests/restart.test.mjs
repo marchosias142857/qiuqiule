@@ -2041,7 +2041,7 @@ test('the settings export action downloads the bounded local aim report without 
   document.body={append:node=>appended.push(node)};
   t.after(()=>{document.createElement=originalCreate;if(originalBody===undefined)delete document.body;else document.body=originalBody;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
   clickAction('export-aim');assert.equal(created.length,1);assert.deepEqual(appended,created);
-  const link=created[0];assert.equal(link.clicked,true);assert.equal(link.removed,true);assert.equal(link.download,'qiuqiule-aim-v7.8.0.json');
+  const link=created[0];assert.equal(link.clicked,true);assert.equal(link.removed,true);assert.equal(link.download,'qiuqiule-aim-v7.8.1.json');
   assert.match(link.href,/^data:application\/json;charset=utf-8,/);
   const report=JSON.parse(decodeURIComponent(link.href.slice(link.href.indexOf(',')+1)));
   assert.equal(report.sampleCount,30);assert.equal(report.medianSeconds,1.05);assert.equal(report.nextHoldSeconds,.9);assert.equal(report.currentRunHoldSeconds,1.2);
@@ -2113,25 +2113,38 @@ test('archived campaign retains its readiness gate, captured-speed shot and full
   near(p.vx,0);near(p.vy,-launch-carried);app.setFeedbackStrength(.6);
 });
 
-test('the actual endless guide keeps seven points and splits only its first three above twenty units per second',()=>{
-  for(const mode of ['endless'])for(const units of [20,20.01]){
-    const g=graphicsRecorder(),{world,scene}=mode==='campaign'?app.seedCampaignRenderer(g):app.seedRenderer(g,390,844,true);
-    const pointer=inputCanvas(),p=world.player;world.enemies=[];world.spawnTimer=Infinity;app.setFeedbackStrength(1);
-    pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x,p.y+world.maxPull);
-    p.vx=units*world.unit;p.vy=0;scene.update(0,0);
-    const dots=g.shapes.filter(shape=>shape.type==='circle'&&shape.r===1.7);
-    assert.equal(dots.length,7);
-    for(let index=0;index<7;index++){
-      const dot=dots[index],velocity=mode==='endless'&&units>20&&index<3;
-      if(velocity){assert.ok(dot.x>p.x);near(dot.y,p.y);}
-      else{near(dot.x,p.x);assert.ok(dot.y<p.y);}
-      near(dot.alpha,.36*(1-(index+1)/9)*(velocity?.45:1));
+test('endless battle and Boss guides turn all seven dots with rapid input at every travel speed',t=>{
+  t.after(()=>app.setFeedbackStrength(.6));
+  const turns=[[0,1],[1,0],[-1,0],[0,-1],[-.6,.8]];
+  for(const phase of ['battle','boss'])for(const units of [0,19.999,20,20.001,40]){
+    const {g,world,scene,pointer}=controlRun(),p=world.player;
+    if(phase==='boss'){world.stage=5;world.beginBoss();world.phase='boss';world.events=[];}
+    p.vx=units*world.unit;p.vy=0;
+    const start={x:p.x,y:p.y},incoming={vx:p.vx,vy:p.vy};
+    pointer('pointerdown',start.x,start.y,{timeStamp:1000});
+    for(const [turn,[dx,dy]] of turns.entries()){
+      pointer('pointermove',start.x+dx*world.maxPull,start.y+dy*world.maxPull,{timeStamp:1004+turn*4});
+      scene.update(0,0);
+      const dots=g.shapes.filter(shape=>shape.type==='circle'&&shape.r===1.7);
+      assert.equal(dots.length,7,`${phase} at ${units} units/s, turn ${turn}`);
+      for(const [index,dot] of dots.entries()){
+        const distance=p.r+12+(index+1)*16;
+        near(dot.x,p.x-dx*distance);near(dot.y,p.y-dy*distance);
+        near(dot.alpha,.36*(1-(index+1)/9));
+      }
+      const arrow=g.shapes.find(shape=>shape.type==='stroke'&&shape.width===1.4);
+      assert.ok(arrow);near(arrow.points[1].x,dots[6].x);near(arrow.points[1].y,dots[6].y);
+      const base={x:(arrow.points[0].x+arrow.points[2].x)/2,y:(arrow.points[0].y+arrow.points[2].y)/2};
+      near(arrow.points[1].x-base.x,-dx*6);near(arrow.points[1].y-base.y,-dy*6);
+      near(p.vx,incoming.vx);near(p.vy,incoming.vy,'aiming must not redirect the moving ball before release');
     }
-    const arrow=g.shapes.find(shape=>shape.type==='stroke'&&shape.width===1.4);
-    assert.ok(arrow);near(arrow.points[1].x,p.x);assert.ok(arrow.points[1].y<p.y,'the arrow always points in the new launch direction');
-    pointer('pointercancel');
+    const [dx,dy]=turns.at(-1);
+    pointer('pointerup',start.x+dx*world.maxPull,start.y+dy*world.maxPull,{timeStamp:1024});
+    const speed=Math.hypot(p.vx,p.vy);
+    assert.ok(speed>0);near(p.vx/speed,-dx);near(p.vy/speed,-dy,'release follows the entire displayed guide');
+    assert.equal(world.events.filter(e=>e.type==='shoot').length,1);
+    assert.equal(app.readRestart().drag,null);
   }
-  app.setFeedbackStrength(.6);
 });
 
 test('slow aim expires across a stalled frame while simulation keeps its bounded real-time tick',()=>{

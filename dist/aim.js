@@ -6,21 +6,18 @@ export const AIM_RECOVERY_SECONDS=.5;
 export const aimMinimumScale=(reducedMotion=false)=>reducedMotion?.6:.3;
 
 // Geometry only: callers decide which modes use the moving-ball guide.
-// All seven points retain the established spacing and fade. At high speed the
-// first three describe current travel; the arrow always describes the launch.
-export function aimGuide({player,drag,maxPull,unit,baseAlpha=.36}){
+// Every point and the arrow describe the next launch, including while the ball
+// is moving quickly in a different direction. Keep one continuous guide.
+export function aimGuide({player,drag,maxPull,baseAlpha=.36}){
   const dx=drag?.dx||0,dy=drag?.dy||0,distance=Math.hypot(dx,dy);
   if(!player||!Number.isFinite(distance)||distance<=3)return {points:[],arrow:null};
   const power=clamp(distance/Math.max(1,finite(maxPull,90)),0,1);
   const nx=-dx/distance,ny=-dy/distance;
-  const speed=Math.hypot(player.vx||0,player.vy||0);
-  const fast=speed>20*Math.max(1e-6,finite(unit,1));
-  const vx=fast?player.vx/speed:0,vy=fast?player.vy/speed:0;
   const alpha=clamp(finite(baseAlpha,.36),0,1);
   const points=Array.from({length:7},(_,index)=>{
-    const i=index+1,d=player.r+12+i*(8+power*8),velocity=fast&&i<=3;
-    return {x:player.x+(velocity?vx:nx)*d,y:player.y+(velocity?vy:ny)*d,
-      r:1.7,alpha:alpha*(1-i/9)*(velocity?.45:1),direction:velocity?'velocity':'aim'};
+    const i=index+1,d=player.r+12+i*(8+power*8);
+    return {x:player.x+nx*d,y:player.y+ny*d,
+      r:1.7,alpha:alpha*(1-i/9),direction:'aim'};
   });
   const tip={x:points[6].x,y:points[6].y};
   return {points,arrow:{tip,
