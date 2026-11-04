@@ -127,7 +127,7 @@ test('checker cells are visibly distinct without adding decorative shapes or ext
 test('permanent rounded rectangular obstacles retain finite visible geometry with infinite HP',()=>{
   const world=base();world.statics=[{shape:'rect',kind:'obstacle',x:100,y:80,width:44,height:24,cornerRadius:4,hp:Infinity,maxHp:Infinity}];
   const g=recorder();drawCampaign(g,world);
-  assert.equal(g.shapes.length,1);near(g.shapes[0].alpha,.9);
+  assert.equal(g.shapes.length,1);near(g.shapes[0].alpha,.85);assert.equal(g.shapes[0].type,'stroke');
   for(const point of g.shapes[0].points)assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y));
   near(bounds(g.shapes[0]).right-bounds(g.shapes[0]).left,44);
 });
@@ -147,7 +147,7 @@ test('target and ordinary pegs stay solid-looking or outlined respectively, and 
 test('moving bucket is a background-filled open slot at the real floor and follows its zone horizontally',()=>{
   const world=base();world.zones=[{kind:'bucket',shape:'rect',x:90,y:355,width:44,height:10,visualY:375,visualHeight:10}];
   const before=structuredClone(world),g=recorder();drawCampaign(g,world,{bgColor:0xabcdef,inkColor:0x334455});
-  assert.deepEqual(world,before);assert.equal(g.shapes.length,2);assert.equal(g.shapes[0].color,0xabcdef);
+  assert.deepEqual(world,before);assert.equal(g.shapes.length,3);assert.equal(g.shapes[0].color,0xabcdef);
   const outline=g.shapes[1];assert.equal(outline.type,'stroke');assert.equal(outline.closed,false);
   assert.equal(outline.color,0x334455);near(bounds(outline).bottom,380);near(bounds(outline).right-bounds(outline).left,44);
   near(outline.points[0].y,370);near(outline.points.at(-1).y,370);
@@ -373,30 +373,23 @@ test('all ten real peg layouts and their moving pins draw within phone and deskt
       addZone(spec){const zone={...spec,id:++this.id};this.zones.push(zone);return zone;}};
     const rules=createPeggleRules(world);rules.setup(k);rules.onTick(1.6);
     const before=JSON.stringify(world),g=recorder();drawCampaign(g,world,{showTutorial:false});
-    assert.equal(JSON.stringify(world),before);assert.equal(g.shapes.length,params.totalPegs+2);
-    assert.ok(g.shapes.length<=50);
+    assert.equal(JSON.stringify(world),before);assert.equal(g.shapes.length,params.totalPegs+3);
+    assert.ok(g.shapes.length<=56);
     for(const shape of g.shapes)for(const point of shape.points){
       assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y));
       assert.ok(point.x>=16-1e-8&&point.x<=width-16+1e-8,`${width}x${height} k${k} x${point.x}`);
       assert.ok(point.y>=16-1e-8&&point.y<=height-16+1e-8,`${width}x${height} k${k} y${point.y}`);
     }
     world.statics.forEach(pin=>pin.hitThisShot=true);const touched=recorder();drawCampaign(touched,world,{showTutorial:false});
-    assert.equal(touched.shapes.length,params.totalPegs*2+2);assert.ok(touched.shapes.length<=98);
+    assert.equal(touched.shapes.length,params.totalPegs*2+3);assert.ok(touched.shapes.length<=109);
   }
 });
 
-test('all twenty pool and golf layouts keep holes, obstacles and infinite-HP actors finite and clear of the HUD',()=>{
+test('all forty pool and golf layouts keep holes, obstacles and infinite-HP actors finite and clear of the HUD',()=>{
   for(const [width,height] of [[320,568],[390,844],[844,390],[568,320],[1280,800]]){
-    for(const kind of ['pool','golf'])for(let k=0;k<10;k++){
-      const unit=Math.max(18,Math.min(34,Math.min(width,height)*.047));
-      const params=kind==='pool'?poolParams(k):golfParams(k);
-      const world={...base(),width,height,unit,config:{...params,k},id:0,enemies:[],inset:16,
-        player:{id:0,isPlayer:true,x:width/2,y:height*.76,r:unit,mass:1.5},
-        get arenaBounds(){return kind==='pool'?poolBounds(this):{left:16,right:width-16,top:16,bottom:height-16,width:width-32,height:height-32};},
-        addStatic(spec){const body={...spec,id:++this.id};this.statics.push(body);return body;},
-        addZone(spec){const zone={...spec,id:++this.id};this.zones.push(zone);return zone;},
-        makeBody(x,y,r,density){return {id:++this.id,x,y,r,density,vx:0,vy:0,squash:0,angle:0,born:1};}};
-      const rules=kind==='pool'?createPoolRules(world):createGolfRules(world);rules.setup(k);
+    for(const kind of ['pool','golf'])for(let rank=0;rank<20;rank++){
+      const k=rank>>1,world=new CampaignWorld(width,height,k*10+(kind==='pool'?3:7)+rank%2,()=>.5);
+      const {unit,config:params,rules}=world;
       for(const dt of [0,1.6,1.6]){
         rules.onTick(dt);
         const before=JSON.stringify(world),normal=recorder(),reduced=recorder();
@@ -564,7 +557,7 @@ test('all ten real merge boards keep initial and spawned Infinite-HP balls withi
     const world=new CampaignWorld(width,height,k*10+5,renderRandom(400+k),{upgradeId:k%2?'growth':'gravity'});
     const check=()=>{
       const b=world.arenaBounds,before=JSON.stringify(world),g=recorder();
-      drawCampaign(g,world,{showTutorial:false});assert.equal(g.shapes.length,0,'merge keeps the existing dynamic-ball layer');
+      drawCampaign(g,world,{showTutorial:false});assert.equal(g.shapes.length,world.statics.length,'only authored fixed columns enter the static layer');
       for(const body of world.enemies){
         const pose=campaignBodyVisual(world,body);if(pose.hidden)continue;
         assert.equal(body.hp,Infinity);assert.equal(body.maxHp,Infinity);
@@ -580,33 +573,8 @@ test('all ten real merge boards keep initial and spawned Infinite-HP balls withi
         assert.ok(p.y>=b.top-1e-5&&p.y<=b.bottom+1e-5,`${width}x${height} k${k} y${p.y}`);
       }
       assert.ok(b.top>=(world.height>520?128:86));
-      near(campaignBodyVisual(world,world.player).body.r,world.unit*(world.upgradeId==='growth'?1.2:1));
+      near(campaignBodyVisual(world,world.player).body.r,world.unit*world.config.playerRadius*(world.upgradeId==='growth'?1.2:1));
     };
     check();world.step(4);check();world.resize(height,width);check();
-  }
-});
-
-test('all ten real chains keep queued beads hidden, tangent visible balls and the exact rail inside phones through motion and rotation',()=>{
-  for(const [width,height] of [[320,568],[390,844],[844,390],[568,320],[1280,800]])for(let k=0;k<10;k++){
-    const world=new CampaignWorld(width,height,k*10+9,renderRandom(600+k),{upgradeId:k%2?'growth':'gravity'});
-    const check=()=>{
-      const before=JSON.stringify(world),g=recorder(),reduced=recorder(),b=world.arenaBounds;
-      drawCampaign(g,world,{showTutorial:false});drawCampaign(reduced,world,{showTutorial:false,reducedMotion:true,strength:0});
-      assert.deepEqual(reduced.shapes,g.shapes);assert.equal(JSON.stringify(world),before);
-      const beads=world.chainBeads.filter(bead=>bead.active!==false&&!bead.dead);
-      const count=5+beads.reduce((n,bead)=>n+1+bead.sizeIndex,0);
-      assert.equal(g.shapes.length,count);assert.ok(count<=68);
-      for(const shape of g.shapes)for(const p of shape.points){
-        assert.ok([p.x,p.y,shape.alpha].every(Number.isFinite));
-        assert.ok(p.x>=b.left-1e-4&&p.x<=b.right+1e-4,`${width}x${height} k${k} x${p.x}`);
-        assert.ok(p.y>=Math.max(b.top,world.height>520?112:76)-1e-4&&p.y<=b.bottom+1e-4,`${width}x${height} k${k} y${p.y}`);
-      }
-      for(let i=0;i<beads.length;i++)for(let j=i+1;j<beads.length;j++)
-        assert.ok(Math.hypot(beads[i].x-beads[j].x,beads[i].y-beads[j].y)>=beads[i].r+beads[j].r-1e-6,'visible circles never overlap even with 21 logical beads');
-      assert.equal(world.chainState.visibleCount,beads.length);
-      assert.ok(world.chainBeads.filter(bead=>bead.chainS<0).every(bead=>bead.active===false));
-      near(campaignBodyVisual(world,world.player).body.r,world.unit*(world.upgradeId==='growth'?1.2:1));
-    };
-    assert.equal(world.chainBeads.length,12+k);check();world.step(4);check();world.resize(height,width);check();
   }
 });

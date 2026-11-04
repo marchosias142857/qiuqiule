@@ -100,7 +100,7 @@ test('offered fixed multipliers match awarded values alongside the endless diffi
   for(const stage of [1,11,21]){
     const run=world();run.stage=stage;run.time=90;
     const profile=run.enemyProfile();
-    near(profile.hp,19*1.16**(stage-1)+4);
+    near(profile.hp,19*1.20**(stage-1)+4);
     near(profile.density,.65+.06*stage+.0004*90);
     near(run.spawnInterval,.65+1.35*.86**(stage-1));
     profiles.push({profile,spawn:run.spawnInterval});

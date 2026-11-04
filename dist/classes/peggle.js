@@ -1,72 +1,31 @@
-// PDF §8.3, r=0. Counts use nearest integer for total pins and floor for
-// targets: that is the one rounding policy matching all four printed examples.
+import {peggleLevel} from './peggle-levels.js';
+
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const TAU = Math.PI * 2;
 
-export function peggleParams(difficulty) {
-  const k = clamp(Math.floor(Number(difficulty) || 0), 0, 9);
+export function peggleParams(difficulty, variant = 0) {
+  const k = clamp(Math.floor(Number(difficulty) || 0), 0, 9), rank = 2 * k + (variant ? 1 : 0);
+  const board = peggleLevel(rank);
   return Object.freeze({
-    kind: 'peggle', name: '钉板狂热',
-    totalPegs: Math.round(36 + 1.33 * k), targetPegs: Math.floor(18 + .9 * k),
-    budget: 10 - Math.floor(k / 3), pegRadius: .45, restitution: .95,
-    bucketWidth: 2.2, bucketSpeed: 1.2, movingPegs: k >= 8 ? 2 : 0,
-    pattern: k < 3 ? 'arcs' : k < 6 ? 'grid' : k < 8 ? 'spiral' : 'mixed',
+    kind: 'peggle', name: '钉板狂热', rank20: rank,
+    layoutId: board.id, layoutName: board.name, layoutLesson: board.lesson,
+    totalPegs: board.pegs.length, targetPegs: board.pegs.filter(pin => pin.target).length,
+    budget: k < 4 ? 11 : 10, playerRadius: .42, pegRadius: .36, restitution: .95,
+    bucketWidth: 2.6 - .4 * rank / 19, bucketSpeed: 1.2, movingPegs: k >= 8 ? 2 : 0,
+    pattern: board.id,
     peakDuration: 1.2, peakTimeScale: .25, peakZoom: .06, remainingBallValue: 10,
+    threePointRemaining: 3, twoPointRemaining: 1,
   });
 }
 
-// Pin size is physical and stays .45u. Only the spacing/layout fits the screen;
-// neither player radius nor pin count changes on short landscape viewports.
 export function peggleLayout(world, params = world.config) {
   const u = world.unit, b = world.arenaBounds;
-  const left = b.left + 1.7 * u, right = b.right - 1.7 * u;
-  const hudBottom = world.height > 520 ? 112 : 76;
-  const top = Math.max(hudBottom + params.pegRadius * u, b.top + 2.6 * u, Math.min(100, world.height * .22));
-  const bottom = Math.max(top + 5.6 * u, Math.min(world.height * .64, b.bottom - 4.5 * u));
-  const width = right - left, height = bottom - top, count = params.totalPegs;
-  const positions = [];
-  if (params.pattern === 'spiral') {
-    // A pair of interleaved Fermat arms leaves the centre open rather than
-    // stacking circles on a small-radius circular spiral.
-    const golden = Math.PI * (3 - Math.sqrt(5));
-    for (let i = 0; i < count; i++) {
-      const radius = Math.sqrt((i + .7) / count), angle = i * golden;
-      positions.push({x: left + width * (.5 + .47 * radius * Math.cos(angle)),
-        y: top + height * (.5 + .47 * radius * Math.sin(angle))});
-    }
-  } else {
-    const columns = params.pattern === 'arcs' ? 6 : 8;
-    const rows = Math.ceil(count / columns);
-    let index = 0;
-    for (let row = 0; row < rows; row++) {
-      const inRow = Math.min(columns, count - index);
-      for (let column = 0; column < inRow; column++, index++) {
-        const nx = (column + .5 + (columns - inRow) / 2) / columns;
-        const base = (row + .5) / rows;
-        const arc = params.pattern === 'arcs' ? (.5 - Math.abs(nx - .5)) * .7 / rows
-          : params.pattern === 'mixed' ? Math.sin(nx * TAU + row * .7) * .16 / rows : 0;
-        positions.push({x: left + width * nx, y: top + height * (base + arc)});
-      }
-    }
-  }
-  // Elliptical spirals compress on very short screens. Resolve that spacing
-  // geometrically instead of shrinking pins or dropping targets.
-  const separation = 1.02 * u;
-  for (let pass = 0; pass < 24; pass++) {
-    let changed = false;
-    for (let i = 0; i < positions.length; i++) for (let j = i + 1; j < positions.length; j++) {
-      const a = positions[i], c = positions[j], dx = c.x - a.x, dy = c.y - a.y;
-      const distance = Math.hypot(dx, dy);
-      if (distance >= separation - 1e-7) continue;
-      const nx = distance > 1e-8 ? dx / distance : 1, ny = distance > 1e-8 ? dy / distance : 0;
-      const correction = (separation - distance) / 2 + 1e-7;
-      a.x = clamp(a.x - nx * correction, left, right); a.y = clamp(a.y - ny * correction, top, bottom);
-      c.x = clamp(c.x + nx * correction, left, right); c.y = clamp(c.y + ny * correction, top, bottom);
-      changed = true;
-    }
-    if (!changed) break;
-  }
-  return {left, right, top, bottom, positions};
+  const board = peggleLevel(params.rank20 ?? (world.config.k * 2 + (world.config.variant || 0)));
+  const left = b.left + 1.2 * u, right = b.right - 1.2 * u;
+  const top = b.top + .8 * u, bottom = b.bottom - 4.7 * u;
+  const width = right - left, height = Math.max(4.8 * u, bottom - top);
+  const positions = board.pegs.map(peg => ({x: left + width * peg.nx, y: top + height * peg.ny}));
+  return {left, right, top, bottom: top + height, positions, layoutId: board.id};
 }
 
 export function createPeggleRules(world) {
@@ -76,19 +35,23 @@ export function createPeggleRules(world) {
   const targetPoint = () => {
     const p = world.player;
     const targets = pins.filter(pin => pin.active !== false && pin.target && !pin.hitThisShot);
-    const nearest = targets.reduce((best, pin) => !best || Math.hypot(pin.x - p.x, pin.y - p.y) < Math.hypot(best.x - p.x, best.y - p.y) ? pin : best, null);
-    if (nearest && params?.k === 0 && !(world.shotsUsed > 0)) {
-      // Demonstrate an oblique first shot. A centre-to-centre hit on the nearest
-      // bottom pin merely returns the ball to the floor on a tall phone.
-      const wide = world.width / world.height > 2;
-      const outer = targets.filter(pin => pin.x > world.width * .65).sort((a, b) => b.y - a.y)[0] || nearest;
-      const chosen = wide ? nearest : outer;
-      const offset = wide ? (world.upgradeId === 'bank' || world.upgradeId === 'pierce' ? 0 : -.13)
-        : world.height / world.width > 1.9 ? .13 : 0;
-      const distance = Math.hypot(chosen.x - p.x, chosen.y - p.y);
-      const angle = Math.atan2(chosen.y - p.y, chosen.x - p.x) + offset;
-      return {x: p.x + Math.cos(angle) * distance, y: p.y + Math.sin(angle) * distance};
-    }
+    const livePins = pins.filter(pin => pin.active !== false && !pin.hitThisShot);
+    const visible = targets.filter(target => {
+      const dx = target.x - p.x, dy = target.y - p.y, distance = Math.hypot(dx, dy);
+      if (!distance) return true;
+      const nx = dx / distance, ny = dy / distance, targetEntry = distance - p.r - target.r;
+      return livePins.every(pin => {
+        if (pin === target) return true;
+        const x = pin.x - p.x, y = pin.y - p.y, along = x * nx + y * ny;
+        const across = x * ny - y * nx, radius = p.r + pin.r;
+        if (along <= 0 || Math.abs(across) >= radius) return true;
+        return along - Math.sqrt(radius * radius - across * across) >= targetEntry - .001;
+      });
+    });
+    // Guide towards a visible target, rather than an orange pin screened by a
+    // normal pin. This is geometric line-of-sight, not a promised ricochet.
+    const nearest = (visible.length ? visible : targets).reduce((best, pin) =>
+      !best || Math.hypot(pin.x - p.x, pin.y - p.y) < Math.hypot(best.x - p.x, best.y - p.y) ? pin : best, null);
     return nearest ? {x: nearest.x, y: nearest.y} : {x: world.width / 2, y: world.height / 3};
   };
   const bucketLimits = () => {
@@ -129,13 +92,11 @@ export function createPeggleRules(world) {
   };
   return {
     setup(k = world.config.k) {
-      params = {...peggleParams(k), ...world.config};
+      params = {...world.config, ...peggleParams(k, world.config.variant)};
       world.budget = params.budget; world.remaining = params.budget;
       remainingTargets = params.targetPegs;
       for (let index = 0; index < params.totalPegs; index++) {
-        // Distribute the exact target count throughout the whole board. The
-        // layout is fixed for a level so a retry can teach a repeatable route.
-        const target = Math.floor((index + 1) * params.targetPegs / params.totalPegs) > Math.floor(index * params.targetPegs / params.totalPegs);
+        const target = peggleLevel(params.rank20).pegs[index].target;
         pins.push(world.addStatic({kind: 'peg', shape: 'circle', x: 0, y: 0, r: params.pegRadius * world.unit,
           hp: 1, maxHp: 1, restitution: params.restitution, active: true,
           target, hitThisShot: false, hit: 0, index, moving: false}));
@@ -207,7 +168,11 @@ export function createPeggleRules(world) {
     summary: () => remainingTargets > 0 ? `差 ${remainingTargets} 钉` : `剩余 ${world.remaining} 球`,
     progress: () => 1 - remainingTargets / Math.max(1, params.targetPegs),
     remainingTargets: targetCount,
+    ratingStatus: () => ({rating: world.remaining >= 3 ? 3 : world.remaining >= 1 ? 2 : 1,
+      summary: `还差 ${remainingTargets} 钉 · 已连弹 ${world.maxCombo || 0}`,
+      three: '三点剩余 ≥ 3 球', two: '两点剩余 ≥ 1 球'}),
     tutorialTarget: targetPoint,
+    tutorialPullRatio: 1,
     resize: () => layout(false),
   };
 }

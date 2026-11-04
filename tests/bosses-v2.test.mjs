@@ -9,7 +9,7 @@ function boss(stage=5,type){const w=run(stage);w.beginBoss({type});w.step(BOSS_T
 function contact(w,actor=w.player){const b=w.boss;Object.assign(actor,{x:b.x-w.bossRadius-actor.r+.01,y:b.y,vx:w.unit*30,vy:0,feedbackFreeze:0});w.collideBoss(actor);}
 function separate(w,actor=w.player){actor.x=w.boss.x-w.bossRadius-actor.r-w.unit;actor.y=w.boss.y;w.collideBoss(actor);}
 function victory(w){Object.assign(w.boss,{stunned:true,r:w.boss.minRadius,hp:.5,maxHp:.5});w.damageBoss(w.unit*30,{source:'shockwave'});assert.equal(w.phase,'boss-celebrate');w.step(.125,false,{timeScale:.25});near(w.bossVictorySlowTime,0);w.step(BOSS_TIMING.brake+BOSS_TIMING.spin+BOSS_TIMING.hold+BOSS_TIMING.fade+.001);}
-function pick(w,id){w.step(2);assert.equal(w.phase,'choose');const c=id?UPGRADES[id]:w.choices[0];assert.ok(w.choose(c));w.step(1.001);}
+function pick(w,id){w.step(w.rewardTiming.transition);assert.equal(w.phase,'choose');const c=id?UPGRADES[id]:w.choices[0];assert.ok(w.choose(c));w.step(w.rewardTiming.rest);}
 
 test('every Boss stage uses inflation and removed type overrides cannot consume a type-selection random draw',()=>{
  for(const stage of [5,10,15,20,50])for(const forced of [undefined,'splitter','magnet']){
@@ -71,7 +71,7 @@ test('victory has half a real second of slow motion before the old crown and two
 });
 
 test('both exhausted Boss reward rounds finish without a fake upgrade or multiple stage increments',()=>{
- const w=boss(10);for(const d of UPGRADE_DEFINITIONS)w.buffs[d.id]=d.maxStacks;victory(w);assert.equal(w.phase,'reward');w.step(1.001);assert.equal(w.stage,10);assert.equal(w.phase,'reward');w.step(1.001);assert.equal(w.stage,11);assert.equal(w.phase,'battle');assert.equal(w.events.filter(e=>e.type==='upgradeSkipped').length,2);
+ const w=boss(10);for(const d of UPGRADE_DEFINITIONS)w.buffs[d.id]=d.maxStacks;victory(w);assert.equal(w.phase,'reward');w.step(w.rewardTiming.rest-w.phaseTime);assert.equal(w.stage,10);assert.equal(w.phase,'reward');w.step(w.rewardTiming.rest);assert.equal(w.stage,11);assert.equal(w.phase,'battle');assert.equal(w.events.filter(e=>e.type==='upgradeSkipped').length,2);
 });
 
 test('one regular starting choice immediately starts stage one with six enemies and the next-shot boost',()=>{
@@ -92,7 +92,7 @@ test('stats count only successful combat shots and real kills, excluding clearin
 
 
 test('time spent choosing starting upgrades does not age the first battle enemies',()=>{
- const w=run();w.beginStartingUpgrades();w.step(80);assert.equal(w.phase,'choose');near(w.elapsed,0);w.choose(w.choices[0]);w.step(1);
+ const w=run();w.beginStartingUpgrades();w.step(80);assert.equal(w.phase,'choose');near(w.elapsed,0);w.choose(w.choices[0]);w.step(w.rewardTiming.rest);
  assert.equal(w.stage,1);near(w.time,0);for(const b of w.enemies){near(b.hp,19);near(b.density,.71);}
 });
 

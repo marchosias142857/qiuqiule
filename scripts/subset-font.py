@@ -18,6 +18,11 @@ cmap = font.getBestCmap()
 app_files = sorted(p for p in (ROOT/'dist').rglob('*') if p.suffix in ('.js', '.html', '.css'))
 text = ''.join(p.read_text() for p in app_files)
 requested = set(map(ord, text))
+# Keep previously shipped glyphs when help text is retired. Adding campaign
+# labels must not remove any existing glyph available to the unchanged UI.
+previous_metadata = ROOT/'docs/font-subset.json'
+if previous_metadata.exists():
+    requested.update(json.loads(previous_metadata.read_text()).get('codepoints', []))
 for lo, hi in [(0x20, 0x100), (0x2000, 0x2070), (0x3000, 0x3040), (0xff00, 0xfff0)]:
     requested.update(range(lo, hi))
 requested.update(map(ord, '×÷∞→←↑↓−△□'))

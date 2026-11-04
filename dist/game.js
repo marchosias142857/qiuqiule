@@ -1,18 +1,20 @@
 import {World, clamp, ease, lerp} from './physics.js';
+import {CampaignOfferWorld} from './campaign-offer.js';
+import {drawCampaignAim} from './campaign-aim.js';
 import {CampaignWorld,normalizeProgress,progressPercent,levelConfig,campaignUpgradeChoices,campaignUpgradePool} from './campaign.js';
-import {levelRecord,recordAttempt,recordResult,recordCheckpoint,canSkip,skipLevel} from './campaign-progress.js';
-import {drawCampaign,campaignBodyVisual,campaignCaptureVisuals,campaignTextVisuals,campaignBorderGap,drawCampaignBorder} from './campaign-render.js';
+import {levelRecord,recordAttempt,recordResult,recordCheckpoint,recordOffers,recoverInterruptedAttempts,canSkip,skipLevel} from './campaign-progress.js';
+import {drawCampaign,campaignBodyVisual,campaignCaptureVisuals,campaignTextVisuals,campaignBorderGap,drawCampaignBorder,campaignFailureFeedback,drawCampaignBodyDetails} from './campaign-render.js';
 import {LevelSelector,trackPath} from './levels.js';
 import {displayMetrics, pointerPosition} from './display.js';
 import {HomeWorld} from './home.js';
 import {drawFunctionalBall,iconMarkup} from './icons.js';
 import {smooth,pullBallPoint,faceTarget,pointerFaceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline,usesStrainedEyes,playerVisualState,relaxedEyeOutline} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
-import {feedbackStrength,chargeFeedback,ScoreFeedback,impactShards,mergeShards,impactZoom} from './feedback.js';
+import {feedbackStrength,hitFeedbackTier,chargeFeedback,ScoreFeedback,impactShards,mergeShards,impactZoom} from './feedback.js';
 import {CometTrails} from './comet-trail.js';
 import {AimGesture,aimGuide,aimMinimumScale} from './aim.js';
 import {normalizeAimMetrics,recordAimDuration,aimMetricsReport,aimHoldDuration} from './aim-metrics.js';
-import {clearingTimeScale,clearingZoom,pressureStyle,blendRgb,injuredEnemyScale,pressureLook} from './rhythm-feedback.js';
+import {clearingTimeScale,clearingZoom,PressureWarning,PRESSURE_WARNING_COLOR,blendRgb,injuredEnemyScale,pressureLook} from './rhythm-feedback.js';
 import {drawEnemyBall,isSpecialEnemy,enemyTransferMarkup,enemyBodyColor,enemyDetailColor} from './enemy-render.js';
 import {ENEMY_TYPES} from './enemies.js';
 import {UPGRADES,UPGRADE_DEFINITIONS} from './upgrades.js';
@@ -56,7 +58,7 @@ let campaignOffer=null,pendingCampaignUpgrade=null,campaignAttemptId=null,campai
 let choicePress=null;
 let choiceLabels=[];
 let resultBlankPointer=null;
-let campaignProgress=normalizeProgress(storage.read('qiuqiule-campaign',null));
+let campaignProgress=recoverInterruptedAttempts(normalizeProgress(storage.read('qiuqiule-campaign',null)));
 storage.write('qiuqiule-campaign',campaignProgress);
 const savedSkins=storage.read('qiuqiule-skins',null);
 let skins=normalizeSkins(savedSkins,campaignProgress.completed);
@@ -285,6 +287,7 @@ function syncInputs(){
   $('#modal-layer').inert=moving;
   $('#home').inert=!!modal||moving||screen==='entering';
   $('#hud').inert=!!modal||moving||screen==='entering';
+  $('#campaign-preflight').inert=!!modal||moving;
 }
 function showPanel(name){
   resetMenuTransition();cancelDrag();sound.clearEnd();modal=name;paused=screen==='play';
@@ -299,10 +302,26 @@ function hidePanel(){resetMenuTransition();wardrobeUi?.cancelInteraction();modal
 function setPanel(name){if(name==='pause')openPause();else showPanel(name);}
 function anchorPose(anchor){
   if(anchor==='levels')return {...selector.player};
-  if(anchor==='arena')return {...world.player};
+  if(anchor==='arena')return arenaPlayerPose();
   if(anchor==='home')return {...home.layout.player};
   const box=$('#'+anchor+'-ball').getBoundingClientRect();
   return {x:box.x+box.width/2,y:box.y+box.height/2,r:box.width/2};
+}
+function rewardPlayerPose(body){
+  // The upgrade and wall correction apply to collisions immediately. Only
+  // their painted size/offset blend, using resize-safe units and a paused clock.
+  const growth=world&&scene?.rewardVisuals?.world===world&&body===world.player?scene.rewardVisuals.growth:null;
+  if(!growth)return body;
+  const t=smooth((world.feedbackTime-growth.at)/.2);
+  return {x:body.x+(growth.x||0)*world.unit*(1-t),y:body.y+(growth.y||0)*world.unit*(1-t),r:body.r*lerp(growth.from,1,t)};
+}
+function arenaPlayerPose(){
+  const p={...world.player};
+  if(world.mode!=='campaign'||world.isCampaignOffer){
+    Object.assign(p,rewardPlayerPose(world.player));
+    if(world.phase==='transition')p.roll=world.player.roll??Math.PI*2*world.rewardMoveProgress;
+  }
+  return p;
 }
 function selectionPlayerPose(){
   const p={...selector.player},visual=playerVisuals.get(selector.player);
@@ -316,7 +335,9 @@ function selectionPlayerPose(){
   }
   return p;
 }
-function currentPlayerPose(){return skinUnlock&&lastUiPose?{...lastUiPose}:uiAnchor==='wardrobe'?resultBounce(anchorPose('wardrobe'),wardrobeTime,reducedMotion):uiAnchor==='over'?resultBounce(anchorPose('over'),result?.bounceTime||0,reducedMotion):uiAnchor?anchorPose(uiAnchor):screen==='home'?{...home.player}:screen==='levels'?selectionPlayerPose():{...world.player};}
+function resultHasCrown(){return !!result&&(result.campaign?result.golfHoleInOne:result.bossKills>0||result.maxCombo>=6);}
+function resultCrownOpacity(){return resultHasCrown()?smooth(((result.crownAge||0)-.08)/.32):0;}
+function currentPlayerPose(){return skinUnlock&&lastUiPose?{...lastUiPose}:uiAnchor==='wardrobe'?resultBounce(anchorPose('wardrobe'),wardrobeTime,reducedMotion):uiAnchor==='over'?{...resultBounce(anchorPose('over'),result?.bounceTime||0,reducedMotion),visualCrownAlpha:resultCrownOpacity()}:uiAnchor?anchorPose(uiAnchor):screen==='home'?{...home.player}:screen==='levels'?selectionPlayerPose():arenaPlayerPose();}
 function detached(){return !!skinUnlock||!!transfer||!!uiAnchor||['pause','settings','help','wardrobe'].includes(modal);}
 function paintUiBall(p){
   lastUiPose={...p};
@@ -368,8 +389,11 @@ function paintUiBall(p){
   eyes.style.display=appearance?'none':'';
   const resultCrown=el.querySelector('.ui-result-crown');
   if(resultCrown){
-    const visible=result&&(result.campaign?result.golfHoleInOne:result.bossKills>0||result.maxCombo>=6)&&uiAnchor==='over'&&!transfer;
+    const settled=uiAnchor==='over'&&!transfer&&!skinUnlock;
+    const alpha=p.visualCrownAlpha??(settled?resultCrownOpacity():0);
+    const visible=alpha>0||settled&&resultHasCrown();
     resultCrown.style.display=visible?'':'none';
+    resultCrown.style.opacity=String(alpha);
     if(visible){
       const points=fitCrownToSkin(crownPoints,activeContour()).map(point=>({x:50+point.x*35,y:50+(-1+(point.y+1)*.7)*50}));
       resultCrown.setAttribute('d',points.map((point,i)=>`${i?'L':'M'}${point.x} ${point.y}`).join(' ')+' Z');
@@ -379,9 +403,20 @@ function paintUiBall(p){
 }
 function movePlayer(from,target,duration,done){
   cancelDrag();transfer={from:{...from},target,duration:reducedMotion?Math.min(duration,.25):duration,elapsed:0,done,revealHome:screen==='home'&&homeReveal<1&&target==='home'};
+  if(scene?.lastBorder&&(world?.mode==='campaign'||screen==='levels'||screen==='home'&&selectedMode==='campaign'&&scene.lastBorder.campaign)){
+    scene.campaignFrameTransfer={from:{...scene.lastBorder,gap:scene.lastBorder.gap?{...scene.lastBorder.gap}:null},elapsed:0,duration:transfer.duration};
+  }
   paintUiBall(from);syncInputs();
 }
 function updateUiBall(dt){
+  // Start the crown clock only on frames already settled at the result anchor.
+  // The incoming flight's final dt must not consume the fade before first paint.
+  if(result&&uiAnchor==='over'&&!transfer&&!skinUnlock)result.crownAge=(result.crownAge||0)+dt;
+  if(scene?.campaignArrival){scene.campaignArrival.elapsed+=dt;if(scene.campaignArrival.elapsed>=scene.campaignArrival.duration)scene.campaignArrival=null;}
+  if(scene?.campaignFrameTransfer){
+    scene.campaignFrameTransfer.elapsed+=dt;
+    if(scene.campaignFrameTransfer.elapsed>=scene.campaignFrameTransfer.duration)scene.campaignFrameTransfer=null;
+  }
   updateMenuTransition(dt);
   $('#result-shadow').hidden=true;
   if(skinUnlock){updateSkinUnlock(dt);return;}
@@ -401,6 +436,7 @@ function updateUiBall(dt){
   if(transfer){
     const move=transfer;move.elapsed+=dt;
     const progress=clamp(move.elapsed/move.duration,0,1),pose=transferPose(move.from,anchorPose(move.target),progress);
+    if(move.from.visualCrownAlpha!==undefined)pose.visualCrownAlpha=move.from.visualCrownAlpha*(1-smooth(move.elapsed/.18));
     paintUiBall(pose);$('#ui-ball').dataset.state='moving';
     if(move.revealHome)homeReveal=smooth(progress);
     if(progress===1){
@@ -471,6 +507,7 @@ function updateControlFlight(dt){
   if(progress===1){controlFlight=null;flight.done?.();$('#control-transfers').replaceChildren();syncInputs();}
 }
 function openResult(view=null){
+  if(world?.isCampaignOffer){leaveCampaignOffer('home');return;}
   if(!world||result||skinUnlock)return;
   if(world.phase==='campaign-celebrate'){if(modal==='pause')resumeGame();return;}
   scene.resetFeedback?.();
@@ -515,9 +552,21 @@ function presentResult(from,fromPause,sources,duration=.82,view=null){
   }
   const reason=$('#result-reason');
   if(reason){
-    reason.textContent=modernCampaign?world.resultSummary||'':'';reason.hidden=!modernCampaign;
+    reason.textContent=modernCampaign?[world.resultSummary,world.completed?`${world.resultRating}点 · ${world.ratingStatus?.summary||''}`:levelRecord(campaignProgress,world.level).lastOutcome==='abandon'?'本轮结束 · 失败次数保留':campaignFailureFeedback(world.failureReason||world.lastFailureReason||'budget').label].filter(Boolean).join(' · '):'';reason.hidden=!modernCampaign;
   }
-  result={clock:0,bounceTime:0,campaign,modernCampaign,golfHoleInOne:!!world.golfHoleInOne&&!!world.completed,maxCombo:combo,maxStage:stage,bossKills:Math.max(0,world.bossKills||0),sceneBodies:view,percent:campaign?world.percent:0,completed:!!world.completed,displayed:0,lastTone:0,sourceIds:fromPause?[]:sources.map(b=>b.id)};
+  const chapter=$('#campaign-chapter');
+  if(chapter){
+    chapter.hidden=!modernCampaign;
+    if(modernCampaign){
+      const start=Math.floor((world.level-1)/10)*10+1;
+      chapter.innerHTML=Array.from({length:10},(_,i)=>{
+        const number=start+i,record=levelRecord(campaignProgress,number);
+        return `<span class="chapter-cell${record.rating?' filled':''}${number===world.level?' current':''}" title="${number}关 · ${record.rating||0}点" aria-label="${number}关，${record.rating||0}点">${number}</span>`;
+      }).join('');
+      chapter.setAttribute('aria-label',`第 ${Math.floor((world.level-1)/10)+1} 章评分回顾`);
+    }else chapter.innerHTML='';
+  }
+  result={clock:0,bounceTime:0,crownAge:0,campaign,modernCampaign,golfHoleInOne:!!world.golfHoleInOne&&!!world.completed,maxCombo:combo,maxStage:stage,bossKills:Math.max(0,world.bossKills||0),sceneBodies:view,percent:campaign?world.percent:0,completed:!!world.completed,displayed:0,lastTone:0,sourceIds:fromPause?[]:sources.map(b=>b.id)};
   $('#hud').hidden=true;
   showPanel('over');$('.result-actions').classList.add('arriving');
   movePlayer(from,'over',duration);
@@ -581,7 +630,7 @@ function updateSkinUnlock(dt){
 
 function openPause(){
   if(transfer||modal||screen!=='play'||!world||world.phase==='over')return;
-  checkpointCampaign();const from={...world.player};paused=true;showPanel('pause');movePlayer(from,'pause',.42);
+  checkpointCampaign();const from=arenaPlayerPose();paused=true;showPanel('pause');movePlayer(from,'pause',.42);
 }
 function openSettings(){
   if(transfer||modal==='settings')return;
@@ -623,7 +672,8 @@ function closePanel(){
 }
 function clearEffects(){for(const e of scene.effects)e.label?.destroy();scene.effects=[];scene.resetFeedback?.();}
 function prepareGame({demo=false}={}){
-  // A new run owns no animation, particle, input or clock state from the old run.
+  // A new run clears gameplay feedback, input and clocks. The scene-owned red
+  // warning independently finishes its breath out over the arriving screen.
   closeCampaignOffer(false);cancelDrag();feedbackDemo=demo;campaignRecorded=false;campaignAttemptId=null;runBest=best;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';result=null;transfer=null;controlFlight=null;uiAnchor=null;
   skinUnlock=null;skinOverride=null;clearPhoto();
   releaseOverlay=0;pauseOnArrival=false;
@@ -636,7 +686,7 @@ function prepareGame({demo=false}={}){
   const starting=selectedMode==='endless'&&!demo?1:0;
   world=selectedMode==='campaign'?new CampaignWorld(viewport.width,viewport.height,currentLevel,Math.random,{upgradeId:pendingCampaignUpgrade,tutorialSeen:!!campaignProgress.tutorials?.[levelConfig(currentLevel).classId]}):new World(viewport.width,viewport.height,runDay.random,{spawnInitial:starting===0});screen='play';
   if(world.mode==='campaign'&&!demo){
-    campaignProgress=recordAttempt(campaignProgress,currentLevel,{upgradeId:pendingCampaignUpgrade,tutorialKey:world.config?.implemented&&world.config.k===0?world.config.classId:null});
+    campaignProgress=recordAttempt(campaignProgress,currentLevel,{upgradeId:pendingCampaignUpgrade,tutorialKey:world.config?.implemented?world.config.classId:null,offerChoices:levelRecord(campaignProgress,currentLevel).offerChoices});
     campaignAttemptId=levelRecord(campaignProgress,currentLevel).activeAttempt;
     storage.write('qiuqiule-campaign',campaignProgress);
   }
@@ -652,15 +702,15 @@ function prepareGame({demo=false}={}){
   $('.pause-button').disabled=false;updateHud();
 }
 function checkpointCampaign(){
-  if(!world||world.mode!=='campaign'||feedbackDemo||campaignRecorded||!campaignAttemptId)return;
+  if(!world||world.mode!=='campaign'||world.isCampaignOffer||feedbackDemo||campaignRecorded||!campaignAttemptId)return;
   campaignProgress=recordCheckpoint(campaignProgress,world.level,{elapsed:world.elapsed||world.time,progress:world.percent/100,summary:world.resultSummary||`${world.percent}%`,attemptId:campaignAttemptId});
   storage.write('qiuqiule-campaign',campaignProgress);
 }
 function saveCampaignResult(outcome){
-  if(!world||world.mode!=='campaign'||feedbackDemo||campaignRecorded)return;
+  if(!world||world.mode!=='campaign'||world.isCampaignOffer||feedbackDemo||campaignRecorded)return;
   campaignRecorded=true;
   campaignProgress=recordResult(campaignProgress,world.level,{outcome,rating:world.resultRating||0,score:world.score,
-    elapsed:world.elapsed||world.time,progress:world.percent/100,summary:world.resultSummary||`${world.percent}%`,legacy:!world.config?.implemented,attemptId:campaignAttemptId});
+    elapsed:world.elapsed||world.time,progress:world.percent/100,summary:world.resultSummary||`${world.percent}%`,legacy:!world.config?.implemented,attemptId:campaignAttemptId,tutorialKey:world.config?.classId});
   storage.write('qiuqiule-campaign',campaignProgress);
 }
 function saveEndlessProgress(){
@@ -702,29 +752,73 @@ function campaignUpgradeIcon(id){
   if(id==='pulse')return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.5" fill="#fff9ec"/><g fill="none" stroke="#fff9ec" stroke-width="1.2"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="9"/></g></svg>';
   return iconMarkup(id==='energy'?'play':id==='bank'?'restart':id==='pierce'?'flag':'infinity');
 }
-function offerCampaign(level){
+function campaignPreflightRating(config){
+  if(config.classId==='merge')return `三点 ≤ ${config.threePointTime} 秒 · 两点 ≤ ${config.twoPointTime} 秒`;
+  if(config.classId==='peggle')return `通关余 ${config.threePointRemaining??3} 发得三点 · 余 ${config.twoPointRemaining??1} 发得两点`;
+  const metric=config.classId==='pool'?'发数＋自己落袋次数':config.classId==='golf'?'杆数':'发数';
+  return `${metric}：三点 ≤ ${config.threePointShots??config.par-1} · 两点 ≤ ${config.twoPointShots??config.par}`;
+}
+function offerCampaign(level,from=currentPlayerPose()){
   if(level>campaignProgress.unlocked)return;
   currentLevel=level;const config=levelConfig(level);
-  campaignOffer={level,choices:campaignUpgradeChoices(level)};
-  selector.phase='external';cancelDrag();
+  const pool=campaignUpgradePool(level),offered=levelRecord(campaignProgress,level).offerChoices||[];
+  const retained=offered.map(id=>pool.find(choice=>choice.id===id)).filter(Boolean);
+  const choices=retained.length===2?retained:campaignUpgradeChoices(level);
+  campaignProgress=recordOffers(campaignProgress,level,choices.map(choice=>choice.id));
+  storage.write('qiuqiule-campaign',campaignProgress);
+  campaignOffer={level,choices};
+  if(selector)selector.phase='external';cancelDrag();hidePanel();
+  world=new CampaignOfferWorld(viewport.width,viewport.height,config,choices);
+  world.setFeedbackOptions({strength:settings.juice,reducedMotion});
+  screen='play';paused=true;result=null;campaignAttemptId=null;campaignRecorded=false;feedbackDemo=false;
+  uiAnchor=null;releaseOverlay=0;pauseOnArrival=false;
+  clearEffects();clearChoiceLabels();scene.accumulator=0;scene.timeSlices=[];scene.timeScale=1;
+  $('#levels-view').setAttribute('hidden','');$('#level-skip').hidden=true;
+  $('#home').hidden=true;$('#hud').hidden=false;$('#hud').style.opacity=1;
+  $('#hud').classList.add('campaign','campaign-offer');$('#hud').classList.remove('campaign-modern');
+  $('.pause-button').disabled=false;
   $('#campaign-preflight').hidden=false;$('#campaign-note').hidden=true;
   $('#campaign-level-title').textContent=`${level} · ${config.name}`;
+  $('#campaign-layout-name').textContent=config.layoutName||'';
+  $('#campaign-layout-lesson').textContent=config.lesson||config.layoutLesson||config.layoutDescription||'';
   const goal=config.r===1?'清空砖墙':config.r===0?'清空实心目标钉':config.r===4?'清空目标球':config.r===2?`${config.rounds} 轮 · 击倒 ${config.requiredPins} 瓶`:config.r===6?`击破 ${config.jackpotGoal} 个大奖`:`标准杆 ${config.par}`;
   $('#campaign-level-goal').textContent=config.r===5?`合成 ${config.goal} 个最大球 · 覆盖率低于 42%`:config.r===9?`消除 ${config.goal} 颗或坚持 60 秒`:config.r===3?`击碎 ${config.goal} 块砖 · ${config.budget} 回合`:config.r===7?`坚持 60 秒 · 可漏 ${config.budget} 颗`:`${goal} · ${config.budget} ${config.r===6?'球':'发'}`;
-  $('#campaign-upgrades').innerHTML=campaignOffer.choices.map(c=>`<button data-action="campaign-upgrade" data-upgrade="${c.id}" class="campaign-upgrade" aria-label="选择${c.name}，${c.short}，仅本关有效"><span class="campaign-upgrade-ball">${campaignUpgradeIcon(c.id)}</span><span>${c.name}</span>${[2,3,4,5,6,7,8,9].includes(config.r)?`<small>${c.short}</small>`:''}</button>`).join('');
+  const ratingGuide=$('#campaign-level-rating');if(ratingGuide)ratingGuide.textContent=campaignPreflightRating(config);
+  // Accessible keyboard controls launch the actual ball; pointer taps on text
+  // never select a buff. Visible labels are attached to the physical rewards.
+  $('#campaign-upgrades').innerHTML=campaignOffer.choices.map(c=>`<button data-action="campaign-upgrade" data-upgrade="${c.id}" class="campaign-upgrade" aria-label="发射小球撞击${c.name}，${c.short}，仅本关有效"><span>${c.name}</span><small>${c.short}</small></button>`).join('');
   const skip=$('#campaign-skip');skip.hidden=!canSkip(campaignProgress,level);
-  $('#ui-ball').hidden=true;
+  updateHud();movePlayer(from,'arena',.65,finishArenaArrival);
 }
 function closeCampaignOffer(reset=true){
-  campaignOffer=null;$('#campaign-preflight').hidden=true;
+  campaignOffer=null;$('#campaign-preflight').hidden=true;$('#campaign-preflight').style.opacity='';$('#hud').classList.remove('campaign-offer');
   if(reset&&selector)selector.phase='idle';
   if(screen==='levels')$('#campaign-note').hidden=false;
 }
+function leaveCampaignOffer(target='levels'){
+  if(!campaignOffer||!world?.isCampaignOffer||transfer||controlFlight)return;
+  const from=currentPlayerPose();hidePanel();paused=false;uiAnchor=null;
+  // A menu exit first rejoins the still-frozen offer body, then lets the
+  // reward labels and icons breathe out together on the selection clock.
+  const finish=()=>{world.leave(target);finishArenaArrival();};
+  if(Math.hypot(from.x-world.player.x,from.y-world.player.y)>1){paused=true;movePlayer(from,'arena',.3,finish);}
+  else finish();
+}
+function finishCampaignOfferAction(){
+  const action=campaignOffer?.action;if(!action)return false;
+  const from=currentPlayerPose(),level=currentLevel;
+  if(action.type==='choose')launchCampaignLevel(action.upgradeId);
+  else if(action.target==='home'){closeCampaignOffer(false);showHome();}
+  else if(action.target==='restart'){closeCampaignOffer(false);offerCampaign(level,from);}
+  else openLevels(from);
+  return true;
+}
 function launchCampaignLevel(upgradeId){
   if(currentLevel>campaignProgress.unlocked)return;
-  const from=selectionPlayerPose();pendingCampaignUpgrade=upgradeId;closeCampaignOffer(false);
+  const from=world?.isCampaignOffer?currentPlayerPose():selectionPlayerPose();pendingCampaignUpgrade=upgradeId;closeCampaignOffer(false);
   prepareGame();paused=true;$('#campaign-note').hidden=true;
-  movePlayer(from,'arena',.65,finishArenaArrival);tone(420,.24,'sine',.055,1.7);
+  movePlayer(from,'arena',.65,finishArenaArrival);
+  scene.campaignArrival={world,elapsed:0,duration:transfer.duration};tone(420,.24,'sine',.055,1.7);
 }
 function rebuildLevels(){
   const svg=$('#levels-view');svg.setAttribute('viewBox',`0 0 ${viewport.width} ${viewport.height}`);
@@ -771,6 +865,7 @@ function startGame(){
 }
 function restartGame(){
   if(transfer||controlFlight||!scene)return;
+  if(world?.isCampaignOffer){leaveCampaignOffer('restart');return;}
   if(world?.phase==='campaign-celebrate'){if(modal==='pause')resumeGame();return;}
   if(feedbackDemo&&world?.config?.implemented){startCampaignDemo(world.level,world.upgradeId);return;}
   const from=currentPlayerPose(),duration=world?.mode==='campaign'?.65:.4;
@@ -786,6 +881,7 @@ function restartGame(){
 }
 function showHome(){
   if(transfer||controlFlight)return;
+  if(campaignOffer&&world?.isCampaignOffer){leaveCampaignOffer('home');return;}
   saveCampaignResult(world?.completed?'win':'abandon');closeCampaignOffer(false);$('#campaign-note').hidden=true;$('#level-skip').hidden=true;
   const from=currentPlayerPose();hidePanel();screen='home';cancelDrag();world=null;paused=false;result=null;feedbackDemo=false;
   $('#control-transfers').replaceChildren();$('#result-shadow').hidden=true;
@@ -807,11 +903,12 @@ function clearChoiceLabels(){
   choiceLabels=[];$('#choice-labels').replaceChildren();
 }
 function choiceBob(c){
+  if(world.isCampaignOffer&&['reward','offer-exit'].includes(world.phase))return (c.departureBob||0)*(1-smooth(world.phaseTime/.22));
   // Start at rest and use the choice clock so pausing also freezes the float.
   return world.phase==='choose'&&!reducedMotion?Math.sin(world.phaseTime*2+c.x)*2*smooth(world.phaseTime/.4):0;
 }
 function updateChoices(){
-  const active=world.phase==='transition'||world.phase==='choose',container=$('#choice-labels');
+  const active=world.phase==='transition'||world.phase==='choose'||world.isCampaignOffer&&world.choices.length>0,container=$('#choice-labels');
   if(!active){if(choiceLabels.length||container.children.length)clearChoiceLabels();return;}
   // Keep the same text nodes across transition -> choose. Replacing them here
   // used to skip the CSS fade and jump straight from 40% to full opacity.
@@ -819,6 +916,7 @@ function updateChoices(){
     choiceLabels=world.choices.map(choice=>{
       const node=document.createElement('div'),title=document.createElement('h3');
       node.className='choice-label';title.textContent=choice.name;node.append(title);
+      if(world.isCampaignOffer){const description=document.createElement('small');description.textContent=choice.short;node.append(description);}
       return {choice,node,title};
     });
     container.replaceChildren(...choiceLabels.map(label=>label.node));
@@ -827,24 +925,45 @@ function updateChoices(){
     const width=c.labelWidth||Math.max(76,Math.min(160,c.r*3));
     const font=Math.max(9,Math.min(17,Math.floor(width/Math.max(1,c.name.length)*.9)));
     Object.assign(node.style,{left:c.x+'px',top:(c.y+choiceBob(c)+c.r*(1+.14*(c.rings||0))+14)+'px',
-      width:world.mode!=='campaign'?width+'px':'',opacity:String(ease(c.born??1))});
-    Object.assign(title.style,{fontSize:world.mode!=='campaign'?font+'px':'',whiteSpace:world.mode!=='campaign'?'nowrap':''});
+      width:world.mode!=='campaign'||world.isCampaignOffer?width+'px':'',opacity:String(ease(c.born??1))});
+    Object.assign(title.style,{fontSize:world.mode!=='campaign'||world.isCampaignOffer?font+'px':'',whiteSpace:world.mode!=='campaign'||world.isCampaignOffer?'nowrap':''});
   }
 }
+function campaignHudRating(world){
+  const config=world.config,used=world.shotsUsed||0;
+  let summary='',threshold='';
+  if(config.classId==='pool'){
+    const scratches=world.poolScratches||0;
+    summary=`评分${used+scratches} · 自己落袋${scratches}次`;threshold=`三点≤${config.threePointShots}`;
+  }else if(config.classId==='merge'){
+    summary=`${Math.ceil(world.mergeElapsed||0)}秒`;threshold=`三点≤${config.threePointTime}秒`;
+  }else if(config.classId==='golf'){
+    summary=`已用${used}杆`;threshold=`三点≤${config.threePointShots}杆`;
+  }else if(config.classId==='peggle'){
+    summary=`连弹${world.maxCombo||0}`;threshold=`三点余≥${config.threePointRemaining??3}发`;
+  }else{
+    summary=`已发${used}发`;threshold=`三点≤${config.threePointShots}发`;
+  }
+  return `${summary} · ${world.tutorialVisible?`建议拉距 ${Math.round(world.tutorialPullRatio*100)}%`:threshold}`;
+}
 function updateHud(dt=0){
+  if(world?.isCampaignOffer){$('#campaign-preflight').style.opacity=String(world.presentationAlpha);updateChoices();return;}
   if(!world)return;
   if(world.mode!=='campaign'){
     if(!feedbackDemo&&!runNewRecord&&world.score>runBest){runNewRecord=true;recordPulse=.2;recordCue=.1;tone(660,.09,'sine',.04,1.1);}
     const previousCue=recordCue;recordCue=Math.max(0,recordCue-dt);if(previousCue>0&&recordCue===0)tone(880,.12,'sine',.04,1.1);
     recordPulse=Math.max(0,recordPulse-dt);
     const animate=!reducedMotion&&settings.juice>0;
-    if(world.score!==lastScore){scoreFeedback.set(world.score,lastScore>=0&&animate);lastScore=world.score;}
+    // Consume this frame's kill cue even if an earlier HUD sync already showed
+    // the same score; it must not leak into a later clear or Boss award.
+    scoreFeedback.set(world.score,lastScore>=0&&animate);lastScore=world.score;
     const display=scoreFeedback.step(dt,animate);
     const recordScale=recordPulse>0&&animate?1+.3*Math.sin((1-recordPulse/.2)*Math.PI):1;
     $('#score').textContent=pad(display.value);$('#score').style.transform=`scale(${Math.max(display.scale,recordScale)})`;
     $('#score').style.color=runNewRecord?'var(--player)':'';saveEndlessProgress();
   }
   if(world.mode==='campaign'&&world.config?.implemented){
+    $('#hud').style.opacity=scene?.campaignArrival?.world===world?smooth(scene.campaignArrival.elapsed/scene.campaignArrival.duration):1;
     $('#score').textContent=pad(world.score);$('#score').style.transform='scale(1)';$('#score').style.color='';
   }
   const goal=$('#campaign-goal');
@@ -852,23 +971,34 @@ function updateHud(dt=0){
   if(goal){
     goal.hidden=!world.config?.implemented;
     const label=world.config?.r===8?`标准杆 ${world.config.par} · ${world.shotsUsed} 杆`:world.config?.r===2?`第 ${world.bowlingRound}/${world.config.rounds} 轮 · 瓶 ${world.bowlingPinsDown}/${world.config.requiredPins}`:world.config?.r===6?`大奖 ${world.pinballJackpots}/${world.config.jackpotGoal}`:`${world.config?.r===1?'砖':world.config?.r===4?'球':'钉'} ${world.targetsRemaining??world.rules?.progress?.()?.remaining??0}`;
-    goal.textContent=world.config?.r===5?`合成 ${world.mergeState?.produced??0}/${world.config.goal} · 覆盖 ${Math.floor((world.mergeState?.coverage??0)*100)}%/42% · ${Math.floor(world.mergeState?.elapsed??0)}秒`:world.config?.r===9?`消除 ${world.chainState?.cleared??0}/${world.config.goal} · 余 ${Math.ceil(world.chainState?.remainingTime??60)} 秒`:world.config?.r===3?`砖 ${world.bricksBroken}/${world.config.goal} · 球 ${world.bricksBallCount}/${world.config.ballCap} · 余 ${budgetRemaining}/${world.budget} 回合`:world.config?.r===7?`余 ${Math.ceil(world.glassState?.remainingTime??60)} 秒 · 漏 ${world.glassState?.misses??0}/${world.budget} 颗`:world.config?.implemented?`${label} · 余 ${budgetRemaining}/${world.budget} ${world.config?.r===6?'球':'发'}`:'';
+    goal.textContent=world.config?.r===5?`合成 ${world.mergeState?.produced??0}/${world.config.goal} · 覆盖 ${Math.floor((world.mergeState?.coverage??0)*100)}%/42%`:world.config?.r===9?`消除 ${world.chainState?.cleared??0}/${world.config.goal} · 余 ${Math.ceil(world.chainState?.remainingTime??60)} 秒`:world.config?.r===3?`砖 ${world.bricksBroken}/${world.config.goal} · 球 ${world.bricksBallCount}/${world.config.ballCap} · 余 ${budgetRemaining}/${world.budget} 回合`:world.config?.r===7?`余 ${Math.ceil(world.glassState?.remainingTime??60)} 秒 · 漏 ${world.glassState?.misses??0}/${world.budget} 颗`:world.config?.implemented?`${label} · 余 ${budgetRemaining}/${world.budget} ${world.config?.r===6?'球':'发'}`:'';
   }
   const progress=$('#stage-progress');
   if(progress){
+    if(world.mode!=='campaign')progress.removeAttribute('title');
     const visible=world.mode!=='campaign'&&['battle','clearing'].includes(world.phase)&&Number.isFinite(world.killTarget);
     const campaign=world.mode==='campaign'&&world.config?.implemented;
     progress.hidden=!visible&&!campaign;
     if(campaign){
-      const slots=Math.min(10,world.budget),remaining=budgetRemaining;
-      progress.innerHTML=Array.from({length:slots},(_,i)=>`<i class="stage-dot${remaining>i*world.budget/slots?' filled':''}" aria-hidden="true"></i>`).join('');
-      const unit=world.config.r===3?'回合':world.config.r===7?'颗可漏球':world.config.r===6?'球':'发';
-      progress.setAttribute('aria-label',world.config.r===5?`剩余空间 ${Math.max(0,remaining).toFixed(1)}%，覆盖率达到 42% 失败`:world.config.r===9?`还需坚持 ${Math.ceil(remaining)} 秒，或消除 ${world.config.goal} 颗`:`剩余 ${remaining} ${unit}，共 ${world.budget} ${unit}`);
+      const rating=world.ratingStatus||{rating:0,summary:'',three:'',two:''};
+      progress.innerHTML=Array.from({length:3},(_,i)=>`<i class="stage-dot${i<rating.rating?' filled':''}" aria-hidden="true"></i>`).join('');
+      progress.setAttribute('aria-label',`通关可得 ${rating.rating} 点，共三点。${rating.summary}；${rating.three}；${rating.two}`);
+      progress.setAttribute('title',`${rating.three}；${rating.two}；完成目标才计评分`);
     }
     if(visible){
       const ratio=clamp((world.stageKills||0)/world.killTarget,0,1),lit=Math.floor(ratio*10+1e-9);
       progress.innerHTML=Array.from({length:10},(_,i)=>`<i class="stage-dot${i<lit?' filled':''}" aria-hidden="true"></i>`).join('');
       progress.setAttribute('aria-label',`本阶段击杀 ${world.stageKills||0}，目标 ${world.killTarget}`);
+    }
+  }
+  const ratingStatus=$('#campaign-rating-status');
+  if(ratingStatus){
+    const campaign=world.mode==='campaign'&&world.config?.implemented;
+    ratingStatus.hidden=!campaign;
+    if(campaign){
+      const status=world.ratingStatus||{};
+      ratingStatus.textContent=campaignHudRating(world);
+      ratingStatus.setAttribute('title',`${status.summary||''}；${status.three||''}；${status.two||''}；完成目标才计评分`);
     }
   }
   updateChoices();
@@ -911,7 +1041,9 @@ function drawDragGuide(g,p){
   const distance=Math.hypot(drag.dx,drag.dy);
   if(distance<=3)return;
   const color=hex(settings.player);
-  if(screen==='play'&&world.continuousControl){
+  if(screen==='play'&&world.mode==='campaign'&&world.config?.implemented&&!world.isCampaignOffer){
+    drawCampaignAim(g,world,drag,{player:p,color});
+  }else if(screen==='play'&&world.continuousControl){
     const guide=aimGuide({player:p,drag,maxPull:world.maxPull,unit:world.unit});
     for(const point of guide.points){g.fillStyle(color,point.alpha);g.fillCircle(point.x,point.y,point.r);}
     if(guide.arrow){const a=guide.arrow;g.lineStyle(a.width,color,a.alpha);g.beginPath();g.moveTo(a.left.x,a.left.y);g.lineTo(a.tip.x,a.tip.y);g.lineTo(a.right.x,a.right.y);g.strokePath();}
@@ -973,7 +1105,7 @@ function drawBoss(g,b,alpha=1){
 
 function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
   const born=birth?.scale??(b.isPlayer?1:ease(b.born));
-  const r=b.r*born;
+  const rewardPose=rewardPlayerPose(b),visualX=rewardPose.x,visualY=rewardPose.y,r=rewardPose.r*born;
   if(r<.3)return;
   const angle=pull?Math.atan2(pull.dy,pull.dx):b.angle;
   const amount=pull?clamp(Math.hypot(pull.dx,pull.dy)/(screen==='home'?home.maxPull:(screen==='levels'?selector.maxPull:(world?.maxPull||150))),0,1):0;
@@ -989,9 +1121,8 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
       const slowWeight=drag?.aim?clamp((1-(scene?.timeScale??1))/(1-aimMinimumScale(reducedMotion)),0,1):1;
       visual.eyeMix=amount*slowWeight;
     }
-    if(screen==='play'&&world?.mode!=='campaign'&&['battle','boss-entry','boss'].includes(world?.phase)&&settings.expressions){
-      visual.eyeMix=Math.max(visual.eyeMix,clamp((world.shotKills||0)/4,0,1));
-    }
+    // Combo counts survive release and cancelled pulls; they must not hold the
+    // pull expression after input ends. Kill feedback keeps its brief blink.
     if(screen==='play'&&world?.mode!=='campaign'&&settings.expressions&&Math.max(scene?.rescueUntil||0,scene?.firstTypeUntil||0)>(world.feedbackTime??world.time))visual.eyeMix=0;
   }
   // Restart breathing at the round rebound/overlay endpoint, independently of
@@ -1006,10 +1137,16 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
   }
   g.fillStyle(color,alpha*(birth?.alpha??born));g.beginPath();
   const segments=192;
-  const roll=b.roll??(world?.phase==='transition'?Math.PI*2*ease(world.phaseTime/1.45):0);
-  const skinPose={x:b.x,y:b.y,r,squash,deformAngle:angle,pullAmount:amount,roll};
+  // Keep eyes, custom contours and photos on the same eased turn as reward
+  // placement; the ready-state pose is the identical completed full turn.
+  const roll=b.roll??(world?.phase==='transition'?Math.PI*2*world.rewardMoveProgress:0);
+  const skinPose={x:visualX,y:visualY,r,squash,deformAngle:angle,pullAmount:amount,roll};
   const flight=b.isPlayer&&screen==='play'&&['battle','boss-entry','boss'].includes(world?.phase)&&!pull&&!reducedMotion;
-  const flightStretch=flight?.12*clamp(Math.hypot(b.vx,b.vy)/(world.baseSpeed||1),0,1)*settings.juice:0;
+  const flightStart=world&&scene?.rewardVisuals?.world===world?scene.rewardVisuals.flightAt:null;
+  // Re-enter the existing flight deformation softly after the shorter reward
+  // rest, without changing any stretch during ordinary combat.
+  const flightBlend=flightStart!=null?smooth((world.feedbackTime-flightStart)/.2):1;
+  const flightStretch=flight?.12*clamp(Math.hypot(b.vx,b.vy)/(world.baseSpeed||1),0,1)*settings.juice*flightBlend:0;
   const flightAngle=flight?Math.atan2(b.vy,b.vx):0;
   Object.assign(skinPose,{flightStretch,flightAngle});
   const fc=Math.cos(flightAngle),fs=Math.sin(flightAngle),fx=1+flightStretch;
@@ -1023,7 +1160,7 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
     const lx=r*point.x*(1-squash),ly=r*point.y*(1+squash*.7);
     const wx=lx*cos-ly*sin,wy=lx*sin+ly*cos;
     const along=(wx*fc+wy*fs)*fx,across=(-wx*fs+wy*fc)/fx;
-    const x=b.x+along*fc-across*fs,y=b.y+along*fs+across*fc;
+    const x=visualX+along*fc-across*fs,y=visualY+along*fs+across*fc;
     i?g.lineTo(x,y):g.moveTo(x,y);
   }
   g.closePath();
@@ -1038,15 +1175,15 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
     if(screen==='play'&&(scene?.ending||world?.config?.r===7&&settings.expressions&&world.glassMissUntil>world.feedbackTime)){
       g.lineStyle(Math.max(1,r*.045),face,alpha*.9);
       for(const side of [-1,1]){
-        const x=b.x+side*r*.17,y=b.y-r*.07,d=r*.065;
+        const x=visualX+side*r*.17,y=visualY-r*.07,d=r*.065;
         g.lineBetween(x-d,y-d,x+d,y+d);g.lineBetween(x-d,y+d,x+d,y-d);
       }
       return;
     }
-    if(screen==='play'&&world?.config?.r===8&&settings.expressions&&(b.campaignSquintUntil||0)>world.feedbackTime){
+    if(screen==='play'&&world?.mode==='campaign'&&[4,8].includes(world?.config?.r)&&settings.expressions&&(b.campaignSquintUntil||0)>world.feedbackTime){
       g.lineStyle(Math.max(1,r*.055),face,alpha*.9);
       for(const side of [-1,1]){
-        const x=b.x+side*r*.17,y=b.y-r*.07,d=r*.075;
+        const x=visualX+side*r*.17,y=visualY-r*.07,d=r*.075;
         g.lineBetween(x+side*d,y-d,x-side*d,y);
         g.lineBetween(x-side*d,y,x+side*d,y+d);
       }
@@ -1072,7 +1209,7 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
           const normal=relaxedEyes[i][j],mix=visual.eyeMix;
           const x=ex+(normal.x+(point.x-normal.x)*mix)*r;
           const y=ey+(normal.y+(point.y-normal.y)*mix)*r;
-          const px=b.x+x*rc-y*rs,py=b.y+x*rs+y*rc;
+          const px=visualX+x*rc-y*rs,py=visualY+x*rs+y*rc;
           j?g.lineTo(px,py):g.moveTo(px,py);
         });
         g.closePath();g.fillPath();
@@ -1080,7 +1217,7 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
         const surprised=screen==='play'&&settings.expressions&&Math.max(scene?.rescueUntil||0,scene?.firstTypeUntil||0)>(world?.feedbackTime??world?.time??Infinity);
         const blink=!surprised&&screen==='play'&&scene?.blinkUntil>scene.clock&&!reducedMotion?.25:1;
         const open=surprised?1.3:1;
-        g.fillEllipse(b.x+ex*rc-ey*rs,b.y+ex*rs+ey*rc,r*.105*open,r*.19*blink*open,64);
+        g.fillEllipse(visualX+ex*rc-ey*rs,visualY+ex*rs+ey*rc,r*.105*open,r*.19*blink*open,64);
       }
     }
   }
@@ -1094,9 +1231,9 @@ function bindInput(canvas){
   };
   canvas.addEventListener('pointerdown',e=>{
     if(choicePress){if(e.pointerId!==choicePress.id)clearChoicePress();return;}
-    if(campaignOffer||paused||modal||transfer||controlFlight||drag||levelPointer||trackPointer!==null||!e.isPrimary||e.button>0)return;
+    if(paused||modal||transfer||controlFlight||drag||levelPointer||trackPointer!==null||!e.isPrimary||e.button>0)return;
     const point=position(e);
-    if(screen==='play'&&world?.mode!=='campaign'&&world?.phase==='choose'){
+    if(screen==='play'&&(world?.mode!=='campaign'||world?.isCampaignOffer)&&world?.phase==='choose'){
       const choice=world.choices.find(c=>Math.hypot(point.x-c.x,point.y-c.y)<=c.r*ease(c.born??1));
       if(choice){
         choicePress={id:e.pointerId,choiceId:choice.id,x:point.x,y:point.y,startedAt:aimInputTime(e),startStamp:Number(e.timeStamp)/1000,active:false,canvas};
@@ -1189,7 +1326,7 @@ function bindInput(canvas){
 function boot(){
   if(!window.Phaser){toast('引擎未能加载，请联网刷新后重试');return;}
   class BallScene extends Phaser.Scene {
-    constructor(){super('BallScene');this.accumulator=0;this.timeSlices=[];this.effects=[];this.clock=0;this.inputClock=0;this.frameStamp=null;this.timeScale=1;this.hitSoundAt=0;this.wallFlashes=[];this.impactGhosts=[];this.zoomPulse=null;this.upgradeCue=0;this.feedbackCamera=null;this.blinkUntil=0;this.rescueUntil=0;this.firstTypeUntil=0;this.ending=null;this.cometTrails=new CometTrails();this.trailWorld=null;this.trailPhase='';this.campaignLabels=new Map();this.labelWorld=null;this.campaignNotes=[];}
+    constructor(){super('BallScene');this.accumulator=0;this.timeSlices=[];this.effects=[];this.clock=0;this.inputClock=0;this.frameStamp=null;this.timeScale=1;this.hitSoundAt=0;this.wallFlashes=[];this.impactGhosts=[];this.zoomPulse=null;this.upgradeCue=0;this.feedbackCamera=null;this.blinkUntil=0;this.rescueUntil=0;this.firstTypeUntil=0;this.ending=null;this.pressureWarning=new PressureWarning();this.cometTrails=new CometTrails();this.trailWorld=null;this.trailPhase='';this.campaignLabels=new Map();this.labelWorld=null;this.campaignNotes=[];this.campaignFailure=null;this.campaignPressure=0;}
     create(){
       scene=this;
       initializeSkins();
@@ -1200,6 +1337,13 @@ function boot(){
         const next=displayMetrics(window.innerWidth,window.innerHeight,window.devicePixelRatio||1);
         const geometryChanged=next.width!==viewport.width||next.height!==viewport.height;
         const ending=this.ending,oldWidth=viewport.width,oldHeight=viewport.height,oldUnit=world?.unit;
+        if(geometryChanged&&this.lastBorder){
+          const rx=next.width/viewport.width,ry=next.height/viewport.height,k=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);
+          for(const frame of [this.lastBorder,this.campaignFrameTransfer?.from].filter(Boolean)){
+            frame.left*=rx;frame.right*=rx;frame.top*=ry;frame.bottom*=ry;frame.cornerRadius*=k;
+            if(frame.gap){frame.gap.left*=rx;frame.gap.right*=rx;}
+          }
+        }
         if(transfer&&geometryChanged){transfer.from.x*=next.width/viewport.width;transfer.from.y*=next.height/viewport.height;transfer.from.r*=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);}
         if(skinUnlock&&geometryChanged){skinUnlock.from.x*=next.width/viewport.width;skinUnlock.from.y*=next.height/viewport.height;skinUnlock.from.r*=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);}
         if(controlFlight&&geometryChanged)for(const item of controlFlight.items){item.from.x*=next.width/viewport.width;item.from.y*=next.height/viewport.height;item.from.r*=Math.min(next.width,next.height)/Math.min(viewport.width,viewport.height);}
@@ -1354,12 +1498,13 @@ function boot(){
     }
     handleEvents(){
       const events=world.events.splice(0);
+      const endless=world.mode!=='campaign';
       const finalKill=events.some(e=>e.type==='kill')&&events.some(e=>e.type==='upgrade');
       const bossDefeated=events.some(e=>e.type==='bossDefeated');
       for(const e of events){
         if(e.type==='shoot'){sound.launch(e.power);vibrate(9);}
         if(e.type==='wall'){
-          if(this.clock-this.hitSoundAt>.07){sound.wall(e.power);this.hitSoundAt=this.clock;}
+          if((!endless||audioLevel(e.power,.5)>=.25)&&this.clock-this.hitSoundAt>.07){sound.wall(e.power,{endless});this.hitSoundAt=this.clock;}
           if(settings.juice)this.wallFlashes.push({...e,life:0});
         }
         if(e.type==='shockwave'&&settings.juice){
@@ -1367,13 +1512,15 @@ function boot(){
           this.effects.push({type:'upgrade-wave',x:e.x,y:e.y,r:e.r,life:0,total:.25,color:hex(settings.player)});
         }
         if(e.type==='hit'&&!e.lethal){
-          if(this.clock-this.hitSoundAt>.05){sound.impact({kind:'hit',power:e.power,strength:settings.juice});this.hitSoundAt=this.clock;}
-          if(e.power>.35)vibrate(12);
+          const hitTier=endless?hitFeedbackTier(e):'heavy';
+          if(hitTier!=='light'&&this.clock-this.hitSoundAt>.05){sound.impact({kind:'hit',power:e.power,strength:settings.juice,endless,hitTier});this.hitSoundAt=this.clock;}
+          if(hitTier==='heavy'&&e.power>.35)vibrate(12);
         }
         if(e.type==='kill'){
+          if(endless&&e.value>0)scoreFeedback.noteKill(e.combo,world.comboCap);
           if(e.bodySnapshot&&e.freezeDuration>0)this.impactGhosts.push({event:e,body:e.bodySnapshot,life:0,total:e.freezeDuration,startedAt:e.feedbackTime??world.feedbackTime??world.time});
           else this.particles(e,enemyBodyColor(e,hex(settings.enemy)));
-          sound.impact({kind:'kill',level:Math.max(0,(e.feedbackLevel||1)-1),power:e.power??e.impactSpeed/world.baseSpeed,strength:settings.juice,upgradeBoost:!!e.upgradeBoost});vibrate(15);
+          sound.impact({kind:'kill',level:Math.max(0,(e.feedbackLevel||1)-1),power:e.power??e.impactSpeed/world.baseSpeed,strength:settings.juice,upgradeBoost:!!e.upgradeBoost,endless,frenzy:endless&&!!world.buffs.frenzy});vibrate(15);
           this.hitSoundAt=this.clock;this.blinkUntil=this.clock+.075;this.pulseZoom(e);
         }
         if(e.type==='clearingStart'){
@@ -1421,15 +1568,30 @@ function boot(){
         if(e.type==='bossCelebrate')sound.bossVictory();
         if(e.type==='upgrade'){
           cancelDrag();
+          if(endless||world.isCampaignOffer)this.rewardVisuals={world};
           fitDemoOffer();
           if(finalKill)this.upgradeCue=.16;else tone(480,.25,'sine',.05,1.5);
         }
         if(e.type==='choiceReady'){fitDemoOffer();tone(660,.13,'sine',.035,1.2);}
         if(e.type==='buff'){
+          if(endless&&e.playerRadiusBefore<world.player.r){
+            this.rewardVisuals={world,growth:{from:e.playerRadiusBefore/world.player.r,at:e.feedbackTime,
+              x:(e.playerGrowthOffset?.x||0)/world.unit,y:(e.playerGrowthOffset?.y||0)/world.unit}};
+          }
           // Every collectible reward uses the same contact-directed shard
           // recipe as an enemy kill, without emitting a kill or changing score.
           this.particles(e,e.buff.color?hex(e.buff.color):rewardColor);
           sound.rewardHit({strength:settings.juice,power:e.power??.5});vibrate([12,30,12]);
+        }
+        if(world.isCampaignOffer&&e.type==='campaignOfferComplete'){
+          campaignOffer.action={type:'choose',upgradeId:e.upgradeId};paused=true;
+        }
+        if(world.isCampaignOffer&&e.type==='campaignOfferExit'){
+          campaignOffer.action={type:'exit',target:e.target};paused=true;
+        }
+        if(e.type==='stage'&&endless){
+          if(this.rewardVisuals?.world!==world)this.rewardVisuals={world};
+          this.rewardVisuals.flightAt=e.feedbackTime;
         }
         if(e.type==='campaignPeak'){
           cancelDrag();this.rescaleTimeSlices(world.presentationTimeScale||1);sound.bossVictory();
@@ -1466,7 +1628,7 @@ function boot(){
         if(e.type==='campaignGlassRush')tone(880,.14,'sine',.025,1.2);
         if(e.type==='campaignPocket'&&!e.player)tone(440*2**(Math.min(12,e.combo||1)/12),.12,'sine',.035,1.1);
         if(e.type==='campaignScratch')tone(220,.15,'sine',.03,.7);
-        if(e.type==='campaignRim')tone(880,.07,'sine',.025,.8);
+        if(e.type==='campaignRim'||e.type==='campaignPocketReject')tone(880,.07,'sine',.025,.8);
         if(e.type==='campaignBumperHit'){
           sound.impact({kind:'hit',level:Math.min(12,(e.combo||1)-1),power:.55,strength:settings.juice});
           tone(440*2**(Math.min(12,e.combo||1)/12),.07,'sine',.025,1.12);
@@ -1483,15 +1645,20 @@ function boot(){
         }
         if(['campaignSkill','campaignCombo','campaignPegRun'].includes(e.type))for(const [i,n] of [660,880,990].entries())tone(n,.12+i*.03,'sine',.025,1.05);
         if(e.type==='campaignBonus')tone(500+(e.index||0)*65,.1,'sine',.025,1.15);
-        if(e.type==='campaignFreeBall'){tone(880,.15,'sine',.04,1.4);}
+        if(e.type==='campaignFreeBall'){for(const n of [660,880,1100])tone(n,.16,'sine',.022,1.04);}
         if(e.type==='campaignBuff'){
           const label=this.add.text(e.x??world.player.x,e.y??world.player.y,e.label,{fontFamily:'GameSans, sans-serif',fontSize:'15px',color:settings.player,fontStyle:'normal'}).setOrigin(.5).setScale(viewport.scale);
           this.effects.push({type:'label',label,life:0,total:1.15,x:e.x??world.player.x,y:(e.y??world.player.y)-world.player.r-10});
           tone(700,.2,'sine',.045,1.4);vibrate(10);
         }
+        if(world.mode==='campaign'&&e.type==='campaignLaunchEnd'&&e.reason==='timeout')tone(180,.09,'sine',.018,.8);
+        if(world.mode==='campaign'&&e.type==='campaignFail'){
+          const cue=campaignFailureFeedback(e.reason);this.campaignFailure={...cue,life:0};
+          tone(cue.frequency,.25,'sine',.045,.6);vibrate(cue.reason==='budget'?12:[12,30,12]);
+        }
         if(e.type==='over'){
           if(world.mode==='campaign'){this.resetFeedback();openResult();}else this.beginEnding();
-          if(!world.completed){tone(160,.4,'sine',.06,.4);vibrate([20,40,30]);}
+          if(!world.completed&&world.mode!=='campaign'){tone(160,.4,'sine',.06,.4);vibrate([20,40,30]);}
         }
       }
     }
@@ -1501,27 +1668,56 @@ function boot(){
       const full={left:16,top:16,right:w-16,bottom:h-16};
       const frame=bounds||full,geometry=bounds&&screen==='play'?world?.arenaGeometry:null,returning=result?smooth(result.clock/.65):0;
       const blend=(geometry?.blend||0)*(1-returning),margin=1-blend;
-      const x=lerp(frame.left,full.left,returning)-margin,y=lerp(frame.top,full.top,returning)-margin;
-      const right=lerp(frame.right,full.right,returning)+margin,bottom=lerp(frame.bottom,full.bottom,returning)+margin;
-      const corner=clamp(lerp(geometry?.visualCornerRadius??22,22,returning),0,Math.min(right-x,bottom-y)/2);
+      let x=lerp(frame.left,full.left,returning)-margin,y=lerp(frame.top,full.top,returning)-margin;
+      let right=lerp(frame.right,full.right,returning)+margin,bottom=lerp(frame.bottom,full.bottom,returning)+margin;
+      let corner=clamp(lerp(geometry?.visualCornerRadius??22,22,returning),0,Math.min(right-x,bottom-y)/2);
       const bossPulse=screen==='play'&&!result&&!this.ending&&settings.juice?this.wallFlashes.find(flash=>flash.bossDefeat):null;
       const bossFade=bossPulse?clamp(1-bossPulse.life/bossPulse.duration,0,1):0;
       const bossOffset=bossPulse&&!reducedMotion?5*settings.juice*Math.sin(Math.PI*2*18*bossPulse.life)*bossFade*bossFade:0;
       // Move the actual visible frame, not a second outline over a still frame.
       // These offsets never enter arenaBounds or the collision simulation.
-      const outline={left:x,top:y,right,bottom,cornerRadius:corner};
       const physicalGap=bounds&&screen==='play'?campaignBorderGap(world):null;
-      const gap=physicalGap&&returning<.999?{left:lerp(physicalGap.left,(x+right)/2,returning),right:lerp(physicalGap.right,(x+right)/2,returning)}:null;
+      let gap=physicalGap&&returning<.999?{left:lerp(physicalGap.left,(x+right)/2,returning),right:lerp(physicalGap.right,(x+right)/2,returning)}:null;
+      const frameMove=this.campaignFrameTransfer;
+      if(frameMove){
+        const t=smooth(frameMove.elapsed/frameMove.duration),from=frameMove.from;
+        x=lerp(from.left,x,t);y=lerp(from.top,y,t);right=lerp(from.right,right,t);bottom=lerp(from.bottom,bottom,t);corner=lerp(from.cornerRadius,corner,t);
+        if(from.gap||gap){
+          const a=from.gap||{left:(gap.left+gap.right)/2,right:(gap.left+gap.right)/2};
+          const b=gap||{left:(a.left+a.right)/2,right:(a.left+a.right)/2};
+          const nextGap={left:lerp(a.left,b.left,t),right:lerp(a.right,b.right,t)};
+          gap=nextGap.right-nextGap.left>1e-6?nextGap:null;
+        }
+      }
+      const outline={left:x,top:y,right,bottom,cornerRadius:corner};
+      this.lastBorder={...outline,gap:gap?{...gap}:null,campaign:world?.mode==='campaign'||screen==='levels'};
       const stroke=(dx=0,dy=0,outset=0)=>{
         if(gap&&drawCampaignBorder(g,outline,gap,{dx:bossOffset+dx,dy,outset}))return;
         g.strokeRoundedRect(x+bossOffset+dx-outset,y+dy-outset,right-x+outset*2,bottom-y+outset*2,Math.max(0,corner+outset));
       };
-      const pressure=screen==='play'&&!result&&world?.mode!=='campaign'&&['battle','boss-entry','boss'].includes(world?.phase)
-        ?pressureStyle(world.enemies.filter(body=>body.hp>0).length,world.feedbackTime??world.time,{juice:settings.juice,reducedMotion})
-        :{width:1,alpha:.65,mix:0};
-      g.lineStyle(pressure.width+(reducedMotion?1.5:1)*bossFade*settings.juice,blendRgb(border,hex(settings.enemy),pressure.mix),Math.min(1,pressure.alpha+.35*bossFade*settings.juice));stroke();
-      if(this.ending){g.lineStyle(1.5,blendRgb(border,hex(settings.enemy),.4),1);stroke();return;}
-      if(screen!=='play'||result||!settings.juice)return;
+      g.lineStyle(1+(reducedMotion?1.5:1)*bossFade*settings.juice,border,Math.min(1,.65+.35*bossFade*settings.juice));stroke();
+      const warning=()=>{
+        if(world?.mode==='campaign'||screen!=='play'){
+          const pressure=this.campaignPressure||0;
+          if(pressure>1e-5){
+            const breath=reducedMotion?.6:.45+.55*(.5-.5*Math.cos(this.clock*Math.PI*2/1.8));
+            g.lineStyle(2+pressure*1.5,PRESSURE_WARNING_COLOR,pressure*breath*.6);stroke();
+          }
+          const cue=this.campaignFailure;
+          if(cue){
+            const t=clamp(cue.life/cue.duration,0,1),fade=reducedMotion?Math.sin(Math.PI*t):Math.pow(Math.sin(Math.PI*cue.pulses*t),2)*(1-t*.4);
+            g.lineStyle(1.5+fade*1.7,cue.color,fade*.75*settings.juice);stroke();
+          }
+        }
+        const {alpha,width}=this.pressureWarning;
+        if(alpha<=0)return;
+        // Two translucent strokes sit on the original path. Their extra width
+        // is paint only; arenaBounds and all collision radii stay untouched.
+        g.lineStyle(width+4,PRESSURE_WARNING_COLOR,alpha*.18);stroke();
+        g.lineStyle(width,PRESSURE_WARNING_COLOR,alpha);stroke();
+      };
+      if(this.ending){g.lineStyle(1.5,blendRgb(border,hex(settings.enemy),.4),1);stroke();warning();return;}
+      if(screen!=='play'||result||!settings.juice){warning();return;}
       for(const flash of this.wallFlashes){
         const fade=1-flash.life/(flash.duration||.12);
         if(flash.bossDefeat)continue;
@@ -1553,6 +1749,7 @@ function boot(){
           if(end>gap.right)g.lineBetween(Math.max(start,gap.right),edge,end,edge);
         }else g.lineBetween(start,edge,end,edge);
       }
+      warning();
     }
     drawHome(){
       const g=this.g,fade=home.fade*homeReveal,t=reducedMotion?0:home.clock;
@@ -1618,7 +1815,8 @@ function boot(){
     drawArena(){
       const g=this.g;this.drawBorder(world.arenaBounds);
       const view=this.ending||result?.sceneBodies,p=view?.player||world.player,boss=view?.boss||world.boss;
-      const campaignTheme={enemyColor:hex(settings.enemy),playerColor:hex(settings.player),inkColor:isDark(settings.bg)?0xf0f2e8:0x252720,bgColor:hex(settings.bg),alpha:result?1-smooth(result.clock/.65):1,reducedMotion,strength:settings.juice,showTutorial:!drag&&!paused&&!modal};
+      const arrival=this.campaignArrival?.world===world?smooth(this.campaignArrival.elapsed/this.campaignArrival.duration):1;
+      const campaignTheme={enemyColor:hex(settings.enemy),playerColor:hex(settings.player),inkColor:isDark(settings.bg)?0xf0f2e8:0x252720,bgColor:hex(settings.bg),alpha:(result?1-smooth(result.clock/.65):1)*arrival,reducedMotion,strength:settings.juice,showTutorial:!paused&&!modal,dragging:!!drag};
       if(world.config?.implemented)drawCampaign(g,world,campaignTheme);
       this.drawCampaignLabels(campaignTheme);
       const trailBodies=[world.player,...(world.auxiliaries||[])].filter(body=>!body.captured&&body.active!==false&&body.hp>0);
@@ -1632,7 +1830,7 @@ function boot(){
         if(result?.sourceIds.includes(b.id))continue;
         const pose=world.config?.implemented?campaignBodyVisual(world,b,{reducedMotion}):{body:b,alpha:1,hidden:false};
         if(pose.hidden)continue;
-        const alpha=(result?1-smooth(result.clock/.65):1)*pose.alpha;
+        const alpha=(result?1-smooth(result.clock/.65):1)*pose.alpha*arrival;
         const size=injuredEnemyScale(b,world.mode!=='campaign');
         const body=this.shakenBody({...pose.body,r:pose.body.r*size});
         const special=(world.mode!=='campaign'||[2,8].includes(world.config?.r))&&isSpecialEnemy(body);
@@ -1640,6 +1838,7 @@ function boot(){
           flashAlpha:!result&&b.hit>.01?b.hit*(b.hitAlpha??.5):0,flashColor:isDark(settings.enemy)?0xffffff:0xf9f8f0});
         else{
           drawBall(g,body,hex(settings.enemy),alpha);
+          if(world.mode==='campaign')drawCampaignBodyDetails(g,world,body,{enemyColor:hex(settings.enemy),bgColor:hex(settings.bg),alpha});
           if(!result&&b.hit>.01){g.fillStyle(isDark(settings.enemy)?0xffffff:0xf9f8f0,b.hit*(b.hitAlpha??.5));g.fillEllipse(body.x,body.y,body.r*1.7,body.r*1.7,128);}
         }
       }
@@ -1656,9 +1855,9 @@ function boot(){
       }
       for(const c of world.choices){
         const appear=ease(c.born),r=c.r*appear;
-        if(r<1)continue;
+        if(r<1||world.isCampaignOffer&&c.selected)continue;
         const bob=choiceBob(c);
-        if(world.mode!=='campaign')drawUpgradeBall(g,{...c,y:c.y+bob},rewardColor,{preview:choicePress?.active&&choicePress.choiceId===c.id,
+        if(world.mode!=='campaign'||world.isCampaignOffer)drawUpgradeBall(g,{...c,y:c.y+bob},rewardColor,{preview:choicePress?.active&&choicePress.choiceId===c.id,
           time:Math.max(0,this.inputClock-(choicePress?.startedAt||0)-.3),reducedMotion:reducedMotion||!settings.juice});
         else{
           g.fillStyle(hex(c.color),appear);g.fillEllipse(c.x,c.y+bob,r*2,r*2,192);
@@ -1669,13 +1868,15 @@ function boot(){
       for(const auxiliary of view?.auxiliaries||world.auxiliaries||[]){
         if(auxiliary.active===false||auxiliary.hp<=0)continue;
         const pose=world.config?.implemented?campaignBodyVisual(world,auxiliary,{reducedMotion}):{body:auxiliary,alpha:1,hidden:auxiliary.captured};
-        if(!pose.hidden)drawBall(g,this.shakenBody(pose.body),hex(settings.player),pose.alpha*(result?1-smooth(result.clock/.65):1),null,null,photoSlot++);
+        if(!pose.hidden)drawBall(g,this.shakenBody(pose.body),hex(settings.player),pose.alpha*(result?1-smooth(result.clock/.65):1)*arrival,null,null,photoSlot++);
       }
       if(!detached()){
         const pose=world.config?.implemented?campaignBodyVisual(world,p,{reducedMotion}):{body:p,alpha:1,hidden:false};
         if(!pose.hidden){drawDragGuide(g,pose.body);drawBall(g,pose.body,hex(settings.player),pose.alpha,drag?.pending?null:drag);}
-        if(world.config?.implemented&&!result)for(const capture of campaignCaptureVisuals(world,{reducedMotion}))
+        if(world.config?.implemented&&!result)for(const capture of campaignCaptureVisuals(world,{reducedMotion})){
           drawBall(g,capture.body,hex(capture.player?settings.player:settings.enemy),capture.alpha,null,null,capture.auxiliary?photoSlot++:null);
+          if(!capture.player)drawCampaignBodyDetails(g,world,capture.body,{enemyColor:hex(settings.enemy),bgColor:hex(settings.bg),alpha:capture.alpha});
+        }
       }
       const campaignCrown=world.bowlingCrown||world.pinballCrown;
       const crownAge=campaignCrown?(world.feedbackTime-campaignCrown.at):Infinity;
@@ -1716,6 +1917,12 @@ function boot(){
       const realDt=Math.max(0,delta/1000),dt=Math.min(realDt,.05);
       this.inputClock+=realDt;this.frameStamp=Number.isFinite(time)?time/1000:null;
       this.frameDt=dt;this.clock+=dt;this.g.clear();
+      const pressureActive=screen==='play'&&!paused&&!modal&&!result&&!this.ending&&world?.mode!=='campaign'&&world?.phase==='battle';
+      this.pressureWarning.step(pressureActive?world.enemies.filter(body=>body.hp>0).length:0,dt,{juice:settings.juice,reducedMotion});
+      // Campaign overlays breathe out independently while changing screens.
+      const campaignTarget=screen==='play'&&!result&&world?.mode==='campaign'?(world.mergeWarning||0)*settings.juice:0;
+      this.campaignPressure=(this.campaignPressure||0)+(campaignTarget-(this.campaignPressure||0))*(1-Math.exp(-dt/.18));
+      if(this.campaignFailure){this.campaignFailure.life+=dt;if(this.campaignFailure.life>=this.campaignFailure.duration)this.campaignFailure=null;}
       clearPhoto();updateSkin(dt);this.radiance?.setVisible(false);
       if(screen!=='play'&&this.campaignLabels.size)this.clearCampaignLabels();
       this.updateTrails();
@@ -1786,6 +1993,11 @@ function boot(){
         for(const e of this.effects){e.life+=dt;if(e.type==='shard'){e.x+=e.vx*dt;e.y+=e.vy*dt;e.angle+=e.spin*dt;}}
         this.effects=this.effects.filter(e=>{if(e.life>=e.total){e.label?.destroy();return false;}return true;});
       }else{this.accumulator=0;this.timeSlices=[];}
+      if(finishCampaignOfferAction()){
+        if(screen==='levels'){this.drawBorder();renderLevels();}
+        else if(screen==='home')this.drawHome();else this.drawArena();
+        updateUiBall(dt);return;
+      }
       this.updateFeedback(dt);this.drawArena();updateHud(paused?0:dt);updateUiBall(dt);
     }
   }
@@ -1796,7 +2008,7 @@ let campaignDemoEnabled=false;
 function installCampaignDemo(){
   campaignDemoEnabled=true;
   $('#campaign-demo-level').innerHTML=Array.from({length:100},(_,i)=>i+1).filter(level=>levelConfig(level).implemented).map(level=>`<option value="${level}">${level} · ${levelConfig(level).name}</option>`).join('');
-  $('#campaign-demo-level').value='5';
+  $('#campaign-demo-level').value='1';
   $('#campaign-demo-level').onchange=updateCampaignDemoUpgrades;
   updateCampaignDemoUpgrades();
   $('#campaign-demo-panel').hidden=false;
@@ -1819,7 +2031,7 @@ function installFeedbackDemo(){
   if($('#feedback-demo'))return;
   const panel=document.createElement('section');panel.id='feedback-demo';panel.className='feedback-demo';
   panel.setAttribute('aria-label','打击反馈试玩');
-  panel.innerHTML='<div class="demo-title">打击反馈试玩 <span>选择场景，可继续拖拽弹射</span></div><div class="demo-actions"><button data-demo="steer">高速转向</button><button data-demo="light">轻击</button><button data-demo="heavy">重击</button><button data-demo="kill">击杀</button><button data-demo="multi">连续击杀</button><button data-demo="reward">连锁清场</button><button data-demo="rescue">压力保命</button><button data-demo="danger">危险宽限</button><button data-demo="boss">Boss</button><button data-demo="home">返回游戏</button><button data-demo="all-demos">试玩菜单</button></div><div class="volume-row"><div><label for="demo-strength">反馈强度</label><output id="demo-value">60%</output></div><input id="demo-strength" type="range" min="0" max="100" step="10" value="60" aria-label="试玩反馈强度"></div>';
+  panel.innerHTML='<div class="demo-title">打击反馈试玩 <span>选择场景，可继续拖拽弹射</span></div><div class="demo-actions"><button data-demo="steer">高速转向</button><button data-demo="light">轻击</button><button data-demo="medium">普通命中</button><button data-demo="heavy">重击</button><button data-demo="kill">击杀</button><button data-demo="multi">连续击杀</button><button data-demo="reward">连锁清场</button><button data-demo="rescue">压力保命</button><button data-demo="danger">危险宽限</button><button data-demo="boss">Boss</button><button data-demo="home">返回游戏</button><button data-demo="all-demos">试玩菜单</button></div><div class="volume-row"><div><label for="demo-strength">反馈强度</label><output id="demo-value">60%</output></div><input id="demo-strength" type="range" min="0" max="100" step="10" value="60" aria-label="试玩反馈强度"></div>';
   const typeOptions=['ring','heavy','split','walker','magnet','shield','leader'].map(type=>`<option value="${type}">${ENEMY_TYPES[type].name}</option>`).join('');
   panel.innerHTML+=`<div class="demo-enemy"><label for="demo-enemy-type">敌球类型</label><select id="demo-enemy-type">${typeOptions}</select><button type="button" data-demo="enemy-type">试玩敌球</button></div>`;
   const upgradeOptions=UPGRADE_DEFINITIONS.map(upgrade=>`<option value="upgrade-${upgrade.id}">${upgrade.name}</option>`).join('');
@@ -1911,7 +2123,7 @@ function startFeedbackDemo(kind){
   }
   if(kind==='multi'){
     for(let i=0;i<3;i++)add(middle+i*u*1.7,p.y,1,.12,u*.65);
-  }else add(middle,p.y,kind==='light'?1000:kind==='heavy'?180:19);
+  }else add(middle,p.y,kind==='light'?2000:kind==='medium'?600:kind==='heavy'?180:19);
   // This independent ball visibly keeps moving during another pair's hit-stop.
   const witness=add(viewport.width*.65,Math.max(90,p.y-u*5),10000,.8,u*.7);witness.vx=-u*1.5;
   if(kind==='reward'){
@@ -1980,7 +2192,7 @@ function startUpgradeDemo(kind){
   const acquire=upgrade=>{
     world.phase='choose';
     world.choose({...UPGRADES[upgrade],x:p.x,y:p.y,r:u*2,born:1});
-    // Finish the same one-second reward rest used by ordinary play.
+    // Finish the same reward rest used by ordinary play.
     for(let i=0;i<125&&world.phase==='reward';i++)world.step(1/120);
   };
   if(id==='overspeed')for(let i=0;i<4;i++)acquire('energy');
@@ -2026,7 +2238,7 @@ function startUpgradeDemo(kind){
   }
   if(['breath','risk','frenzy'].includes(id))world.spawnTimer=.45;
   if(id!=='gravity')world.shoot(world.maxPull*(['bank','boomerang','shockwave'].includes(id)?1:-1),0);
-  const hints={energy:'强化后的这一发更快；可继续拖拽发射',overspeed:'弹性已满层；这一发能越过原来的速度上限',density:'重量级碰撞更有分量；继续试着撞开敌球',rubber:'碰撞后保留更多速度，可连续弹射',growth:'玩家已经大一圈，更容易同时碰到敌球',magnet:'击杀后，最近的敌球会被拉近',pierce:'撞击后仍沿原方向，试着穿过一排',pulse:'重击会震伤附近敌球并将它们推开',bank:'先撞墙，下一次撞击更有力量',gravity:'附近敌球正向玩家聚拢，可继续拖拽发射',breath:'击杀后刷新会短暂放慢',split:'这一发首杀后会分出两颗辅助球',penetration:'这一发第一次击杀后保持速度',boomerang:'撞墙后的半秒，球会加速',shockwave:'第三次撞墙会释放冲击波',risk:'刷新更快，实际得分也会增加',frenzy:'每波更多球，连击还能继续增长'};
+  const hints={energy:'强化后的这一发更快；可继续拖拽发射',overspeed:'弹性已满层；这一发能越过原来的速度上限',density:'重量级碰撞更有分量；继续试着撞开敌球',rubber:'碰撞后保留更多速度，可连续弹射',growth:'玩家已经大一圈，伤害也提高了10%',magnet:'击杀后，最近的敌球会被拉近',pierce:'撞击后仍沿原方向，试着穿过一排',pulse:'重击会震伤附近敌球并将它们推开',bank:'先撞墙，下一次撞击更有力量',gravity:'附近敌球正向玩家聚拢，可继续拖拽发射',breath:'击杀后刷新会短暂放慢',split:'这一发首杀后会分出两颗辅助球',penetration:'这一发第一次击杀后保持速度',boomerang:'撞墙后0.8秒，球会加速30%',shockwave:'每第2次撞墙会释放冲击波',risk:'新生敌球HP更高，实际得分也会增加',frenzy:'每波更多球，连击还能继续增长'};
   if(hint)hint.textContent=hints[id]||'选择场景，可继续拖拽弹射';
   updateHud();
 }
@@ -2034,7 +2246,7 @@ function startUpgradeDemo(kind){
 function exportAimStatistics(){
   const link=document.createElement('a');
   link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(aimStatistics(),null,2));
-  link.download='qiuqiule-aim-v6.9.0.json';
+  link.download='qiuqiule-aim-v7.7.1.json';
   document.body.append(link);link.click();link.remove();
 }
 
@@ -2062,8 +2274,8 @@ document.addEventListener('click',e=>{
   unlockAudio();tone(680,.035,'sine',.02,1.15);
   const action=button.dataset.action;
   if(action.startsWith('home-')&&e.detail===0&&screen==='home'&&!modal)home.launchTo(action==='home-launch'?'play':action.slice(5));
-  if(action==='campaign-upgrade'&&campaignOffer&&campaignOffer.choices.some(c=>c.id===button.dataset.upgrade))launchCampaignLevel(button.dataset.upgrade);
-  if(action==='campaign-cancel')closeCampaignOffer();
+  if(action==='campaign-upgrade'&&e.detail===0&&campaignOffer&&!paused&&!modal)world.launchTo(button.dataset.upgrade);
+  if(action==='campaign-cancel'&&!paused&&!modal)leaveCampaignOffer();
   if(action==='campaign-demo-start')startCampaignDemo(Number($('#campaign-demo-level').value),$('#campaign-demo-upgrade').value);
   if(action==='campaign-demo-close'){$('#campaign-demo-panel').hidden=true;campaignDemoEnabled=false;}
   if(action==='campaign-skip-level'&&screen==='levels'&&canSkip(campaignProgress,Number(button.dataset.level))){
@@ -2073,18 +2285,18 @@ document.addEventListener('click',e=>{
 
   if(action==='campaign-skip'&&campaignOffer&&canSkip(campaignProgress,currentLevel)){
     campaignProgress=skipLevel(campaignProgress,currentLevel);storage.write('qiuqiule-campaign',campaignProgress);
-    closeCampaignOffer();selector.unlocked=campaignProgress.unlocked;$('#level-announcement').textContent='已跳过，可随时返回挑战；本关不计评分。';
+    leaveCampaignOffer();selector.unlocked=campaignProgress.unlocked;$('#level-announcement').textContent='已跳过，可随时返回挑战；本关不计评分。';
   }
   if(action==='levels'&&modal==='over')openLevels();
   if(action==='restart')restartGame();
-  if(action==='home'){if(modal==='pause')openResult();else showHome();}
+  if(action==='home'){if(world?.isCampaignOffer)leaveCampaignOffer('home');else if(modal==='pause')openResult();else showHome();}
   if(action==='pause')openPause();
   if(action==='resume')resumeGame();
   if(action==='close')closePanel();
   if(action==='settings')openSettings();
   if(action==='help')openHelp();
   if(action==='export-aim')exportAimStatistics();
-  if(action==='export-campaign'){const link=document.createElement('a');link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(campaignProgress,null,2));link.download='qiuqiule-campaign-v6.9.0.json';document.body.append(link);link.click();link.remove();}
+  if(action==='export-campaign'){const link=document.createElement('a');link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(campaignProgress,null,2));link.download='qiuqiule-campaign-v7.7.1.json';document.body.append(link);link.click();link.remove();}
   if(action==='sound'){settings.sound=!settings.sound;applyTheme();}
   if(action==='haptic'){settings.haptic=!settings.haptic;applyTheme();vibrate(10);}
   if(action==='expressions'){settings.expressions=!settings.expressions;applyTheme();}
@@ -2105,7 +2317,7 @@ $('#feedback-strength')?.addEventListener('input',e=>{
 document.addEventListener('keydown',e=>{
   if(transfer||controlFlight){if(e.key==='Escape')e.preventDefault();return;}
   if(e.key==='Escape'){
-    if(campaignOffer){closeCampaignOffer();return;}
+    if(campaignOffer&&!modal){leaveCampaignOffer();return;}
     if(modal&&modal!=='over')closePanel();else if(screen==='play'&&world.phase!=='over')setPanel('pause');
   }
   if(e.key==='Tab'&&modal){

@@ -196,7 +196,7 @@ test('campaign hooks stay separate from the new endless opening and escalation',
   assert.equal(world.killTarget, 14);
   assert.equal(world.spawnInterval, 2);
   world.stage = 8; world.time = 180; world.enemies = []; world.spawnEnemy();
-  assert.equal(world.enemies[0].hp, 19 * 1.16 ** 7 + 8);
+  assert.equal(world.enemies[0].hp, 19 * 1.20 ** 7 + 8);
   assert.equal(world.enemies[0].density, .65 + .06 * 8 + .0004 * 180);
   assert.equal(world.enemies[0].value, 10);
   assert.equal(world.killTarget, 42);

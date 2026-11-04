@@ -51,7 +51,7 @@ test('a winning stage-five pulse batch takes precedence over capacity and carrie
   for(let i=0;i<28;i++){
     const b=w.makeBody(350+i*3,300,w.unit,.8);Object.assign(b,{hp:1,value:10,born:1,solid:true});w.enemies.push(b);
   }
-  w.step(1/120);w.step(1/120);assert.equal(w.phase,'boss-entry');assert.equal(w.score,1960);assert.equal(w.enemies.length,0);assert.equal(w.stageKills,57);
+  w.step(1/120);w.step(1/120);assert.equal(w.phase,'boss-entry');assert.equal(w.score,2925);assert.equal(w.enemies.length,0);assert.equal(w.stageKills,57);
   assert.equal(w.events.filter(e=>e.type==='kill').length,28);assert.equal(w.events.filter(e=>e.type==='over').length,0);assert.equal(w.events.filter(e=>e.type==='rescue').length,0);
 });
 
@@ -248,7 +248,7 @@ test('a normal stage-five build wins through real shots and rebounds in under 20
     w.player.density=1.5*w.density;w.player.mass=w.player.density;w.beginBoss();
     while(w.phase!=='boss')w.step(1/120);
     w.events=[];const startScore=w.score;
-    let hits=0,shots=0,elapsed=0,pulling=0;
+    let hits=0,stunnedHits=0,shots=0,elapsed=0,pulling=0;
     while(w.phase==='boss'&&elapsed<20){
       if(pulling===0&&w.ready){assert.equal(w.beginPull(),true);pulling=.12;shots++;}
       if(pulling>0){
@@ -260,11 +260,14 @@ test('a normal stage-five build wins through real shots and rebounds in under 20
         }
       }
       // Only normal input and integration: no repositioning or direct damage.
+      const wasStunned=w.boss.stunned;
       w.step(1/120,pulling>0);elapsed+=1/120;
-      hits+=w.events.splice(0).filter(e=>e.type==='bossHit').length;
+      const contacts=w.events.splice(0).filter(e=>e.type==='bossHit').length;
+      hits+=contacts;if(wasStunned)stunnedHits+=contacts;
     }
     assert.equal(w.phase,'boss-celebrate',`${width}x${height}: ${elapsed}s, ${hits} hits`);
-    assert.ok(elapsed<20&&elapsed>2);assert.ok(hits>=25&&hits<=35&&shots>=1);
+    assert.ok(elapsed<20&&elapsed>2);assert.ok(hits>=20&&hits<=35&&shots>=1);
+    assert.ok(stunnedHits>=2,'the stronger density launch still leaves a finishing rebound after the first stunned hit');
     assert.equal(w.score-startScore,1000);
   }
 });
@@ -322,7 +325,7 @@ test('stunned health is a one-time build snapshot and ordinary damage remains un
     const w=ready(),boss=w.boss;w.density=density;w.energy=energy;w.player.mass=1.5*density;
     if(bank)w.buffs.bank=1;
     boss.r=boss.minRadius+.001;w.damageBoss(w.baseSpeed);
-    const hp=boss.hp,maximumLaunch=Math.min(w.unit*60,w.baseSpeed*Math.sqrt(energy/density))+w.readySpeed;
+    const hp=boss.hp,maximumLaunch=Math.min(w.unit*60,w.baseSpeed*Math.sqrt(energy))+w.readySpeed;
     w.bank=bank?2:0;
     const strongestDamage=Math.round(.5*w.player.mass*(maximumLaunch/w.unit)**2*.31*(bank?2.2:1));
     w.damageBoss(maximumLaunch);

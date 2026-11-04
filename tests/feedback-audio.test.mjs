@@ -243,3 +243,122 @@ test('upgrade tone respects zero feedback and effect gates and cannot raise nonl
     mute();audio.impact({kind:'kill',upgradeBoost:true});assert.equal(c.oscillators.length,1);
   }
 });
+
+test('endless kills climb through eight notes while legacy kills keep their six-note ceiling', async () => {
+  const scale = [523.251, 659.255, 783.991, 1046.502, 1318.51, 1567.982, 2093.004, 2637.02];
+  assert.deepEqual(IMPACT_NOTES, scale);
+  for (const endless of [false, true]) {
+    const {c, audio} = await setup();
+    for (let level = 0; level < 12; level++) {
+      const before = c.oscillators.length;
+      assert.equal(audio.impact({kind: 'kill', level, endless}), true);
+      assert.equal(firstPitch(c.oscillators[before]), scale[Math.min(level, endless ? 7 : 5)]);
+      assert.equal(audio.voices.size, 4);
+      for (const voice of [...audio.voices]) voice.finish();
+    }
+  }
+});
+
+test('endless Frenzy alternates C7 and E7 after the eighth kill and boosts never lower the chosen note', async () => {
+  for (const upgradeBoost of [false, true]) {
+    const {c, audio} = await setup();
+    for (let level = 0; level < 16; level++) {
+      const before = c.oscillators.length;
+      audio.impact({kind: 'kill', level, endless: true, frenzy: true, upgradeBoost});
+      const expected = level < 8 ? level : 6 + level % 2;
+      assert.equal(firstPitch(c.oscillators[before]), IMPACT_NOTES[Math.min(7, expected + Number(upgradeBoost))]);
+      for (const voice of [...audio.voices]) voice.finish();
+    }
+  }
+  const legacy = await setup();
+  legacy.audio.impact({kind: 'kill', level: 12, frenzy: true, upgradeBoost: true});
+  assert.equal(firstPitch(legacy.c.oscillators[0]), 2093.004, 'campaign boosted ceiling remains its old C7');
+  const silentFeedback = await setup();
+  silentFeedback.audio.impact({kind: 'kill', level: 6, endless: true, upgradeBoost: true, strength: 0});
+  assert.equal(firstPitch(silentFeedback.c.oscillators[0]), 2093.004);
+  assert.equal(silentFeedback.audio.voices.size, 1);
+});
+
+test('endless light hits allocate nothing while medium hits are one fifty-ms voice at forty-percent main gain', async () => {
+  const quiet = await setup();
+  assert.equal(quiet.audio.impact({kind: 'hit', endless: true, hitTier: 'light', power: 1}), false);
+  assert.equal(quiet.c.oscillators.length, 0); assert.equal(quiet.c.sources.length, 1);
+  assert.equal(quiet.c.buffers.length, 0); assert.equal(quiet.audio.voices.size, 0);
+  for (const strength of [0, .6, 1]) {
+    const heavy = await setup(), medium = await setup();
+    heavy.c.currentTime = medium.c.currentTime = 7;
+    heavy.audio.impact({kind: 'hit', endless: true, hitTier: 'heavy', power: .5, strength});
+    assert.equal(medium.audio.impact({kind: 'hit', endless: true, hitTier: 'medium', power: .5, strength}), true);
+    assert.equal(medium.c.oscillators.length, 1); assert.equal(medium.c.sources.length, 1);
+    assert.equal(medium.c.buffers.length, 0); assert.equal(medium.audio.voices.size, 1);
+    const voice = medium.c.oscillators[0];
+    assert.equal(firstPitch(voice), firstPitch(heavy.c.oscillators[0]));
+    assert.ok(Math.abs(peak(voice) / peak(heavy.c.oscillators[0]) - .4) < 1e-10);
+    assert.ok(Math.abs(voice.target.gain.events.at(-1).at - 7 - .05) < 1e-10);
+    voice.finish(); assert.equal(medium.audio.voices.size, 0);
+  }
+});
+
+test('hit tiers do not silence Boss, lethal or legacy hit sounds', async () => {
+  for (const options of [
+    {kind: 'hit'}, {kind: 'boss', endless: true}, {kind: 'kill', endless: true},
+  ]) for (const hitTier of ['light', 'medium']) {
+    const reference = await setup(), other = await setup();
+    reference.audio.impact(options); other.audio.impact({...options, hitTier});
+    assert.equal(other.audio.voices.size, reference.audio.voices.size);
+    assert.deepEqual(other.c.oscillators.map(firstPitch), reference.c.oscillators.map(firstPitch));
+    assert.deepEqual(other.c.oscillators.map(peak), reference.c.oscillators.map(peak));
+    assert.deepEqual(other.c.oscillators.map(v => v.stopTime), reference.c.oscillators.map(v => v.stopTime));
+  }
+});
+
+test('endless walls use a strict quarter-power gate and quadratic gain without changing duration or legacy walls', async t => {
+  const originalRandom = Math.random; let draws = 0;
+  Math.random = () => { draws++; return .5; };
+  t.after(() => { Math.random = originalRandom; });
+  const muted = await setup();
+  for (const power of [-1, 0, .249999]) assert.equal(muted.audio.wall(power, {endless: true}), false);
+  assert.equal(muted.c.oscillators.length, 0); assert.equal(draws, 0);
+  for (const power of [.25, .5, 1, 2]) {
+    const {c, audio} = await setup(); c.currentTime = 3;
+    assert.equal(audio.wall(power, {endless: true}), true);
+    const voice = c.oscillators[0], bounded = Math.min(power, 1);
+    assert.equal(firstPitch(voice), 100 + bounded * 80);
+    assert.ok(Math.abs(peak(voice) - .0175 * bounded ** 2) < 1e-12);
+    assert.ok(Math.abs(voice.target.gain.events.at(-1).at - 3 - .055) < 1e-12);
+  }
+  for (const power of [0, .1, .5, 1]) {
+    const {c, audio} = await setup();
+    assert.equal(audio.wall(power), true);
+    assert.equal(peak(c.oscillators[0]), .0175);
+  }
+});
+
+test('new endless audio keeps mute gates and reserves exactly the voices it needs', async () => {
+  const c = audioContext(); let created = 0;
+  const audio = new GameAudio({createContext: () => { created++; return c; }, loadMusic: async () => ({duration: 90})});
+  const sounds = () => {
+    assert.equal(audio.impact({kind: 'hit', endless: true, hitTier: 'medium'}), false);
+    assert.equal(audio.impact({kind: 'kill', endless: true, frenzy: true, level: 11}), false);
+    assert.equal(audio.wall(.5, {endless: true}), false);
+  };
+  sounds(); assert.equal(created, 0);
+  await audio.unlock(); await audio.loading;
+  audio.setLevels({sound: false}); sounds();
+  audio.setLevels({sound: true, sfxVolume: 0}); sounds();
+  audio.setLevels({sfxVolume: 1}); audio.setHidden(true); sounds();
+  audio.setHidden(false); await audio.unlock(); c.state = 'suspended'; sounds();
+  assert.equal(c.oscillators.length, 0);
+  c.state = 'running';
+  for (let i = 0; i < 31; i++) audio.tone();
+  assert.equal(audio.impact({kind: 'hit', endless: true, hitTier: 'heavy'}), false);
+  assert.equal(audio.impact({kind: 'hit', endless: true, hitTier: 'medium'}), true);
+  assert.equal(audio.voices.size, 32);
+  const allocated = c.oscillators.length + c.sources.length;
+  assert.equal(audio.impact({kind: 'kill', endless: true}), false);
+  assert.equal(audio.wall(1, {endless: true}), false);
+  assert.equal(c.oscillators.length + c.sources.length, allocated);
+  for (const voice of [...audio.voices]) voice.finish();
+  assert.equal(audio.impact({kind: 'kill', endless: true, level: 7}), true);
+  assert.equal(audio.voices.size, 4);
+});

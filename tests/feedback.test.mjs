@@ -1,8 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ScoreFeedback, chargeFeedback, impactShards, mergeShards, impactZoom, feedbackStrength} from '../dist/feedback.js';
+import {ScoreFeedback, chargeFeedback, impactShards, mergeShards, impactZoom, feedbackStrength, hitFeedbackTier} from '../dist/feedback.js';
 
 const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-9, message || `${actual} ≈ ${expected}`);
+
+test('ordinary hit tiers use maximum health with inclusive ten and thirty percent boundaries', () => {
+  for (const [damage, expected] of [[0, 'light'], [9.999, 'light'], [10, 'medium'], [29.999, 'medium'], [30, 'heavy'], [100, 'heavy']]) {
+    assert.equal(hitFeedbackTier({damage, maxHp: 100}), expected);
+    assert.equal(hitFeedbackTier({damage, maxHp: 100, hp: 1}), expected, 'remaining HP cannot inflate an ordinary hit tier');
+  }
+  for (const sample of [{}, {damage: NaN, maxHp: 100}, {damage: 1, maxHp: Infinity}, {damage: 1, maxHp: 0}]) {
+    assert.equal(hitFeedbackTier(sample), 'heavy', 'unclassified legacy events retain their established feedback');
+  }
+});
 
 test('score rolls monotonically to the exact score within 250 ms while its pop ends at 160 ms', () => {
   const score = new ScoreFeedback(); score.set(137);
@@ -28,6 +38,33 @@ test('continuous scoring retargets from the displayed state and repeated HUD syn
   assert.equal(previous, 30);
   score.set(5000); score.step(.1); score.set(5001);
   assert.deepEqual(score.step(.25), {value: 5001, scale: 1});
+});
+
+test('endless kill pops grow with capped combo while keeping the original timing and exact score', () => {
+  for(const [combo,cap,peak] of [[1,8,1.22],[2,8,1.26],[3,8,1.30],[8,8,1.50],[12,8,1.50],[12,12,1.66],[40,12,1.66]]){
+    const score=new ScoreFeedback();score.noteKill(combo,cap);score.set(1000);
+    near(score.step(.08).scale,peak);near(score.step(.08).scale,1);
+    assert.deepEqual(score.step(.09),{value:1000,scale:1});
+  }
+});
+
+test('batched kills select their highest combo once without contaminating later nonkill scores or repeated syncs', () => {
+  const score=new ScoreFeedback();for(const combo of [1,3,2])score.noteKill(combo);score.set(75);
+  near(score.step(.08).scale,1.30);score.set(75);near(score.step(.08).scale,1);
+  assert.deepEqual(score.step(.09),{value:75,scale:1});
+  score.set(85);near(score.step(.08).scale,1.18);
+  score.noteKill(12,12);score.set(85);score.set(100);near(score.step(.08).scale,1.18,'already-counted kills are discarded on a same-target sync');
+  for(const combo of [0,-1,NaN,Infinity])score.noteKill(combo,12);
+  score.set(110);near(score.step(.08).scale,1.18);
+});
+
+test('score reset and disabled animation discard queued and active combo amplification', () => {
+  const score=new ScoreFeedback();score.noteKill(12,12);score.reset(0);score.set(10);
+  near(score.step(.08).scale,1.18);
+  score.noteKill(12,12);score.set(30,false);assert.deepEqual(score.step(0),{value:30,scale:1});
+  score.set(40);near(score.step(.08).scale,1.18);
+  score.noteKill(12,12);score.set(100);score.step(.03);assert.deepEqual(score.step(.01,false),{value:100,scale:1});
+  score.set(110);near(score.step(.08).scale,1.18);
 });
 
 test('reduced animation, disabled feedback and restart produce immediate exact scores without a residual pop', () => {

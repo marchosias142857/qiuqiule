@@ -77,8 +77,8 @@ test('one ordinary full launch repeatedly rebounds without the former high-drag 
 });
 
 test('stunned HP includes the legal wall multiplier and leaves a second full-strength impact',()=>{
- for(const upgrades of [[],['bank'],['energy','energy','energy','energy','boomerang','bank']]){const w=enter();for(const id of upgrades)w.applyUpgrade(id);w.boss.r=w.boss.minRadius+.001;w.damageBoss(w.unit*30);assert.equal(w.boss.stunned,true);const hp=w.boss.hp;
- const speed=(Math.min(w.launchCap,w.baseSpeed*Math.sqrt(w.energy/w.density))+w.readySpeed)*(w.buffs.boomerang?1.2:1);w.shotBanked=true;w.bank=w.buffs.bank?2:0;w.damageBoss(speed);assert.ok(w.boss.hp>0&&w.boss.hp<hp);w.bank=w.buffs.bank?2:0;w.damageBoss(speed);assert.equal(w.phase,'boss-celebrate');}
+ for(const upgrades of [[],['density'],['density','density','bank'],['bank'],['energy','energy','energy','energy','boomerang','bank','density','density']]){const w=enter();for(const id of upgrades)w.applyUpgrade(id);w.boss.r=w.boss.minRadius+.001;w.damageBoss(w.unit*30);assert.equal(w.boss.stunned,true);const hp=w.boss.hp;
+ const speed=(Math.min(w.launchCap,w.baseSpeed*Math.sqrt(w.energy))+w.readySpeed)*(w.buffs.boomerang?1.3:1);w.shotBanked=true;w.bank=w.buffs.bank?2:0;w.damageBoss(speed);assert.ok(w.boss.hp>0&&w.boss.hp<hp);w.bank=w.buffs.bank?2:0;w.damageBoss(speed);assert.equal(w.phase,'boss-celebrate');}
 });
 
 test('bossKills persists through later play and defeat but resets with a fresh run',()=>{

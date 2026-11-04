@@ -2,6 +2,15 @@
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 export const feedbackStrength=value=>Number.isFinite(value)?clamp(value,0,1):.6;
 
+// Use maximum HP, so a tiny finishing hit cannot be mistaken for a heavy hit.
+// Lethal and shield events are routed separately by the caller. Older events
+// without a damage sample keep their established feedback.
+export function hitFeedbackTier({damage,maxHp}={}){
+  if(!Number.isFinite(damage)||damage<0||!Number.isFinite(maxHp)||maxHp<=0)return 'heavy';
+  const ratio=damage/maxHp;
+  return ratio<.1?'light':ratio<.3?'medium':'heavy';
+}
+
 export function chargeFeedback(mask,amount){
   let next=mask||0;const pulses=[];
   [.5,.8,1].forEach((threshold,i)=>{
@@ -12,18 +21,24 @@ export function chargeFeedback(mask,amount){
 
 export class ScoreFeedback {
   constructor(){this.reset(0);}
-  reset(value){this.from=this.value=this.target=value;this.age=1;}
+  reset(value){this.from=this.value=this.target=value;this.age=1;this.pop=.18;this.pendingCombo=0;}
+  noteKill(combo,cap=8){
+    if(!Number.isFinite(combo)||combo<1)return;
+    const limit=Number.isFinite(cap)?clamp(Math.floor(cap),0,12):8;
+    this.pendingCombo=Math.max(this.pendingCombo,Math.min(Math.floor(combo),limit));
+  }
   set(value,animate=true){
+    const combo=this.pendingCombo;this.pendingCombo=0;
     if(value===this.target)return;
     if(!animate||value<this.target){this.reset(value);return;}
-    this.from=this.value;this.target=value;this.age=0;
+    this.from=this.value;this.target=value;this.age=0;this.pop=.18+.04*combo;
   }
   step(dt,animate=true){
     if(!animate){this.reset(this.target);return {value:this.target,scale:1};}
     this.age+=Math.max(0,dt);
     const t=clamp(this.age/.25,0,1);
     this.value=this.from+(this.target-this.from)*(1-(1-t)**3);
-    return {value:t===1?this.target:Math.floor(this.value),scale:this.age<.16?1+.18*Math.sin(Math.PI*this.age/.16):1};
+    return {value:t===1?this.target:Math.floor(this.value),scale:this.age<.16?1+this.pop*Math.sin(Math.PI*this.age/.16):1};
   }
 }
 

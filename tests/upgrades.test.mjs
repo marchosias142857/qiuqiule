@@ -44,19 +44,19 @@ test('core tuning is fixed across stages and all documented effect constants are
   assert.deepEqual(UPGRADES.energy.effect, {energyMultiplier: 1.3});
   assert.deepEqual(UPGRADES.overspeed.effect, {speedCapBonus: 8});
   assert.deepEqual(UPGRADES.density.effect, {densityMultiplier: 1.35});
-  assert.deepEqual(UPGRADES.rubber.effect, {retentionBonus: .06});
-  assert.deepEqual(UPGRADES.growth.effect.radiusScales, [1.2, 1.4]);
-  assert.deepEqual(UPGRADES.magnet.effect, {pullDuration: .4, pullDistance: 1.5});
+  assert.deepEqual(UPGRADES.rubber.effect, {retentionBonus: .08, lethalRetentionBonus: .04});
+  assert.deepEqual(UPGRADES.growth.effect, {radiusScales: [1.2, 1.4], damageBonus: .1});
+  assert.deepEqual(UPGRADES.magnet.effect, {pullDuration: .6, pullDistance: 2.5});
   assert.deepEqual(UPGRADES.pierce.effect, {retention: .92});
   assert.deepEqual(UPGRADES.pulse.effect, {radius: 4, damageRatio: .3});
   assert.deepEqual(UPGRADES.bank.effect, {damageBonus: .6, maxCharges: 2});
   assert.deepEqual(UPGRADES.gravity.effect, {radius: 5, acceleration: 2.4});
-  assert.deepEqual(UPGRADES.breath.effect, {duration: 1.5, intervalMultiplier: 1.5});
+  assert.deepEqual(UPGRADES.breath.effect, {duration: 2.5, intervalMultiplier: 1.5});
   assert.deepEqual(UPGRADES.split.effect, {count: 2, radius: .7, speedRatio: .6, damageRatio: .6});
   assert.deepEqual(UPGRADES.penetration.effect, {firstKillRetention: 1});
-  assert.deepEqual(UPGRADES.boomerang.effect, {duration: .5, speedMultiplier: 1.2});
-  assert.deepEqual(UPGRADES.shockwave.effect, {everyWalls: 3, radius: 3, fullPullDamageRatio: .5});
-  assert.deepEqual(UPGRADES.risk.effect, {spawnRateMultiplier: 1.2, scoreMultiplier: 1.5});
+  assert.deepEqual(UPGRADES.boomerang.effect, {duration: .8, speedMultiplier: 1.3});
+  assert.deepEqual(UPGRADES.shockwave.effect, {everyWalls: 2, radius: 3, fullPullDamageRatio: .75});
+  assert.deepEqual(UPGRADES.risk.effect, {enemyHpMultiplier: 1.15, scoreMultiplier: 1.5});
   assert.deepEqual(UPGRADES.gambler.effect, {nextTargetMultiplier: 1.5, nextChoiceCount: 5});
   assert.deepEqual(UPGRADES.frenzy.effect, {waveSizeBonus: 2, restMultiplier: .7, comboCap: 12});
 });
@@ -113,11 +113,15 @@ test('context weighting has exact thresholds, requires a completed shot sample a
   for (const id of ['energy', 'density', 'split']) assert.equal(upgradeWeight(id, {nextBoss: true}), 2);
   for (const id of ['split', 'pulse', 'gravity']) {
     assert.equal(upgradeWeight(id, {completedShots: 0, averageKillsPerShot: 0}), 1);
-    assert.equal(upgradeWeight(id, {completedShots: 1, averageKillsPerShot: 1.2}), 1);
-    assert.equal(upgradeWeight(id, {completedShots: 1, averageKillsPerShot: NaN}), 1);
-    assert.equal(upgradeWeight(id, {completedShots: 1, averageKillsPerShot: 1.1999}), 2);
+    assert.equal(upgradeWeight(id, {averageKillsPerShot: 1.3}), 1);
+    for (const averageKillsPerShot of [1.5, 1.500001, NaN, Infinity, undefined])
+      assert.equal(upgradeWeight(id, {completedShots: 1, averageKillsPerShot}), 1);
+    for (const averageKillsPerShot of [1.1999, 1.2, 1.35, 1.499999])
+      assert.equal(upgradeWeight(id, {completedShots: 1, averageKillsPerShot}), 2);
   }
-  assert.equal(upgradeWeight('split', {nextBoss: true, completedShots: 3, averageKillsPerShot: 1}), 4);
+  assert.equal(upgradeWeight('split', {nextBoss: true, completedShots: 3, averageKillsPerShot: 1.35}), 4);
+  assert.equal(upgradeWeight('split', {nextBoss: true, completedShots: 0, averageKillsPerShot: 0}), 2);
+  assert.equal(upgradeWeight('split', {nextBoss: true, completedShots: 3, averageKillsPerShot: 1.5}), 2);
   assert.equal(upgradeWeight('frenzy', {hardEnemyShare: 1, nextBoss: true, completedShots: 3, averageKillsPerShot: 0}), 1);
   assert.equal(upgradeWeight('toString'), 0);
 });
@@ -140,15 +144,26 @@ test('real weighted first-slot frequencies match the snapshot and exclude maxed 
   assert.deepEqual(observed, {overspeed: 1000, density: 1000, rubber: 1000, growth: 1000, magnet: 1000});
 });
 
-test('real special-slot frequencies reflect both boss and low-efficiency weighting', () => {
-  const context = {nextBoss: true, completedShots: 4, averageKillsPerShot: 1};
-  const expected = {pierce: 1000, pulse: 2000, bank: 1000, gravity: 2000, breath: 1000, split: 4000, penetration: 1000, boomerang: 1000, shockwave: 1000};
-  const observed = Object.fromEntries(Object.keys(expected).map(id => [id, 0]));
-  for (let i = 0; i < 14000; i++) {
-    const choices = rollUpgrades({context, count: 2, random: sequence(0, (i + .5) / 14000)});
-    observed[choices[1].id]++;
+test('real special-slot frequencies cover the widened efficiency window, boundary and independent Boss multiplier', () => {
+  for (const [completedShots, averageKillsPerShot, nextBoss, pulseUnits, splitUnits] of [
+    [4, 1.2, false, 2, 2],
+    [4, 1.35, true, 2, 4],
+    [4, 1.499999, false, 2, 2],
+    [4, 1.5, false, 1, 1],
+    [4, 1.5, true, 1, 2],
+    [0, 1.35, false, 1, 1],
+  ]) {
+    const context = {completedShots, averageKillsPerShot, nextBoss};
+    const expected = {pierce: 100, pulse: pulseUnits * 100, bank: 100, gravity: pulseUnits * 100,
+      breath: 100, split: splitUnits * 100, penetration: 100, boomerang: 100, shockwave: 100};
+    const observed = Object.fromEntries(Object.keys(expected).map(id => [id, 0]));
+    const samples = Object.values(expected).reduce((total, count) => total + count, 0);
+    for (let i = 0; i < samples; i++) {
+      const choices = rollUpgrades({context, count: 2, random: sequence(0, (i + .5) / samples)});
+      observed[choices[1].id]++;
+    }
+    assert.deepEqual(observed, expected, JSON.stringify(context));
   }
-  assert.deepEqual(observed, expected);
 });
 
 test('special exhaustion replaces its slot with a distinct regular layer', () => {

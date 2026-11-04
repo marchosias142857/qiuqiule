@@ -41,8 +41,8 @@ test('ordinary endless release redirects current speed while Boss release restor
     const w = world(); w.phase = phase; w.energy = energy; w.density = density;
     w.player.vx = w.baseSpeed * 3; assert.equal(w.beginPull(), true);
     w.player.vx = current * w.baseSpeed * .6; w.player.vy = current * w.baseSpeed * .8;
-    const speed = length(w.player), launch = Math.min(w.unit * 60, w.baseSpeed * power * Math.sqrt(energy / density));
-    const expected = phase==='battle'?Math.max(.9 * speed, launch * (1 - .5 * Math.min(1, speed / w.baseSpeed))):launch+Math.min(w.baseSpeed*3,w.readySpeed);
+    const speed = length(w.player), launch = Math.min(w.unit * 60, w.baseSpeed * power * Math.sqrt(energy));
+    const expected = phase==='battle'?Math.max(speed, launch * (1 - .5 * Math.min(1, speed / w.baseSpeed))):launch+Math.min(w.baseSpeed*3,w.readySpeed);
     assert.equal(w.shoot(w.maxPull * power * .6, -w.maxPull * power * .8), true);
     near(w.player.vx, -expected * .6); near(w.player.vy, expected * .8);
     assert.equal(w.pullStartSpeed, null);

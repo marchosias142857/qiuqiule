@@ -1,24 +1,27 @@
 import {clamp} from '../physics.js';
+import {campaignBounds} from '../campaign-layout.js';
+import {poolLevel} from './pool-levels.js';
+export {POOL_LEVELS} from './pool-levels.js';
 
 const tier = value => clamp(Math.floor(Number(value) || 0), 0, 9);
 
-export function poolParams(value) {
-  const k = tier(value), targetBalls = 7 + Math.floor(k / 2);
+export function poolParams(value, variant = 0) {
+  const k = tier(value), rank20 = k * 2 + (variant ? 1 : 0), plan = poolLevel(rank20);
+  const targetBalls = plan.balls.length, budget = targetBalls + 3;
   return Object.freeze({kind: 'pool', name: '落袋', targetBalls,
-    budget: targetBalls + 4 - Math.floor(k / 3), scratchPenalty: k >= 5 ? 2 : 1,
-    ballRadius: .95, pocketRadius: 1.35, pocketSpeedLimit: 30, restitution: .95, drag: .3,
-    pattern: k < 3 ? 'triangle' : k < 6 ? 'split-triangle' : k < 9 ? 'diamond' : 'scattered',
+    k, variant: variant ? 1 : 0, rank20, budget, scratchPenalty: k >= 5 ? 2 : 1,
+    layoutId: plan.id, layoutName: plan.name, lesson: plan.lesson,
+    threePointShots: targetBalls, twoPointShots: budget - 1,
+    playerRadius: .62, ballRadius: .62, pocketRadius: 1.16 - .10 * rank20 / 19,
+    pocketSpeedLimit: 30, restitution: .95, drag: .3, pattern: plan.id,
   });
 }
 
 export function poolBounds(world) {
-  const inset = world.inset ?? 16, top = world.height > 520 ? 128 : 86;
-  const left = inset, right = world.width - inset, bottom = world.height - inset;
-  return {left, right, top: Math.min(top, bottom - world.unit * 8), bottom,
-    width: right - left, height: bottom - Math.min(top, bottom - world.unit * 8)};
+  return campaignBounds(world);
 }
 
-export function poolLayout(world, params = poolParams(world.config?.k || 0)) {
+export function poolLayout(world, params = poolParams(world.config?.k || 0, world.config?.variant || 0)) {
   const b = poolBounds(world), u = world.unit, r = params.pocketRadius * u;
   const vertical = b.height >= b.width;
   const pockets = [
@@ -32,28 +35,8 @@ export function poolLayout(world, params = poolParams(world.config?.k || 0)) {
   const point = (p, q) => vertical
     ? {x: b.left + b.width * q, y: b.top + b.height * p}
     : {x: b.left + b.width * (1 - p), y: b.top + b.height * q};
-  const spawn = point(.82, .5), rack = point(.38, .5), spacing = u * 2.04;
-  const local = (along, across) => vertical
-    ? {x: rack.x + across * spacing, y: rack.y + along * spacing}
-    : {x: rack.x - along * spacing, y: rack.y + across * spacing};
-  const positions = [], count = params.targetBalls;
-  if (params.pattern === 'triangle' || params.pattern === 'split-triangle') {
-    const rackCount = count - (params.pattern === 'split-triangle' ? 2 : 0);
-    let left = rackCount, row = 0;
-    while (left > 0) {
-      const inRow = Math.min(row + 1, left);
-      for (let i = 0; i < inRow; i++) positions.push(local(-row * Math.sqrt(3) / 2, i - (inRow - 1) / 2));
-      left -= inRow; row++;
-    }
-    if (params.pattern === 'split-triangle') positions.push(point(.57, .24), point(.57, .76));
-  } else if (params.pattern === 'diamond') {
-    const cells = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1], [2, 0], [-2, 0]];
-    for (const [along, across] of cells.slice(0, count)) positions.push(local(along, across));
-  } else {
-    const cells = [[.22, .24], [.22, .5], [.22, .76], [.4, .34], [.4, .66],
-      [.57, .2], [.57, .5], [.57, .8], [.72, .3], [.72, .7], [.48, .5]];
-    for (const [p, q] of cells.slice(0, count)) positions.push(point(p, q));
-  }
+  const plan = poolLevel(params.rank20 ?? (params.k || 0) * 2 + (params.variant || 0));
+  const spawn = point(...plan.cue), positions = plan.balls.map(position => point(...position));
   // A 320px landscape table has only ~12u on its short axis. Resolve any
   // compressed rack pairs without shrinking either target or player balls.
   const radius = params.ballRadius * u, clearance = radius * 2 + u * .07;
@@ -83,6 +66,15 @@ export function poolLayout(world, params = poolParams(world.config?.k || 0)) {
   return {...b, vertical, pockets, positions, spawn};
 }
 
+function pathBlocked(start, end, radius, bodies, excluded = []) {
+  const dx = end.x - start.x, dy = end.y - start.y, denominator = dx * dx + dy * dy;
+  return bodies.some(body => {
+    if (excluded.includes(body) || body.hp <= 0 || body.captured) return false;
+    const t = denominator ? clamp(((body.x - start.x) * dx + (body.y - start.y) * dy) / denominator, 0, 1) : 0;
+    return Math.hypot(body.x - start.x - dx * t, body.y - start.y - dy * t) < body.r + radius + .01;
+  });
+}
+
 export function poolAimTargets(world) {
   const targets = [], p = world.player;
   for (const ball of world.enemies) {
@@ -93,13 +85,63 @@ export function poolAimTargets(world) {
       const ghost = {x: ball.x - dx / d * (p.r + ball.r), y: ball.y - dy / d * (p.r + ball.r)};
       const b = world.arenaBounds;
       if (ghost.x < b.left + p.r || ghost.x > b.right - p.r || ghost.y < b.top + p.r || ghost.y > b.bottom - p.r) continue;
-      // A ghost behind the target relative to the cue is not a usable first
-      // contact. This only defines the optional steady-hand candidate points.
-      if ((ball.x - p.x) * dx + (ball.y - p.y) * dy <= 0) continue;
-      targets.push(ghost);
+      const cueDistance = Math.hypot(ghost.x - p.x, ghost.y - p.y);
+      const cutCos = ((ghost.x - p.x) * dx + (ghost.y - p.y) * dy) / Math.max(1e-8, cueDistance * d);
+      if (cutCos < .3 || pathBlocked(p, ghost, p.r, world.enemies, [ball]) ||
+        pathBlocked(ball, pocket, ball.r, world.enemies, [ball])) continue;
+      targets.push({...ghost, ballId: ball.id, pocketIndex: pocket.pocketIndex,
+        cueDistance, potDistance: d, cutCos});
     }
   }
   return targets;
+}
+
+// A full-size table can hide a scratch behind an otherwise valid pot. Use the
+// post-impact cue direction to avoid recommending a direct run into a pocket.
+function tutorialScratchRisk(world, target) {
+  const cue = world.player, ball = world.enemies.find(body => body.id === target.ballId);
+  if (!ball || !target.cueDistance) return 0;
+  const nx = (ball.x - target.x) / (cue.r + ball.r), ny = (ball.y - target.y) / (cue.r + ball.r);
+  const incomingX = (target.x - cue.x) / target.cueDistance, incomingY = (target.y - cue.y) / target.cueDistance;
+  const impulse = (world.buffs?.rubber ? 2 : 1.95) * ball.mass / (cue.mass + ball.mass) * target.cutCos;
+  const vx = incomingX - nx * impulse, vy = incomingY - ny * impulse, length = Math.hypot(vx, vy);
+  if (length < .02) return 0;
+  const dx = vx / length, dy = vy / length, b = world.arenaBounds;
+  const initialSpeed = (.3 * (target.cueDistance + target.potDistance) / world.unit + 5) / Math.max(.5, target.cutCos);
+  const travel = Math.max(0, initialSpeed - .3 * target.cueDistance / world.unit) * length / .3 * world.unit * .8;
+  const wallDistance = Math.min(dx > 0 ? (b.right - cue.r - target.x) / dx : dx < 0 ? (b.left + cue.r - target.x) / dx : Infinity,
+    dy > 0 ? (b.bottom - cue.r - target.y) / dy : dy < 0 ? (b.top + cue.r - target.y) / dy : Infinity);
+  return world.zones.some(pocket => {
+    const along = (pocket.x - target.x) * dx + (pocket.y - target.y) * dy;
+    return along > 0 && along < Math.min(wallDistance + pocket.r, travel + pocket.r) &&
+      Math.abs((pocket.x - target.x) * dy - (pocket.y - target.y) * dx) < pocket.r + cue.r * .3;
+  }) ? world.unit * 1000 : 0;
+}
+
+function separateAfterRotation(world, layout) {
+  const bodies = [world.player, ...world.enemies].filter(body => body.hp > 0 && !body.captured);
+  for (let pass = 0; pass < 36; pass++) {
+    let moved = false;
+    for (let i = 0; i < bodies.length; i++) {
+      const body = bodies[i];
+      for (const pocket of layout.pockets) {
+        const dx = body.x - pocket.x, dy = body.y - pocket.y, d = Math.hypot(dx, dy);
+        const safe = world.config.pocketRadius * world.unit + body.r * .65;
+        if (d >= safe) continue;
+        const nx = d > 1e-8 ? dx / d : body.x < (layout.left + layout.right) / 2 ? 1 : -1;
+        const ny = d > 1e-8 ? dy / d : 0;
+        body.x += nx * (safe - d); body.y += ny * (safe - d); world.clampBodyToArena(body); moved = true;
+      }
+      for (const other of bodies.slice(i + 1)) {
+        const dx = other.x - body.x, dy = other.y - body.y, d = Math.hypot(dx, dy), safe = body.r + other.r + world.unit * .07;
+        if (d >= safe) continue;
+        const nx = d > 1e-8 ? dx / d : 1, ny = d > 1e-8 ? dy / d : 0, push = (safe - d) / 2;
+        body.x -= nx * push; body.y -= ny * push; other.x += nx * push; other.y += ny * push;
+        world.clampBodyToArena(body); world.clampBodyToArena(other); moved = true;
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 function safeSpawn(world, desired) {
@@ -123,10 +165,18 @@ function safeSpawn(world, desired) {
 export function createPoolRules(world) {
   let params, layout;
   const live = () => world.enemies.filter(body => body.kind === 'pool-ball' && body.hp > 0 && !body.captured);
+  const ratingCost = () => world.shotsUsed + world.poolScratches;
+  const projectedRating = () => ratingCost() <= params.threePointShots ? 3 : ratingCost() <= params.twoPointShots ? 2 : 1;
   const updateTutorial = () => {
     const targets = poolAimTargets(world);
-    world.tutorialTarget = targets.sort((a, b) => Math.hypot(a.x - world.player.x, a.y - world.player.y) - Math.hypot(b.x - world.player.x, b.y - world.player.y))[0]
-      || live()[0] || null;
+    // Prefer an unobstructed short cut. Recompute after every shot and rotation;
+    // the displayed hint must never tell the player to aim through another ball.
+    const score = target => tutorialScratchRisk(world, target) + (target.cueDistance + target.potDistance * .6) / target.cutCos;
+    const target = targets.sort((a, b) => score(a) - score(b))[0];
+    if (target) { world.tutorialTarget = target; return; }
+    const nearest = live().filter(ball => !pathBlocked(world.player, ball, world.player.r, live(), [ball]))
+      .sort((a, b) => Math.hypot(a.x - world.player.x, a.y - world.player.y) - Math.hypot(b.x - world.player.x, b.y - world.player.y))[0];
+    world.tutorialTarget = nearest ? {x: nearest.x, y: nearest.y} : null;
   };
   const rebound = (body, zone, contact) => {
     const b = world.arenaBounds;
@@ -143,14 +193,18 @@ export function createPoolRules(world) {
     if (dot < 0) { body.vx -= (1 + params.restitution) * dot * nx; body.vy -= (1 + params.restitution) * dot * ny; }
     body.x = zone.x + nx * distance; body.y = zone.y + ny * distance;
     world.clampBodyToArena(body);
-    world.emit('campaignPocketReject', {kind: 'pool', bodyId: body.id, x: zone.x, y: zone.y,
-      impactVx: contact.impactVx, impactVy: contact.impactVy});
+    body.campaignSquintUntil = world.feedbackTime + .3;
+    if (world.feedbackTime - (body.campaignPocketRejectAt ?? -Infinity) > .05) {
+      body.campaignPocketRejectAt = world.feedbackTime;
+      world.emit('campaignPocketReject', {kind: 'pool', bodyId: body.id, x: zone.x, y: zone.y,
+        impactVx: contact.impactVx ?? body.vx, impactVy: contact.impactVy ?? body.vy});
+    }
   };
   return {
-    physics: {nonlethal: true, restitution: .95, freezeTargetsIdle: true, settleAll: true},
+    physics: {nonlethal: true, restitution: .95, playerDrag: .3, freezeTargetsIdle: true, settleAll: true},
     arenaBounds: () => poolBounds(world),
     setup(k) {
-      params = poolParams(k); layout = poolLayout(world, params);
+      params = poolParams(k, world.config?.variant); layout = poolLayout(world, params);
       world.budget = params.budget; world.poolPotted = 0; world.poolScratches = 0;
       world.poolShotPockets = 0; world.poolScratched = false; world.poolCaptures = []; world.poolLayout = layout;
       Object.assign(world.player, layout.spawn, {vx: 0, vy: 0, born: 1, solid: true, captured: false});
@@ -209,11 +263,22 @@ export function createPoolRules(world) {
     },
     isWon: () => live().length === 0,
     isLost: () => !world.shotActive && world.remaining <= 0 && live().length > 0,
-    rating: () => live().length ? 0 : world.shotsUsed <= params.targetBalls ? 3 : world.shotsUsed <= params.budget - 1 ? 2 : 1,
-    summary: () => live().length ? `还差${live().length}球` : `${world.shotsUsed}发清台`,
+    failureReason: () => world.poolScratched ? 'scratch' : 'budget',
+    rating: () => live().length ? 0 : projectedRating(),
+    ratingStatus: () => ({rating: projectedRating(), summary: `${world.shotsUsed}发 · 自己落袋${world.poolScratches}次 · 评分${ratingCost()}`,
+      three: `三点 ≤ ${params.threePointShots}（发数＋自己落袋）`, two: `两点 ≤ ${params.twoPointShots}`}),
+    summary: () => live().length ? `还差${live().length}球` : `${world.shotsUsed}发 · 自己落袋${world.poolScratches}次`,
     progress: () => ({remaining: live().length, total: params.targetBalls, scratches: world.poolScratches}),
     aimTargets: () => poolAimTargets(world),
     tutorialTarget: () => world.tutorialTarget,
+    tutorialPullRatio: () => {
+      const target = world.tutorialTarget || world.player;
+      const distance = ((target.cueDistance ?? Math.hypot(target.x - world.player.x, target.y - world.player.y)) +
+        (target.potDistance || 0)) / world.unit;
+      const speed = .3 * distance + 5;
+      return clamp(speed / (world.baseSpeed / world.unit) * Math.sqrt(world.density / world.energy) /
+        Math.max(.5, target.cutCos || 1), .2, .9);
+    },
     peakOptions: () => ({kind: 'pool', duration: .95, scale: .3, zoom: .04}),
     resize(previous) {
       const old = previous?.bounds || layout;
@@ -235,6 +300,7 @@ export function createPoolRules(world) {
         }
         world.clampBodyToArena(body);
       }
+      separateAfterRotation(world, layout);
       for (const capture of world.poolCaptures) {
         Object.assign(capture, mapPoint(capture));
         capture.r *= ratio;

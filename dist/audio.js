@@ -2,7 +2,8 @@
 export const MUSIC_SECONDS = 32 * 4 * 60 / 88;
 export const audioLevel = (value, fallback = 0) => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
 export const volumeGain = value => audioLevel(value) ** 1.5;
-export const IMPACT_NOTES = Object.freeze([523.251, 659.255, 783.991, 1046.502, 1318.51, 1567.982]);
+const LEGACY_IMPACT_NOTES = Object.freeze([523.251, 659.255, 783.991, 1046.502, 1318.51, 1567.982]);
+export const IMPACT_NOTES = Object.freeze([...LEGACY_IMPACT_NOTES, 2093.004, 2637.02]);
 export const MAX_EFFECT_VOICES = 32;
 
 export class GameAudio {
@@ -124,24 +125,33 @@ export class GameAudio {
   }
   // A single event captures the audio clock once: its attack, body and bass
   // arrive together even when several collisions are handled in the same frame.
-  impact({kind = 'kill', level = 0, power = .5, strength = .6, upgradeBoost = false} = {}) {
-    if (!this.canPlayEffects) return;
+  impact({kind = 'kill', level = 0, power = .5, strength = .6, upgradeBoost = false,
+    endless = false, frenzy = false, hitTier = 'heavy'} = {}) {
+    if (!this.canPlayEffects || endless && kind === 'hit' && hitTier === 'light') return false;
     const c = this.context, at = c.currentTime;
     const amount = audioLevel(strength, .6), energy = audioLevel(power, .5);
-    const index = Math.min(IMPACT_NOTES.length - 1, Math.max(0, Math.floor(Number.isFinite(level) ? level : 0)));
     const hit = kind === 'hit', boss = kind === 'boss';
-    const killIndex=index+(kind==='kill'&&upgradeBoost&&amount>0?1:0);
-    const pitch = hit ? 180 + 70 * energy : boss ? 260 + 220 * energy : (IMPACT_NOTES[killIndex]??IMPACT_NOTES[3]*2);
-    const layers = amount > 0 ? 4 : 1;
-    if (this.voices.size + layers > MAX_EFFECT_VOICES) return;
+    const medium = endless && hit && hitTier === 'medium';
+    const step = Math.max(0, Math.floor(Number.isFinite(level) ? level : 0));
+    const boost = kind === 'kill' && upgradeBoost && amount > 0 ? 1 : 0;
+    // Keep the campaign's six-note scale and historical boosted top note.
+    // Only endless kills use eight notes, with Frenzy alternating its last two.
+    const index = endless && kind === 'kill'
+      ? Math.min(7, (frenzy && step >= 8 ? 6 + (step - 8) % 2 : Math.min(7, step)) + boost)
+      : Math.min(LEGACY_IMPACT_NOTES.length - 1, step) + boost;
+    const notes = endless && kind === 'kill' ? IMPACT_NOTES : LEGACY_IMPACT_NOTES;
+    const pitch = hit ? 180 + 70 * energy : boss ? 260 + 220 * energy : (notes[index] ?? LEGACY_IMPACT_NOTES[3] * 2);
+    const layers = medium || !amount ? 1 : 4;
+    if (this.voices.size + layers > MAX_EFFECT_VOICES) return false;
     // Keep rapid multi-kills readable without a large sum of low-frequency tails.
     const overlap = 1 / Math.sqrt(1 + this.voices.size / 4);
     const gain = overlap * (hit ? .38 : boss ? 1.12 : 1);
-    this.toneAt(at, pitch, hit ? .065 : .11, 'sine', .045 * gain, hit ? .65 : 1, .003);
-    if (!amount) return;
+    this.toneAt(at, pitch, medium ? .05 : hit ? .065 : .11, 'sine', .045 * gain * (medium ? .4 : 1), hit ? .65 : 1, .003);
+    if (medium || !amount) return true;
     this.noiseAt(at, .008, .016 * gain * amount);
     this.toneAt(at, 60 + 20 * energy, .12, 'sine', (.007 + .023 * energy) * gain * amount, .75, .004);
     this.toneAt(at, pitch, .15, 'sine', .012 * gain * amount, 1, .012);
+    return true;
   }
   bossDefeat({strength = .6} = {}) {
     if (!this.canPlayEffects) return;
@@ -177,10 +187,12 @@ export class GameAudio {
     this.stopCharge();
     this.toneAt(this.context.currentTime, 600, .06, 'sine', .018 + .008 * audioLevel(power, .5), 1 / 3);
   }
-  wall(power = .5) {
-    if (!this.canPlayEffects) return;
+  wall(power = .5, {endless = false} = {}) {
+    const energy = audioLevel(power, .5);
+    if (!this.canPlayEffects || this.voices.size >= MAX_EFFECT_VOICES || endless && energy < .25) return false;
     const cents = (Math.random() * 2 - 1) * 4;
-    this.toneAt(this.context.currentTime, (100 + audioLevel(power, .5) * 80) * 2 ** (cents / 1200), .055, 'sine', .0175, .65);
+    this.toneAt(this.context.currentTime, (100 + energy * 80) * 2 ** (cents / 1200), .055, 'sine', .0175 * (endless ? energy ** 2 : 1), .65);
+    return true;
   }
   setCharge(amount) {
     const value = audioLevel(amount);

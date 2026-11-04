@@ -60,7 +60,7 @@ test('stage formulas use rounded-up floors, bounded wave size and exponential he
     assert.equal(w.waveSize, Math.min(8, 4 + Math.floor((stage - 1) / 3)));
     near(w.spawnInterval, (.65 + 1.35 * .86 ** (stage - 1)) * ([3, 6, 8, 10, 12, 13, 16].includes(stage) ? 1.15 : 1));
     assert.equal(w.killTarget, 14 + 4 * (stage - 1));
-    const profile = w.enemyProfile(); near(profile.hp, 19 * 1.16 ** (stage - 1) + 4);
+    const profile = w.enemyProfile(); near(profile.hp, 19 * 1.20 ** (stage - 1) + 4);
     near(profile.density, .65 + .06 * stage + .0004 * 91); near(profile.radiusScale, .8);
   }
   const campaign = new LegacyCampaignWorld(390, 844, 5, () => .5);
@@ -69,13 +69,14 @@ test('stage formulas use rounded-up floors, bounded wave size and exponential he
   const profile = campaign.enemyProfile(); campaign.time = 1000; assert.deepEqual(campaign.enemyProfile(), profile);
 });
 
-test('floor refill is immediate then every 150 ms and cannot be slowed by breath', () => {
+test('floor refill stays immediate but its 150 ms clock runs at two-thirds speed during breath', () => {
   for (const breath of [0, BREATH_DURATION]) {
     const w = run(); w.floorTimer = 0; w.breathTime = breath;
+    const interval = breath ? .225 : .15;
     advance(w, .001); assert.equal(w.liveCount, 1);
-    advance(w, .148); assert.equal(w.liveCount, 1);
+    advance(w, interval - .002); assert.equal(w.liveCount, 1);
     advance(w, .001); assert.equal(w.liveCount, 2);
-    advance(w, .6); assert.equal(w.liveCount, 6);
+    advance(w, interval * 4); assert.equal(w.liveCount, 6);
     assert.equal(new Set(w.enemies.slice(0, 4).map(b => b.clusterId)).size, 1);
     near(w.stageKills, 0); near(w.score, 0);
   }
@@ -108,13 +109,13 @@ test('successful shots reset only their own combo and every actual player reboun
   const w = run(); w.shoot(-w.maxPull, 0);
   for (let i = 0; i < 10; i++) w.damage(enemy(w, 100 + i * 80, 100, {hp: 1, value: 999}), 1);
   const kills = w.events.filter(e => e.type === 'kill');
-  assert.deepEqual(kills.map(e => e.value), [10, 20, 30, 40, 50, 60, 70, 80, 80, 80]);
-  assert.deepEqual(kills.map(e => e.combo), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); assert.equal(w.score, 520);
+  assert.deepEqual(kills.map(e => e.value), [10, 20, 45, 60, 75, 90, 105, 120, 120, 120]);
+  assert.deepEqual(kills.map(e => e.combo), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); assert.equal(w.score, 765);
   assert.equal(w.shotKills, 10); assert.equal(w.stageKills, 10);
   assert.equal(w.shoot(1, 0), false); assert.equal(w.shotKills, 10);
   Object.assign(w.player, {x: 0, y: 700, vx: -1, vy: 0}); w.wall(w.player);
   assert.equal(w.shotBanked, true); assert.equal(w.bank, 0);
-  w.damage(enemy(w, 900, 100, {hp: 1}), 1); assert.equal(w.events.filter(e => e.type === 'kill').at(-1).value, 120);
+  w.damage(enemy(w, 900, 100, {hp: 1}), 1); assert.equal(w.events.filter(e => e.type === 'kill').at(-1).value, 180);
   w.shoot(-w.maxPull, 0); assert.equal(w.shotKills, 0); assert.equal(w.shotBanked, false); assert.equal(w.stageKills, 11);
   w.damage(enemy(w, 1000, 100, {hp: 1}), 1); assert.equal(w.events.filter(e => e.type === 'kill').at(-1).value, 10);
 });
@@ -134,7 +135,7 @@ test('score alone cannot advance a stage and deferred real kills preserve the fi
   w.step(1 / 120); assert.equal(w.phase, 'transition'); assert.equal(w.stageKillCarry, 1);
   assert.equal(w.events.filter(e => e.type === 'clearingStart').length, 1);
   const start = w.events.find(e => e.type === 'clearingStart'); near(start.x, first.x); near(start.y, first.y);
-  advance(w, 1.86); w.choose(w.choices[0]); advance(w, 1.01);
+  advance(w, w.rewardTiming.transition); w.choose(w.choices[0]); advance(w, w.rewardTiming.rest + .01);
   assert.equal(w.stage, 2); assert.equal(w.stageKills, 1); assert.equal(w.stageKillCarry, 0);
   assert.equal(w.killTarget, 18); assert.equal(w.liveCount, 7);
   near(w.spawnTimer, 2 * w.spawnInterval - .01, .02);
@@ -229,10 +230,10 @@ test('rescue removes the oldest three without points, kills or breath and is spe
 });
 
 test('high-stage reward fills its full rounded floor in small clusters and waits two intervals with teaching isolated', () => {
-  const w = run(); w.typeIntroductions={ring:3,heavy:3,split:3,walker:3,leader:3,magnet:3,shield:3}; w.stage = 18; w.phase = 'reward'; w.phaseTime = .999;
+  const w = run(); w.typeIntroductions={ring:3,heavy:3,split:3,walker:3,leader:3,magnet:3,shield:3}; w.stage = 18; w.phase = 'reward'; w.phaseTime = w.rewardTiming.rest - .001;
   w.step(.001); assert.equal(w.stage, 19); assert.equal(w.liveCount, 14);
   const sizes = new Map(); for (const b of w.enemies) sizes.set(b.clusterId, (sizes.get(b.clusterId) || 0) + 1);
-  assert.deepEqual([...sizes.values()], [8, 6]); near(w.spawnTimer, 2 * w.spawnInterval - .001);
+  assert.deepEqual([...sizes.values()], [8, 6]); near(w.spawnTimer, 2 * w.spawnInterval);
   assert.equal(w.events.filter(e => e.type === 'stage').length, 1);
 });
 

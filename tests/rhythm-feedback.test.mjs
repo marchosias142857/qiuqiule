@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {clearingTimeScale,clearingZoom,pressureStyle,blendRgb,injuredEnemyScale,pressureLook} from '../dist/rhythm-feedback.js';
+import {clearingTimeScale,clearingZoom,pressureStyle,PressureWarning,PRESSURE_WARNING_COLOR,PRESSURE_RELEASE_DURATION,blendRgb,injuredEnemyScale,pressureLook} from '../dist/rhythm-feedback.js';
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-9,`${a} != ${b}`);
 
 test('clear slowdown holds for .35 real seconds and recovers linearly over .6 seconds',()=>{
@@ -22,28 +22,52 @@ test('clear camera push stays within four percent and returns exactly to rest',(
   }
 });
 
-test('pressure uses 20/24/26 thresholds without changing any geometry',()=>{
-  assert.deepEqual(pressureStyle(19,0),{alpha:.65,width:1,mix:0,frequency:0,warning:false});
-  assert.equal(pressureStyle(20,0).warning,true);
-  assert.equal(pressureStyle(23,0).frequency,0);assert.equal(pressureStyle(24,0).frequency,1.2);
-  assert.equal(pressureStyle(26,0).frequency,2.4);
-  for(const count of [20,24,26,28,40])for(const time of [0,.1,.2,.5]){
+test('pressure starts at 24 of 28 with a separate red translucent overlay and moderate widths',()=>{
+  assert.deepEqual(pressureStyle(23,0),{alpha:0,width:1,frequency:0,warning:false});
+  assert.equal(pressureStyle(24,0).warning,true);
+  assert.equal(pressureStyle(24,0).frequency,.8);assert.equal(pressureStyle(25,0).frequency,.8);
+  assert.equal(pressureStyle(26,0).frequency,1.2);assert.equal(PRESSURE_WARNING_COLOR,0xd94f4f);
+  for(const count of [24,26,28,40])for(const time of [0,.1,.2,.5]){
     const style=pressureStyle(count,time);
-    assert.ok(style.alpha>=.65&&style.alpha<=1);
-    assert.ok(style.width>=1&&style.width<=1.5);
-    assert.ok(style.mix>=0&&style.mix<=.4);
-    assert.deepEqual(Object.keys(style).sort(),['alpha','frequency','mix','warning','width']);
+    assert.ok(style.alpha>0&&style.alpha<=.54);
+    assert.ok(style.width>=2.2&&style.width<=3.2);
+    assert.deepEqual(Object.keys(style).sort(),['alpha','frequency','warning','width']);
   }
+  assert.equal(pressureStyle(NaN,0).alpha,0);assert.equal(pressureStyle(Infinity,0).alpha,0);
 });
 
-test('reduced motion and zero juice retain a static readable capacity warning',()=>{
+test('reduced motion and zero juice retain a static red capacity warning',()=>{
   for(const options of [{juice:0},{juice:1,reducedMotion:true}]){
     const style=pressureStyle(28,0,options);
     assert.deepEqual(pressureStyle(28,.371,options),style);
-    assert.equal(style.frequency,0);assert.equal(style.alpha,1);assert.equal(style.width,options.reducedMotion?1:1.5);assert.equal(style.mix,.4);
+    assert.equal(style.frequency,0);assert.equal(style.alpha,.54);assert.equal(style.width,3.2);
   }
   assert.equal(blendRgb(0,0xffffff,0),0);assert.equal(blendRgb(0,0xffffff,1),0xffffff);
   assert.equal(blendRgb(0,0xffffff,.4),0x666666);
+});
+
+test('pressure entry is gradual, frequency changes preserve phase, and every breath phase releases continuously',()=>{
+  for(const age of [.08,.25,.45,.7,1,1.3]){
+    const warning=new PressureWarning();warning.step(26,0);assert.equal(warning.alpha,0);
+    for(let t=0;t<age;t+=1/120)warning.step(26,1/120);
+    const alpha=warning.alpha,width=warning.width,phase=warning.phase;
+    assert.ok(alpha>0&&width>1);
+    warning.step(24,0);near(warning.phase,phase);near(warning.alpha,alpha);
+    warning.step(0,0);near(warning.alpha,alpha);near(warning.width,width);
+    warning.step(0,PRESSURE_RELEASE_DURATION/2);near(warning.alpha,alpha/2);near(warning.width,1+(width-1)/2);
+    warning.step(0,PRESSURE_RELEASE_DURATION/2);assert.equal(warning.alpha,0);assert.equal(warning.width,1);
+    warning.step(0,10);assert.equal(warning.alpha,0);
+  }
+});
+
+test('pressure exit is monotone and reentering during it preserves the last visible value',()=>{
+  const warning=new PressureWarning();warning.step(28,.4);warning.step(0,0);
+  let previous=warning.alpha;
+  for(let i=0;i<12;i++){warning.step(0,1/60);assert.ok(warning.alpha<=previous&&warning.alpha>0);previous=warning.alpha;}
+  const width=warning.width;warning.step(28,0);near(warning.alpha,previous);near(warning.width,width);
+  warning.step(28,.3);assert.ok(warning.alpha>previous);
+  warning.step(0,0);const start=warning.alpha;
+  warning.step(0,NaN);near(warning.alpha,start);warning.step(0,-1);near(warning.alpha,start);
 });
 
 test('injury reduces drawing radius only and excludes campaign, player and Boss',()=>{

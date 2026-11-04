@@ -9,10 +9,14 @@ const tick = (w, seconds, scale = 1) => { for (let t = 0; t < seconds - 1e-9; t 
 const fresh = (level = 1, options = {}) => new CampaignWorld(390, 844, level, () => .5, options);
 const noObstacles = w => { w.statics.forEach(s => s.active = false); w.enemies = []; w.rules.isWon = () => false; w.rules.isLost = () => false; };
 
-test('all100 slots retain fixed modulo mapping and completed batches use new rules', () => {
+test('all100 slots use five paired modes and twenty ordered ranks', () => {
   for (let n = 1; n <= 100; n++) {
     const c = levelConfig(n), w = fresh(n);
-    assert.equal(c.r, n % 10); assert.equal(c.k, Math.floor((n - 1) / 10));
+    const modes = ['wall', 'pool', 'merge', 'golf', 'peggle'];
+    const oldIds = [1, 4, 5, 8, 0], group = Math.floor(((n - 1) % 10) / 2);
+    assert.equal(c.r, oldIds[group]); assert.equal(c.digit, n % 10);
+    assert.equal(c.type, modes[group]); assert.equal(c.k, Math.floor((n - 1) / 10));
+    assert.equal(c.rank20, c.k * 2 + (n - 1) % 2); assert.equal(c.variant, (n - 1) % 2);
     assert.equal(c.implemented, true);
     assert.equal(c.type, c.classId); assert.equal(w.legacy, !c.implemented);
     assert.equal(w instanceof LegacyCampaignWorld, !c.implemented);
@@ -24,7 +28,8 @@ test('two offers are unique filtered choices; one per-level choice resets on a n
   for (const seed of [0, .1, .5, .99]) for (const level of [1, 10, 91, 100]) {
     const choices = campaignUpgradeChoices(level, () => seed);
     assert.equal(choices.length, 2); assert.notEqual(choices[0].id, choices[1].id);
-    assert.ok(choices.every(c => ['rubber', 'energy', 'bank', 'pierce'].includes(c.id)));
+    assert.ok(choices.every(c => campaignUpgradePool(level).some(item => item.id === c.id)));
+    if (levelConfig(level).type === 'wall') assert.equal(choices.some(c => c.id === 'pierce'), false);
   }
   assert.equal(campaignUpgradeChoices(5).length, 2);
   const w = fresh(1, {upgradeId: 'energy'}); assert.equal(w.energy, 1.3);
@@ -32,9 +37,9 @@ test('two offers are unique filtered choices; one per-level choice resets on a n
   assert.equal(fresh(1, {upgradeId: 'growth'}).upgradeId, null);
 });
 
-test('tutorial only appears on first-tier first shot and can be suppressed by persistent history', () => {
+test('tutorial appears before first success on every rank first shot and is suppressed by successful history', () => {
   const w = fresh(); assert.equal(w.tutorialVisible, true); assert.ok(Number.isFinite(w.teachingTarget.x));
-  assert.equal(fresh(11).tutorialVisible, false); assert.equal(fresh(1, {showTutorial: false}).tutorialVisible, false);
+  assert.equal(fresh(11).tutorialVisible, true); assert.equal(fresh(1, {showTutorial: false}).tutorialVisible, false);
   w.shoot(0, 80); assert.equal(w.tutorialVisible, false);
 });
 
@@ -107,12 +112,15 @@ test('budget only pays successful launches, active shot cannot relaunch, and las
   tick(w, 2); assert.equal(w.events.filter(e => e.type === 'over').length, 1);
 });
 
-test('four-second deadline ends even continuously fast motion and pauses consume no budget or timer', () => {
+test('four-second deadline extends fast motion then brakes smoothly; pauses consume no time', () => {
   const w = fresh(); noObstacles(w); w.shoot(-w.maxPull, 0);
   for (let i = 0; i < 479; i++) { w.player.vx = 200; w.step(1 / 120); }
   assert.equal(w.shotActive, true); const time = w.shotTime, remaining = w.remaining;
   w.step(0); w.step(-1); w.step(Infinity); assert.equal(w.shotTime, time); assert.equal(w.remaining, remaining);
-  w.player.vx = 200; w.step(1 / 120); assert.equal(w.shotActive, false); assert.equal(w.phase, 'battle');
+  w.player.vx = 200; w.step(1 / 120); assert.equal(w.shotActive, true);
+  assert.equal(w.shotFinish.brakeAt, 5); tick(w, 1.2); assert.equal(w.shotActive, true);
+  tick(w, .11); assert.equal(w.shotActive, false); assert.equal(w.phase, 'battle');
+  assert.equal(w.events.filter(e => e.type === 'campaignLaunchEnd').at(-1).reason, 'timeout');
 });
 
 function finalPegWorld(remaining = 0) {
@@ -254,7 +262,12 @@ test('final-frame collision separation into a pocket is captured before the four
   const w = fresh(4), target = w.enemies[0]; w.enemies = [target];
   w.zones = [{id: 900, kind: 'pocket', shape: 'circle', x: 250, y: 400, r: w.unit * 1.35, centerOnly: true}];
   w.shoot(0, 80); w.remaining = 0; w.shotTime = 4 - 1 / 120;
-  Object.assign(w.player, {x: 196, y: 400, vx: 0, vy: 0}); Object.assign(target, {x: 221, y: 400, vx: 0, vy: 0});
+  // A deliberate final-substep overlap: the target starts just outside the
+  // trigger, then equal-mass separation moves it inside before budget loss.
+  const pocket = w.zones[0], targetX = pocket.x - pocket.r - w.unit * .1;
+  Object.assign(target, {x: targetX, y: pocket.y, vx: 0, vy: 0});
+  Object.assign(w.player, {x: targetX - target.r - w.player.r + w.unit * .4, y: pocket.y, vx: 0, vy: 0});
+  assert.ok(Math.hypot(target.x - w.player.x, target.y - w.player.y) < target.r + w.player.r);
   assert.equal(zoneContains(target, w.zones[0]), false);
   w.step(1 / 120); assert.equal(w.completed, true); assert.equal(w.phase, 'campaign-celebrate'); assert.equal(w.poolPotted, 1);
 });
@@ -277,13 +290,20 @@ test('last-substep pool collision cannot leave a frozen target protruding throug
   w.shoot(0, 80); w.shotTime = 4 - 1 / 120;
   Object.assign(target, {x: left + target.r, y: 400, vx: 0, vy: 0});
   Object.assign(w.player, {x: left + target.r + 2 * w.unit - .5, y: 400, vx: -100, vy: 0});
-  w.step(1 / 120); assert.equal(w.shotActive, false); assert.ok(target.x - target.r >= left - 1e-8);
+  w.step(1 / 120); assert.equal(w.shotActive, true); tick(w, .31);
+  assert.equal(w.shotActive, false); assert.ok(target.x - target.r >= left - 1e-8);
   assert.ok(Math.hypot(target.x - w.player.x, target.y - w.player.y) >= target.r + w.player.r - 1e-5);
   const x = target.x; tick(w, .2); near(target.x, x);
 });
 
-test('idle golf walkers bounce off the stationary cue without spending a stroke or entering the hole', () => {
-  const w = fresh(8), walker = w.enemies[0]; w.statics = [];
+test('synthetic idle obstacles bounce off the stationary cue without spending a stroke or entering the hole', () => {
+  const w = fresh(8); w.statics = [];
+  assert.equal(w.enemies.length, 0, 'authored golf courses do not spawn the retired walkers');
+  // Exercise the shared idle-dynamics regression with an explicit obstacle,
+  // without putting moving enemies back into any production course.
+  const walker = w.makeBody(0, 0, w.unit * .6, .8);
+  Object.assign(walker, {hp: Infinity, maxHp: Infinity, born: 1, solid: true, drag: 0, enemyType: 'walker'});
+  w.enemies.push(walker);
   Object.assign(w.player, {x: 200, y: 500});
   Object.assign(walker, {x: 200 - w.player.r - walker.r + .1, y: 500, vx: w.unit * 1.5, vy: 0});
   const before = {x: w.player.x, y: w.player.y, remaining: w.remaining};
@@ -294,9 +314,10 @@ test('idle golf walkers bounce off the stationary cue without spending a stroke 
 });
 
 test('real golf stroke cannot win from a rotation-created hole overlap, including a repeated resize', () => {
-  const w = new CampaignWorld(390, 844, 58, () => .5, {upgradeId: 'rubber'}), angle = -2.2;
-  w.shoot(-Math.cos(angle) * w.maxPull * .7, -Math.sin(angle) * w.maxPull * .7);
-  for (let i = 0; i < 330; i++) w.step(1 / 120);
+  const w = new CampaignWorld(390, 844, 7, () => .5, {upgradeId: 'rubber'}).setFeedbackOptions({strength: 0});
+  const angle = -1.095124441871195, power = .5156969479064442;
+  w.shoot(-Math.cos(angle) * w.maxPull * power, -Math.sin(angle) * w.maxPull * power);
+  for (let i = 0; i < 120; i++) w.step(1 / 120);
   const remaining = w.remaining, score = w.score;
   w.resize(844, 390); const hole = w.zones.find(z => z.kind === 'hole'), key = `${w.player.id}:${hole.id}`;
   assert.equal(zoneContains(w.player, hole), true); assert.equal(w.blockedZoneEntries.has(key), true);
@@ -304,7 +325,7 @@ test('real golf stroke cannot win from a rotation-created hole overlap, includin
   w.step(1 / 120); assert.equal(w.completed, false); assert.equal(w.remaining, remaining); assert.equal(w.score, score);
   // Continuing this actual stroke exits the resized hole. The next genuine
   // precision putt is a fresh physical entry and must still be capturable.
-  for (let i = 0; i < 160; i++) w.step(1 / 120);
+  for (let i = 0; i < 500; i++) w.step(1 / 120);
   assert.equal(w.blockedZoneEntries.has(key), false); assert.equal(w.ready, true);
   const dx = hole.x - w.player.x, dy = hole.y - w.player.y, distance = Math.hypot(dx, dy);
   const pull = Math.min(1, (.6 * distance + 6 * w.unit) / w.baseSpeed) * w.maxPull;
@@ -312,23 +333,33 @@ test('real golf stroke cannot win from a rotation-created hole overlap, includin
   tick(w, 5); assert.equal(w.completed, true); assert.equal(w.shotsUsed, 2);
 });
 
-test('real pool shot cannot pot a target merely because rotation puts its centre inside a pocket', () => {
-  const w = new CampaignWorld(320, 568, 4, () => .5, {upgradeId: 'rubber'}), angle = -1.6;
-  w.shoot(-Math.cos(angle) * w.maxPull * .7, -Math.sin(angle) * w.maxPull * .7);
-  for (let i = 0; i < 90; i++) w.step(1 / 120);
+test('rotation separates a pool target that would otherwise map inside a pocket without awarding a capture', () => {
+  const w = new CampaignWorld(320, 568, 4, () => .5, {upgradeId: 'rubber'});
+  const resized = new CampaignWorld(568, 320, 4, () => .5, {upgradeId: 'rubber'});
+  const old = w.arenaBounds, next = resized.arenaBounds, pocket = resized.zones[0], target = w.enemies[0];
+  // Explicit edge fixture: inverse-map a point inside the future corner pocket.
+  // It lies outside every current pocket, so only rotation creates the overlap.
+  const mapped = {x: pocket.x + pocket.r * .55, y: pocket.y + pocket.r * .55};
+  Object.assign(target, {x: old.left + (mapped.y - next.top) / next.height * old.width,
+    y: old.top + (1 - (mapped.x - next.left) / next.width) * old.height});
+  assert.ok(w.zones.every(zone => !zoneContains(target, zone)));
+  assert.equal(zoneContains({...target, ...mapped}, pocket), true);
+  assert.equal(w.shoot(0, w.maxPull * .2), true);
   const before = {remaining: w.remaining, potted: w.poolPotted, scratches: w.poolScratches, count: w.enemies.length, score: w.score};
-  w.resize(568, 320); assert.ok(w.blockedZoneEntries.size > 0);
-  const blocked = [...w.blockedZoneEntries]; w.resize(568, 320);
-  assert.ok(blocked.every(key => w.blockedZoneEntries.has(key)));
+  w.resize(568, 320);
+  assert.equal(zoneContains(target, w.zones[0]), false, 'rotation pushes the target safely out of the future pocket');
+  w.resize(568, 320);
+  assert.equal(zoneContains(target, w.zones[0]), false);
   w.step(1 / 120);
   assert.deepEqual({remaining: w.remaining, potted: w.poolPotted, scratches: w.poolScratches, count: w.enemies.length, score: w.score}, before);
   assert.equal(w.completed, false);
 });
 
 test('a new launch does not clear a resize-overlap exclusion before the ball physically leaves', () => {
-  const w = new CampaignWorld(390, 844, 58, () => .5, {upgradeId: 'rubber'}), angle = -2.2;
-  w.shoot(-Math.cos(angle) * w.maxPull * .7, -Math.sin(angle) * w.maxPull * .7);
-  for (let i = 0; i < 330; i++) w.step(1 / 120);
+  const w = new CampaignWorld(390, 844, 7, () => .5, {upgradeId: 'rubber'}).setFeedbackOptions({strength: 0});
+  const angle = -1.095124441871195, power = .5156969479064442;
+  w.shoot(-Math.cos(angle) * w.maxPull * power, -Math.sin(angle) * w.maxPull * power);
+  for (let i = 0; i < 120; i++) w.step(1 / 120);
   w.resize(844, 390); const hole = w.zones.find(z => z.kind === 'hole'), key = `${w.player.id}:${hole.id}`;
   assert.equal(w.blockedZoneEntries.has(key), true);
   w.endLaunch();

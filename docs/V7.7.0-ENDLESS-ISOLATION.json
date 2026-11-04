@@ -1,0 +1,139 @@
+{
+  "baseline": "a5c1166010534328a8fa7719018fb15e7c2fa933",
+  "checkedAt": "2026-11-04T05:52:01.918281+00:00",
+  "coreModules": {
+    "physics.js": {
+      "sha256": "c315e3b57633a5370e2371ead94cdd7058aacde1eeba86dcb9543a261f69dc1b",
+      "matchesBaseline": true
+    },
+    "aim.js": {
+      "sha256": "dd40aeda7331117521fa2761292c6ef24c43763c6db7c5ab2435ef6c46ff12d1",
+      "matchesBaseline": true
+    },
+    "aim-metrics.js": {
+      "sha256": "90a4c4c3db0351c28c5651a7964d21bf735bfe255d4aa09fc066f27a3809d02e",
+      "matchesBaseline": true
+    },
+    "feedback.js": {
+      "sha256": "8aadd60c6e62da52c6e4ff285b7800c43ed6f229a1cfff59156da44ecf9472fb",
+      "matchesBaseline": true
+    },
+    "rhythm-feedback.js": {
+      "sha256": "4bb5193d7afd7c78613dcd3a29f7d6adca5bfe73a2fad9aeee5f29cecaf4c783",
+      "matchesBaseline": true
+    },
+    "endless-progress.js": {
+      "sha256": "fd28c7c6fd1a953c3b4c244b904f51628871b25bfd5f56c97eafcfd4734f04c7",
+      "matchesBaseline": true
+    },
+    "enemies.js": {
+      "sha256": "a13e5234709d390df83f2f70cb7a5b36b711229dd0b9d022d3964f80647a2e93",
+      "matchesBaseline": true
+    },
+    "enemy-render.js": {
+      "sha256": "001e873ca85c4c74331729048b7f485667b3d62a6db51ff4e7d4cff9af68c317",
+      "matchesBaseline": true
+    },
+    "upgrades.js": {
+      "sha256": "a5117b9c630d247bb611478dc1c7df985011ac70db952d93cf0584711fa91075",
+      "matchesBaseline": true
+    },
+    "upgrade-render.js": {
+      "sha256": "d565441e48b3d6a096d8a1bf58bf3df34f3f3a0d1e9163e1c232b01fc4ff3c08",
+      "matchesBaseline": true
+    },
+    "boss-visuals.js": {
+      "sha256": "5d2aaa406a905ad84a88df31eb6e53fc5b813e2ec28a25a626c9078e3ceb4029",
+      "matchesBaseline": true
+    },
+    "audio.js": {
+      "sha256": "bd1c518cb0a01b8ea18785ed9afbda4623b49052fe74bf71cfb884bd8c775c93",
+      "matchesBaseline": true
+    },
+    "home.js": {
+      "sha256": "d360ee38dc17b2469d1e130ce9336c8a4717864778d522b4b83757aee0601a87",
+      "matchesBaseline": true
+    },
+    "motion.js": {
+      "sha256": "71aeee839e0089edee5207aa9a03b365ec851e3b1358a66b54d89c3601f0b11f",
+      "matchesBaseline": true
+    },
+    "skins.js": {
+      "sha256": "a13143b53ef44d3ef1a7c20c6a3bc4ecb945100d1223e3cb70ca71074aa94cd6",
+      "matchesBaseline": true
+    },
+    "skin-render.js": {
+      "sha256": "259d0f3237156b3ff2d9e8a22e548b64477c86c25b02e9e726e741fef910197b",
+      "matchesBaseline": true
+    },
+    "skin-unlock.js": {
+      "sha256": "c064355730b97a04317c748716dd93739f7f7f58a02a1765365c26234ad12ab0",
+      "matchesBaseline": true
+    },
+    "comet-trail.js": {
+      "sha256": "3be4840c89729c72ed8a7c6d251a5bf8e35d3ead5f69b360d30467d70b1896b9",
+      "matchesBaseline": true
+    },
+    "display.js": {
+      "sha256": "7e4d1ea316055e0c4c9da4a26a57ff6102c36a409b8b0104921780b96e00e31b",
+      "matchesBaseline": true
+    },
+    "photo-renderer.js": {
+      "sha256": "495b592bbfa5f6d09d3455420ac7af757d3091b3409bdecad2646a3697799d29",
+      "matchesBaseline": true
+    },
+    "wardrobe.js": {
+      "sha256": "5f172702184724fa76794a31b56d10b8c56a9b31b167bdefa81bf6e21b984c0c",
+      "matchesBaseline": true
+    },
+    "icons.js": {
+      "sha256": "9286953005ffc7d7c2110d2c6cb7b4aa6a1e6e650e51506fc57521485b4b5761",
+      "matchesBaseline": true
+    }
+  },
+  "sceneCases": 56,
+  "sceneFrames": 17348,
+  "migrationCases": 10,
+  "migrationFrames": 40,
+  "switchCases": 2,
+  "switchFrames": 240,
+  "totalCases": 68,
+  "totalFrames": 17628,
+  "originalTestsPassed": 487,
+  "filteredOriginalTest": "v7 retains campaign launch and mass behavior for all density-enabled classes and legacy games (old campaign level map)",
+  "font": {
+    "oldGlyphCodepoints": 1061,
+    "newGlyphCodepoints": 1081,
+    "addedCodepoints": [
+      8804,
+      8805,
+      20214,
+      20272,
+      20855,
+      21495,
+      24179,
+      24314,
+      27714,
+      30861,
+      31456,
+      31561,
+      32791,
+      35748,
+      35758,
+      35828,
+      36317,
+      36776,
+      38556,
+      39038
+    ],
+    "issues": [],
+    "passed": true
+  },
+  "passed": true,
+  "sharedFileHashes": {
+    "game.js": "cb6e7599cd822579523a77bb0fbd223b2935cbccc124a40cef5b709bf46c74fc",
+    "style.css": "05847da1f3c84af48fe99c4745a8a1f4426953161d6ce798d79aed3b80d45736",
+    "index.html": "dc7c071ed1a3415eeb5f6c56691d3b3960e5e7fb0c704b845ea5d40f8e4f5228",
+    "fonts/qiuqiule-ui.woff2": "3ea06613766e354e244962c5f9cab82ad1c109a8e867c9cd830431796aa4a3d0"
+  }
+}

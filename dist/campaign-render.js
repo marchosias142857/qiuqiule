@@ -192,7 +192,7 @@ export function drawCampaignBorder(g,bounds,gap,{dx=0,dy=0,outset=0}={}){
 // Return just the guide geometry so the eye look and the dotted suggestion can
 // be inspected independently of the Phaser boundary. The guide is static and
 // remains useful with reduced motion or feedback strength set to zero.
-export function campaignTutorialGuide(world){
+export function campaignTutorialGuide(world,{dragging=false}={}){
   if(!world||world.config?.legacy||world.legacy||world.phase!=='battle')return [];
   const visible=world.tutorialVisible??(world.config?.k===0&&(world.shotsUsed||0)===0);
   if(!visible||world.shotActive)return [];
@@ -207,13 +207,14 @@ export function campaignTutorialGuide(world){
     ? Math.min(targetBody.width*.5/(Math.abs(dx/distance)||1e-9),targetBody.height*.5/(Math.abs(dy/distance)||1e-9))
     : finite(target.r,finite(targetBody?.r,0));
   const start=player.r+Math.max(5,world.unit*.3);
-  const end=distance-Math.max(4,targetRadius+world.unit*.15);
+  const proposed=clamp(finite(world.tutorialPullRatio,1),.05,1);
+  const end=Math.min(distance-Math.max(4,targetRadius+world.unit*.15),start+7*world.unit*proposed);
   if(end<=start)return [];
   const count=clamp(Math.floor((end-start)/Math.max(9,world.unit*.55))+1,2,24);
   const r=clamp(world.unit*.065,1.1,1.8);
   return Array.from({length:count},(_,i)=>{
     const along=start+(end-start)*i/(count-1);
-    return {x:player.x+dx/distance*along,y:player.y+dy/distance*along,r,alpha:.24+.14*i/(count-1)};
+    return {x:player.x+dx/distance*along,y:player.y+dy/distance*along,r,alpha:(dragging?.52:.32)+.14*i/(count-1)};
   });
 }
 
@@ -221,7 +222,7 @@ export function campaignTutorialGuide(world){
 // their original collider, and a touched peg remains visible until shot-end.
 export function drawCampaign(g,world,{
   enemyColor=0xe88c72,playerColor=0x252720,inkColor=0x252720,bgColor=0xf4f3eb,
-  alpha=1,reducedMotion=false,strength=1,showTutorial=true,
+  alpha=1,reducedMotion=false,strength=1,showTutorial=true,dragging=false,
 }={}){
   if(!world||world.mode!=='campaign'||world.config?.legacy||world.legacy)return;
   alpha=clamp(finite(alpha,1),0,1);
@@ -281,6 +282,9 @@ export function drawCampaign(g,world,{
       }
       points.push({x:right,y:top});
       path(g,points,false,inkColor,alpha*.75,1.2,false);
+      // A double open rim identifies the catch bucket as a functional zone.
+      const second=points.map(point=>({x:zone.x+(point.x-zone.x)*.86,y:point.y-unit*.13}));
+      path(g,second,false,inkColor,alpha*.45,1,false);
     }else if(zone.shape==='circle'&&zone.r>0){
       const points=circlePoints(zone.x,zone.y,zone.r);
       path(g,points,true,bgColor,alpha);
@@ -299,10 +303,15 @@ export function drawCampaign(g,world,{
         path(g,roundedRectPoints(body.x,body.y,body.width,body.height,finite(body.cornerRadius,body.height/2)),true,inkColor,alpha*.35);
         continue;
       }
+      if(body.kind==='obstacle'||body.indestructible||body.hp===Infinity){
+        const points=roundedRectPoints(body.x,body.y,body.width,body.height,finite(body.cornerRadius,unit*.16));
+        path(g,points,false,playerColor,alpha*.85,1.6);
+        continue;
+      }
       const ratio=Number.isFinite(body.maxHp)&&body.maxHp>0&&Number.isFinite(body.hp)?clamp(body.hp/body.maxHp,0,1):1;
       const scale=.82+.18*ratio;
       const points=roundedRectPoints(body.x,body.y,body.width*scale,body.height*scale,finite(body.cornerRadius,unit*.16)*scale);
-      const patternAlpha=body.pattern==='checker'&&body.shade? .72 : .9;
+      const patternAlpha=body.hard||body.pattern==='checker'&&body.shade? .72 : .9;
       path(g,points,true,enemyColor,alpha*patternAlpha*(.4+.6*ratio));
     }else if(body.shape==='circle'&&body.r>0){
       const points=circlePoints(body.x,body.y,body.r);
@@ -328,6 +337,27 @@ export function drawCampaign(g,world,{
       }
     }
   }
-  if(showTutorial)for(const dot of campaignTutorialGuide(world))
+  if(showTutorial)for(const dot of campaignTutorialGuide(world,{dragging}))
     path(g,circlePoints(dot.x,dot.y,dot.r,12),true,playerColor,alpha*dot.alpha);
+}
+
+// Only campaign callers invoke these details. Rings leave collision geometry
+// and the ordinary enemy renderer untouched.
+export function drawCampaignBodyDetails(g,world,body,{enemyColor=0xe88c72,bgColor=0xf4f3eb,alpha=1}={}){
+  if(world?.mode!=='campaign'||body?.kind!=='merge-ball'||!(body.r>0))return;
+  const rings=clamp(Math.floor(body.mergeLevel||1)-3,0,2),ink=numberColor(enemyColor,bgColor,1);
+  for(let i=0;i<rings;i++)path(g,circlePoints(body.x,body.y,body.r*(i?.72:.48),24),false,ink,alpha*.68,1);
+}
+
+export function campaignFailureFeedback(reason='budget'){
+  reason=({pressure:'coverage',water:'hole',shots:'budget'})[reason]||reason;
+  const cues={
+    scratch:{frequency:120,color:0x91b8c7,duration:.85,pulses:2,label:'自己落袋 · 发数耗尽'},
+    budget:{frequency:160,color:0x9b89c5,duration:.75,pulses:1,label:'发数耗尽'},
+    coverage:{frequency:120,color:0xd95f62,duration:1.1,pulses:2,label:'覆盖率达到42%'},
+    bottom:{frequency:140,color:0xe88c72,duration:.95,pulses:2,label:'目标触底'},
+    hole:{frequency:120,color:0x91b8c7,duration:.85,pulses:1,label:'球已落水'},
+    drain:{frequency:120,color:0x91b8c7,duration:.85,pulses:1,label:'球已落水'},
+  };
+  return {reason,...(cues[reason]||cues.budget)};
 }

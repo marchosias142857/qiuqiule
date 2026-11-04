@@ -51,17 +51,17 @@ test('three actual consecutive losses offer one skip without points or fake comp
   assert.deepEqual(skipLevel(state, 1), state);
 });
 
-test('abandonment does not count as a loss or satisfy the consecutive-failure skip requirement', () => {
+test('abandonment preserves prior real failures without adding another failure', () => {
   let state = normalizeProgress(null);
   state = finish(state, 1, 'loss'); state = finish(state, 1, 'loss');
   state = finish(state, 1, 'abandon', {progress: {remaining: 8, total: 20}, summary: '还剩8砖', elapsed: 28.5});
   let record = levelRecord(state, 1);
-  assert.equal(record.losses, 2); assert.equal(record.abandoned, 1); assert.equal(record.failStreak, 0);
+  assert.equal(record.losses, 2); assert.equal(record.abandoned, 1); assert.equal(record.failStreak, 2);
   assert.deepEqual(record.lastProgress, {remaining: 8, total: 20});
   assert.equal(record.lastSummary, '还剩8砖');
   assert.equal(record.lastAbandonTime, 28.5); assert.equal(record.lastElapsed, 28.5);
   state = finish(state, 1, 'loss');
-  assert.equal(canSkip(state, 1), false);
+  assert.equal(canSkip(state, 1), true);
   assert.equal(levelRecord(state, 1).attempts, 4);
 });
 
@@ -130,17 +130,17 @@ test('attempt IDs reject duplicate and late end events across restart', () => {
   assert.equal(levelRecord(state, 1).wins, 1);
 });
 
-test('restarting a persisted open run keeps its abandonment checkpoint', () => {
+test('restarting a persisted open run keeps its interruption checkpoint', () => {
   let state = recordAttempt(null, 1);
   const attemptId = levelRecord(state, 1).activeAttempt;
   state = recordCheckpoint(state, 1, {attemptId, progress: {remaining: 12, total: 20}, summary: '还剩12砖', elapsed: 18.25});
   state = recordAttempt(JSON.parse(JSON.stringify(state)), 1);
   const record = levelRecord(state, 1);
-  assert.equal(record.attempts, 2); assert.equal(record.abandoned, 1);
-  assert.equal(record.lastOutcome, 'abandon'); assert.equal(record.activeAttempt, 2);
+  assert.equal(record.attempts, 2); assert.equal(record.abandoned, 0); assert.equal(record.interrupted, 1);
+  assert.equal(record.lastOutcome, 'interrupt'); assert.equal(record.activeAttempt, 2);
   assert.deepEqual(record.lastProgress, {remaining: 12, total: 20});
   assert.equal(record.lastSummary, '还剩12砖');
-  assert.equal(record.lastAbandonTime, 18.25); assert.equal(record.lastElapsed, 18.25);
+  assert.equal(record.lastInterruptTime, 18.25); assert.equal(record.lastElapsed, 18.25);
   assert.equal(record.activeElapsed, null);
 });
 
@@ -154,11 +154,13 @@ test('trial operations leave formal records untouched, including tutorial and ch
   assert.equal(JSON.stringify(state), before);
 });
 
-test('tutorial and upgrade selections persist, and mutation helpers do not mutate inputs', () => {
+test('tutorial waits for a real win while upgrade usage persists without mutating inputs', () => {
   const input = normalizeProgress(null), before = JSON.stringify(input);
   let state = recordAttempt(input, 1, {upgradeId: 'energy', tutorialKey: 'wall'});
   state = recordResult(state, 1, {outcome: 'loss'});
   state = recordAttempt(state, 1, {upgradeId: 'rubber'});
+  assert.equal(state.tutorials.wall, undefined);
+  state = recordResult(state, 1, {outcome: 'win', rating: 1});
   assert.equal(state.tutorials.wall, true);
   assert.deepEqual(state.upgradeChoices, {energy: 1, rubber: 1});
   assert.deepEqual(levelRecord(state, 1).upgradeChoices, {energy: 1, rubber: 1});
@@ -167,7 +169,7 @@ test('tutorial and upgrade selections persist, and mutation helpers do not mutat
 });
 
 test('invalid numeric metadata, forged dots and oversized/unsafe record keys are normalized', () => {
-  const state = normalizeProgress({version: 2, legacyCompleted: NaN, completed: 100, unlocked: 1,
+  const state = normalizeProgress({version: 3, legacyCompleted: NaN, completed: 100, unlocked: 1,
     levels: {'1': {cleared: false, rating: 3, bestScore: Infinity, attempts: -5, failStreak: 10},
       '2': {cleared: true, rating: 9}, '101': {cleared: true}, '03': {cleared: true}},
     tutorials: {wall: true, constructor: true, bogus: 1}, upgradeChoices: {energy: Infinity}});

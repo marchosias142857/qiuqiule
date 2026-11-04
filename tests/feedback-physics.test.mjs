@@ -58,15 +58,68 @@ test('a damaging nonlethal contact freezes only its pair while other bodies and 
   assert.equal(w.events.filter(e => e.type === 'hit').length, 1);
 });
 
-test('small hits have no hold and hurt alpha reflects the maximum-health damage ratio', () => {
+test('small hits have no hold or flash while actual kills keep their established flash', () => {
   const w = run(), b = enemy(w, 300, 300, {hp: 1000, maxHp: 1000});
   strike(w, b, w.baseSpeed * .3);
   const hit = w.events.find(e => e.type === 'hit');
-  assert.ok(hit.damage > 0 && hit.damage < 300);
+  assert.ok(hit.damage > 0 && hit.damage < 100);
   near(hit.freezeDuration, 0);
-  near(b.hitAlpha, hit.damage / b.maxHp);
+  assert.equal(hit.hitTier, 'light'); near(b.hitAlpha, 0);
   w.damage(b, 1000);
   near(b.hitAlpha, 1);
+});
+
+test('real contacts halve only light-hit squash without changing impulses and retain lethal squash', () => {
+  const captures = [];
+  for (const [maxHp, hp] of [[10000, 10000], [500, 500], [150, 150], [10000, 1]]) {
+    const w = run(), b = enemy(w, 300, 300, {maxHp, hp});
+    strike(w, b);
+    const hit = w.events.find(e => e.type === 'hit');
+    captures.push({w, b, hit});
+  }
+  const [light, medium, heavy, lethal] = captures;
+  assert.deepEqual(captures.slice(0, 3).map(c => c.hit.hitTier), ['light', 'medium', 'heavy']);
+  near(light.w.player.squash * 2, medium.w.player.squash);
+  near(light.b.squash * 2, medium.b.squash);
+  near(medium.w.player.squash, heavy.w.player.squash);
+  near(lethal.w.player.squash, heavy.w.player.squash);
+  near(lethal.b.squash, heavy.b.squash);
+  for (const other of [medium, heavy]) {
+    near(light.w.player.vx, other.w.player.vx); near(light.w.player.vy, other.w.player.vy);
+    near(light.b.vx, other.b.vx); near(light.b.vy, other.b.vy);
+  }
+  near(light.b.hitAlpha, 0); near(medium.b.hitAlpha, medium.hit.damage / medium.b.maxHp);
+  near(light.hit.freezeDuration, 0); near(medium.hit.freezeDuration, 0); near(heavy.hit.freezeDuration, .025);
+  assert.equal(lethal.hit.lethal, true);
+  near(lethal.w.events.find(e => e.type === 'kill').freezeDuration, .048);
+});
+
+test('ordinary damage boundaries do not change old campaign flashes or hold timings', () => {
+  for (const [damage, tier, hold] of [[99, 'light', 0], [100, 'medium', 0], [299, 'medium', 0], [300, 'heavy', .025]]) {
+    const w = run(), b = enemy(w, 300, 300, {hp: 1000, maxHp: 1000});
+    const feedback = w.damage(b, damage);
+    assert.equal(feedback.hitTier, tier); near(feedback.freezeDuration, hold);
+    near(b.hitAlpha, tier === 'light' ? 0 : damage / 1000);
+  }
+  const campaign = new CampaignWorld(900, 700, 1, () => .5);
+  campaign.setFeedbackOptions({strength: .6});
+  const b = campaign.enemies[0]; Object.assign(b, {hp: 1000, maxHp: 1000, born: 1, solid: true});
+  const feedback = campaign.damage(b, 1);
+  near(b.hitAlpha, .15 + .35 / 1000);
+  assert.notEqual(feedback.hitTier, 'light'); near(feedback.freezeDuration, 0);
+});
+
+test('v7.2 leaves default Boss hit and stun holds at sixty and ninety milliseconds', () => {
+  for (const enteringStun of [false, true]) {
+    const w = run(.6); w.stage = 5; w.beginBoss(); w.step(BOSS_TIMING.entry);
+    const b = w.boss, p = w.player;
+    if (enteringStun) b.r = b.minRadius + .01;
+    Object.assign(p, {x: b.x, y: b.y + b.r + p.r - .1, vx: 0, vy: -w.baseSpeed});
+    w.collideBoss();
+    const hit = w.events.find(e => e.type === 'bossHit');
+    near(hit.freezeDuration, enteringStun ? .09 : .06);
+    assert.ok(b.squash > 0 && p.squash > 0, 'Boss collision deformation stays unchanged');
+  }
 });
 
 test('kill event preserves incoming impact and a contact snapshot alongside combo credit', () => {
@@ -123,7 +176,7 @@ test('single-shot holds share 250 ms including anticipation; only a successful s
   near(values[2], .037);
   near(values[3], 0); near(values[4], 0);
   near(w.feedbackFreezeUsed, .25);
-  assert.equal(w.score, 150);
+  assert.equal(w.score, 210);
   w.player.vx = w.player.vy = 0;
   assert.equal(w.shoot(1, 0), false);
   assert.equal(w.feedbackKills, 5); near(w.feedbackFreezeUsed, .25);

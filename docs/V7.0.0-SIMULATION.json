@@ -1,0 +1,5628 @@
+{
+  "method": "New deterministic automated proxy; not the absent PDF simulator or human performance.",
+  "config": {
+    "seedCount": 8,
+    "maxSeconds": 1800,
+    "sigmaDegrees": 10,
+    "maxCadencePerMinute": 26,
+    "width": 390,
+    "height": 844,
+    "realTicksPerSecond": 120,
+    "aimRealSeconds": 0.6,
+    "aimTimeScale": 0.3,
+    "feedback": 0.6,
+    "decision": "90 uniform directions ranked by distinct circle intersections along direct + one reflected segment; fixed upgrade priorities; actual reward-ball shots.",
+    "multiKillDenominator": "combat shots with at least one hit, shield break, or collateral kill",
+    "rewardCarryAttribution": "reward shots clear the combat shot attribution; hits/kills before the next combat shot are reported separately by their actual stage",
+    "priorities": [
+      "split",
+      "pierce",
+      "rubber",
+      "energy",
+      "density",
+      "penetration",
+      "pulse",
+      "gravity",
+      "bank",
+      "boomerang",
+      "magnet",
+      "growth",
+      "shockwave",
+      "breath",
+      "overspeed",
+      "frenzy",
+      "risk",
+      "gambler"
+    ]
+  },
+  "source": {
+    "baselineRef": "a9ad79e4a32a48aaee691ad6d160cbd447c8ff1a",
+    "baselinePhysicsSha256": "9c036381bb08f878343d7e8802aeb3f8b0ba6dc8cfb7a6d8f07687f0e2742e32",
+    "currentPhysicsSha256": "d2f3613554bc617e2fcd2bc66fe1ab3b5788e36cb187d4617985622b45ea739b"
+  },
+  "variants": {
+    "v6.9.0": {
+      "summary": {
+        "runs": 8,
+        "meanStage": 11.375,
+        "stageRange": [
+          8,
+          16
+        ],
+        "meanRealMinutes": 11.003124999999999,
+        "meanScore": 13490.125,
+        "meanActualShotsPerCombatMinute": 25.085889599994694,
+        "censored": 0,
+        "bossWins": 13,
+        "bossLosses": 0,
+        "rewardCarryKills": 0,
+        "rewardCarryHits": 12,
+        "early": {
+          "shots": 766,
+          "kills": 880,
+          "killsPerShot": 1.1488250652741514,
+          "multiKillShareAmongHitShots": 0.3146853146853147
+        },
+        "ordinary": {
+          "shots": 1898,
+          "kills": 3000,
+          "killsPerShot": 1.5806111696522656,
+          "multiKillShareAmongHitShots": 0.446843853820598
+        },
+        "stage2": {
+          "shots": 128,
+          "kills": 144,
+          "killsPerShot": 1.125,
+          "multiKillShareAmongHitShots": 0.32231404958677684
+        },
+        "stage10": {
+          "shots": 106,
+          "kills": 241,
+          "killsPerShot": 2.2735849056603774,
+          "multiKillShareAmongHitShots": 0.7058823529411765
+        }
+      },
+      "runs": [
+        {
+          "seed": 1,
+          "stage": 9,
+          "score": 6020,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 608.2,
+          "activeCombatSeconds": 557.2416666663242,
+          "worldSeconds": 501.3436666663683,
+          "combatShots": 240,
+          "actualShotsPerCombatMinute": 25.841570832539173,
+          "early": {
+            "shots": 113,
+            "kills": 110,
+            "multiKillShots": 22,
+            "hitShots": 104,
+            "killsPerShot": 0.9734513274336283,
+            "multiKillShareAmongHitShots": 0.21153846153846154
+          },
+          "ordinary": {
+            "shots": 233,
+            "kills": 243,
+            "multiKillShots": 60,
+            "hitShots": 217,
+            "killsPerShot": 1.0429184549356223,
+            "multiKillShareAmongHitShots": 0.2764976958525346
+          },
+          "stage2": {
+            "shots": 17,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 16,
+            "killsPerShot": 1.0588235294117647,
+            "multiKillShareAmongHitShots": 0.3125
+          },
+          "stage10": {
+            "shots": 0,
+            "kills": 0,
+            "multiKillShots": 0,
+            "hitShots": 0,
+            "killsPerShot": 0,
+            "multiKillShareAmongHitShots": 0
+          },
+          "maxCombo": 3,
+          "maxPopulation": 28,
+          "nonlethalHits": 463,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 16.808333333333337,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 10,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 0,
+          "rewardCarryByStage": {},
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "gravity"
+            },
+            {
+              "stage": 2,
+              "id": "rubber"
+            },
+            {
+              "stage": 3,
+              "id": "density"
+            },
+            {
+              "stage": 4,
+              "id": "bank"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 6,
+              "id": "density"
+            },
+            {
+              "stage": 7,
+              "id": "growth"
+            },
+            {
+              "stage": 8,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 27.35833333333242,
+            "2": 38.39166666666513,
+            "3": 58.25833333333067,
+            "4": 71.00833333333591,
+            "5": 65.3749999999981,
+            "6": 65.64999999999831,
+            "7": 72.35833333333699,
+            "8": 76.23333333334007,
+            "9": 65.79999999999843
+          }
+        },
+        {
+          "seed": 2,
+          "stage": 12,
+          "score": 12909,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 736.8833333333333,
+          "activeCombatSeconds": 663.8156072535604,
+          "worldSeconds": 611.7652499997831,
+          "combatShots": 281,
+          "actualShotsPerCombatMinute": 25.398619459635448,
+          "early": {
+            "shots": 89,
+            "kills": 110,
+            "multiKillShots": 30,
+            "hitShots": 85,
+            "killsPerShot": 1.2359550561797752,
+            "multiKillShareAmongHitShots": 0.35294117647058826
+          },
+          "ordinary": {
+            "shots": 267,
+            "kills": 380,
+            "multiKillShots": 100,
+            "hitShots": 254,
+            "killsPerShot": 1.4232209737827715,
+            "multiKillShareAmongHitShots": 0.3937007874015748
+          },
+          "stage2": {
+            "shots": 17,
+            "kills": 18,
+            "multiKillShots": 3,
+            "hitShots": 17,
+            "killsPerShot": 1.0588235294117647,
+            "multiKillShareAmongHitShots": 0.17647058823529413
+          },
+          "stage10": {
+            "shots": 23,
+            "kills": 50,
+            "multiKillShots": 14,
+            "hitShots": 23,
+            "killsPerShot": 2.1739130434782608,
+            "multiKillShareAmongHitShots": 0.6086956521739131
+          },
+          "maxCombo": 7,
+          "maxPopulation": 28,
+          "nonlethalHits": 919,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 13.683333333333337,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 17.68333333333328,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 14,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 0,
+          "rewardCarryByStage": {},
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "split"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 6,
+              "id": "penetration"
+            },
+            {
+              "stage": 7,
+              "id": "pierce"
+            },
+            {
+              "stage": 8,
+              "id": "rubber"
+            },
+            {
+              "stage": 9,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "gravity"
+            },
+            {
+              "stage": 11,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 30.116666666665598,
+            "2": 38.81666666666511,
+            "3": 43.36666666666485,
+            "4": 49.216666666664516,
+            "5": 44.2666666666648,
+            "6": 62.23333333333044,
+            "7": 70.35000000000205,
+            "8": 62.71666666666375,
+            "9": 92.75000000001988,
+            "10": 57.549999999997375,
+            "11": 62.441666666663764,
+            "12": 18.624999999999584
+          }
+        },
+        {
+          "seed": 3,
+          "stage": 8,
+          "score": 5413,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 519.725,
+          "activeCombatSeconds": 474.54999999973273,
+          "worldSeconds": 427.9850833331003,
+          "combatShots": 205,
+          "actualShotsPerCombatMinute": 25.91929196081957,
+          "early": {
+            "shots": 113,
+            "kills": 110,
+            "multiKillShots": 27,
+            "hitShots": 107,
+            "killsPerShot": 0.9734513274336283,
+            "multiKillShareAmongHitShots": 0.2523364485981308
+          },
+          "ordinary": {
+            "shots": 197,
+            "kills": 196,
+            "multiKillShots": 47,
+            "hitShots": 190,
+            "killsPerShot": 0.9949238578680203,
+            "multiKillShareAmongHitShots": 0.24736842105263157
+          },
+          "stage2": {
+            "shots": 18,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 18,
+            "killsPerShot": 1,
+            "multiKillShareAmongHitShots": 0.2777777777777778
+          },
+          "stage10": {
+            "shots": 0,
+            "kills": 0,
+            "multiKillShots": 0,
+            "hitShots": 0,
+            "killsPerShot": 0,
+            "multiKillShareAmongHitShots": 0
+          },
+          "maxCombo": 4,
+          "maxPopulation": 28,
+          "nonlethalHits": 463,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 17.69999999999999,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 9,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 0,
+          "rewardCarryByStage": {},
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 1,
+              "id": "pierce"
+            },
+            {
+              "stage": 2,
+              "id": "gravity"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "pulse"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 31.69166666666551,
+            "2": 41.491666666664955,
+            "3": 64.02499999999702,
+            "4": 69.05833333333436,
+            "5": 55.308333333330836,
+            "6": 69.46666666666802,
+            "7": 72.383333333337,
+            "8": 53.42499999999761
+          }
+        },
+        {
+          "seed": 4,
+          "stage": 14,
+          "score": 19274,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 776.8833333333333,
+          "activeCombatSeconds": 693.7705135202762,
+          "worldSeconds": 651.6199166664859,
+          "combatShots": 280,
+          "actualShotsPerCombatMinute": 24.21550018716528,
+          "early": {
+            "shots": 86,
+            "kills": 110,
+            "multiKillShots": 28,
+            "hitShots": 82,
+            "killsPerShot": 1.2790697674418605,
+            "multiKillShareAmongHitShots": 0.34146341463414637
+          },
+          "ordinary": {
+            "shots": 269,
+            "kills": 508,
+            "multiKillShots": 138,
+            "hitShots": 258,
+            "killsPerShot": 1.8884758364312269,
+            "multiKillShareAmongHitShots": 0.5348837209302325
+          },
+          "stage2": {
+            "shots": 15,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 15,
+            "killsPerShot": 1.2,
+            "multiKillShareAmongHitShots": 0.3333333333333333
+          },
+          "stage10": {
+            "shots": 22,
+            "kills": 50,
+            "multiKillShots": 17,
+            "hitShots": 21,
+            "killsPerShot": 2.272727272727273,
+            "multiKillShareAmongHitShots": 0.8095238095238095
+          },
+          "maxCombo": 7,
+          "maxPopulation": 28,
+          "nonlethalHits": 1090,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 8.875,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 15.424999999999955,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 16,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 8,
+          "rewardCarryByStage": {
+            "4": {
+              "kills": 0,
+              "hits": 2
+            },
+            "5": {
+              "kills": 0,
+              "hits": 1
+            },
+            "7": {
+              "kills": 0,
+              "hits": 2
+            },
+            "14": {
+              "kills": 0,
+              "hits": 3
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "energy"
+            },
+            {
+              "stage": 2,
+              "id": "rubber"
+            },
+            {
+              "stage": 3,
+              "id": "boomerang"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "pierce"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 6,
+              "id": "split"
+            },
+            {
+              "stage": 7,
+              "id": "rubber"
+            },
+            {
+              "stage": 8,
+              "id": "energy"
+            },
+            {
+              "stage": 9,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 11,
+              "id": "penetration"
+            },
+            {
+              "stage": 12,
+              "id": "density"
+            },
+            {
+              "stage": 13,
+              "id": "bank"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 34.2499999999987,
+            "2": 34.31666666666536,
+            "3": 43.77499999999816,
+            "4": 47.958333333331254,
+            "5": 39.67499999999839,
+            "6": 55.99999999999746,
+            "7": 46.95833333333131,
+            "8": 50.08333333333113,
+            "9": 47.86666666666459,
+            "10": 55.26666666666417,
+            "11": 47.466666666664615,
+            "12": 69.54166666666808,
+            "13": 71.30833333333615,
+            "14": 25.008333333332555
+          }
+        },
+        {
+          "seed": 5,
+          "stage": 10,
+          "score": 9711,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 492.9,
+          "activeCombatSeconds": 436.09999999977134,
+          "worldSeconds": 410.1247499997886,
+          "combatShots": 182,
+          "actualShotsPerCombatMinute": 25.04012841092806,
+          "early": {
+            "shots": 80,
+            "kills": 110,
+            "multiKillShots": 33,
+            "hitShots": 75,
+            "killsPerShot": 1.375,
+            "multiKillShareAmongHitShots": 0.44
+          },
+          "ordinary": {
+            "shots": 177,
+            "kills": 311,
+            "multiKillShots": 93,
+            "hitShots": 169,
+            "killsPerShot": 1.7570621468926553,
+            "multiKillShareAmongHitShots": 0.5502958579881657
+          },
+          "stage2": {
+            "shots": 14,
+            "kills": 18,
+            "multiKillShots": 7,
+            "hitShots": 11,
+            "killsPerShot": 1.2857142857142858,
+            "multiKillShareAmongHitShots": 0.6363636363636364
+          },
+          "stage10": {
+            "shots": 27,
+            "kills": 41,
+            "multiKillShots": 13,
+            "hitShots": 25,
+            "killsPerShot": 1.5185185185185186,
+            "multiKillShareAmongHitShots": 0.52
+          },
+          "maxCombo": 8,
+          "maxPopulation": 28,
+          "nonlethalHits": 553,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 12.599999999999994,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 11,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 1,
+          "rewardCarryByStage": {
+            "8": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "energy"
+            },
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 2,
+              "id": "rubber"
+            },
+            {
+              "stage": 3,
+              "id": "pulse"
+            },
+            {
+              "stage": 4,
+              "id": "split"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "pierce"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "density"
+            },
+            {
+              "stage": 8,
+              "id": "bank"
+            },
+            {
+              "stage": 9,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 20.291666666666156,
+            "2": 31.966666666665493,
+            "3": 52.25833333333101,
+            "4": 40.241666666665026,
+            "5": 41.67499999999828,
+            "6": 41.608333333331615,
+            "7": 43.124999999998195,
+            "8": 44.44166666666479,
+            "9": 44.51666666666478,
+            "10": 63.374999999997044
+          }
+        },
+        {
+          "seed": 6,
+          "stage": 8,
+          "score": 6265,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 523.0333333333333,
+          "activeCombatSeconds": 474.7916666663992,
+          "worldSeconds": 432.0575833330965,
+          "combatShots": 203,
+          "actualShotsPerCombatMinute": 25.65335673542472,
+          "early": {
+            "shots": 94,
+            "kills": 110,
+            "multiKillShots": 30,
+            "hitShots": 88,
+            "killsPerShot": 1.1702127659574468,
+            "multiKillShareAmongHitShots": 0.3409090909090909
+          },
+          "ordinary": {
+            "shots": 194,
+            "kills": 215,
+            "multiKillShots": 59,
+            "hitShots": 184,
+            "killsPerShot": 1.1082474226804124,
+            "multiKillShareAmongHitShots": 0.32065217391304346
+          },
+          "stage2": {
+            "shots": 14,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 13,
+            "killsPerShot": 1.2857142857142858,
+            "multiKillShareAmongHitShots": 0.38461538461538464
+          },
+          "stage10": {
+            "shots": 0,
+            "kills": 0,
+            "multiKillShots": 0,
+            "hitShots": 0,
+            "killsPerShot": 0,
+            "multiKillShareAmongHitShots": 0
+          },
+          "maxCombo": 5,
+          "maxPopulation": 28,
+          "nonlethalHits": 550,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 20.05833333333331,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 9,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 0,
+          "rewardCarryByStage": {},
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 1,
+              "id": "split"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "penetration"
+            },
+            {
+              "stage": 4,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "gravity"
+            },
+            {
+              "stage": 6,
+              "id": "bank"
+            },
+            {
+              "stage": 7,
+              "id": "pierce"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 27.916666666665723,
+            "2": 31.591666666665514,
+            "3": 38.77499999999844,
+            "4": 59.68333333333059,
+            "5": 62.74999999999708,
+            "6": 90.90833333335175,
+            "7": 67.34999999999967,
+            "8": 75.75833333333969
+          }
+        },
+        {
+          "seed": 7,
+          "stage": 16,
+          "score": 27086,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 919.6583333333333,
+          "activeCombatSeconds": 818.2798091055275,
+          "worldSeconds": 770.9945833332378,
+          "combatShots": 333,
+          "actualShotsPerCombatMinute": 24.417075647803657,
+          "early": {
+            "shots": 107,
+            "kills": 110,
+            "multiKillShots": 25,
+            "hitShots": 98,
+            "killsPerShot": 1.02803738317757,
+            "multiKillShareAmongHitShots": 0.25510204081632654
+          },
+          "ordinary": {
+            "shots": 319,
+            "kills": 640,
+            "multiKillShots": 173,
+            "hitShots": 305,
+            "killsPerShot": 2.006269592476489,
+            "multiKillShareAmongHitShots": 0.5672131147540984
+          },
+          "stage2": {
+            "shots": 15,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 14,
+            "killsPerShot": 1.2,
+            "multiKillShareAmongHitShots": 0.35714285714285715
+          },
+          "stage10": {
+            "shots": 22,
+            "kills": 50,
+            "multiKillShots": 16,
+            "hitShots": 21,
+            "killsPerShot": 2.272727272727273,
+            "multiKillShareAmongHitShots": 0.7619047619047619
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 1290,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 11.508333333333326,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 9.608333333333348,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 11.25,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 19,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 1,
+          "rewardCarryByStage": {
+            "9": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 2,
+              "id": "boomerang"
+            },
+            {
+              "stage": 3,
+              "id": "density"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "split"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "rubber"
+            },
+            {
+              "stage": 8,
+              "id": "rubber"
+            },
+            {
+              "stage": 9,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "bank"
+            },
+            {
+              "stage": 11,
+              "id": "pierce"
+            },
+            {
+              "stage": 12,
+              "id": "growth"
+            },
+            {
+              "stage": 13,
+              "id": "pulse"
+            },
+            {
+              "stage": 14,
+              "id": "density"
+            },
+            {
+              "stage": 15,
+              "id": "gravity"
+            },
+            {
+              "stage": 15,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 43.383333333331514,
+            "2": 35.33333333333197,
+            "3": 46.34999999999801,
+            "4": 62.78333333333041,
+            "5": 59.77499999999725,
+            "6": 52.79166666666431,
+            "7": 49.358333333331174,
+            "8": 41.349999999998296,
+            "9": 47.02499999999797,
+            "10": 55.916666666664135,
+            "11": 47.27499999999796,
+            "12": 45.366666666664734,
+            "13": 53.733333333330926,
+            "14": 51.8749999999977,
+            "15": 71.46666666666961,
+            "16": 22.13333333333272
+          }
+        },
+        {
+          "seed": 8,
+          "stage": 14,
+          "score": 21243,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 704.2166666666667,
+          "activeCombatSeconds": 622.273587258818,
+          "worldSeconds": 591.1332499997839,
+          "combatShots": 251,
+          "actualShotsPerCombatMinute": 24.20157356564163,
+          "early": {
+            "shots": 84,
+            "kills": 110,
+            "multiKillShots": 30,
+            "hitShots": 76,
+            "killsPerShot": 1.3095238095238095,
+            "multiKillShareAmongHitShots": 0.39473684210526316
+          },
+          "ordinary": {
+            "shots": 242,
+            "kills": 507,
+            "multiKillShots": 137,
+            "hitShots": 229,
+            "killsPerShot": 2.0950413223140494,
+            "multiKillShareAmongHitShots": 0.5982532751091703
+          },
+          "stage2": {
+            "shots": 18,
+            "kills": 18,
+            "multiKillShots": 4,
+            "hitShots": 17,
+            "killsPerShot": 1,
+            "multiKillShareAmongHitShots": 0.23529411764705882
+          },
+          "stage10": {
+            "shots": 12,
+            "kills": 50,
+            "multiKillShots": 12,
+            "hitShots": 12,
+            "killsPerShot": 4.166666666666667,
+            "multiKillShareAmongHitShots": 1
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 985,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.083333333333343,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 11.725000000000023,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 16,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 2,
+          "rewardCarryByStage": {
+            "9": {
+              "kills": 0,
+              "hits": 2
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "boomerang"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "split"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "magnet"
+            },
+            {
+              "stage": 6,
+              "id": "pierce"
+            },
+            {
+              "stage": 7,
+              "id": "energy"
+            },
+            {
+              "stage": 8,
+              "id": "rubber"
+            },
+            {
+              "stage": 9,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "magnet"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 11,
+              "id": "rubber"
+            },
+            {
+              "stage": 12,
+              "id": "density"
+            },
+            {
+              "stage": 13,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 29.27499999999898,
+            "2": 42.43333333333157,
+            "3": 53.5749999999976,
+            "4": 35.64166666666529,
+            "5": 36.47499999999857,
+            "6": 42.99166666666487,
+            "7": 51.2166666666644,
+            "8": 36.72499999999856,
+            "9": 48.18333333333124,
+            "10": 33.099999999998765,
+            "11": 51.81666666666437,
+            "12": 46.566666666664666,
+            "13": 73.72500000000474,
+            "14": 18.741666666666244
+          }
+        }
+      ]
+    },
+    "v7.0.0-hp-1.16": {
+      "summary": {
+        "runs": 8,
+        "meanStage": 19.625,
+        "stageRange": [
+          12,
+          26
+        ],
+        "meanRealMinutes": 18.285069444444442,
+        "meanScore": 53869.25,
+        "meanActualShotsPerCombatMinute": 23.306278218869455,
+        "censored": 0,
+        "bossWins": 26,
+        "bossLosses": 0,
+        "rewardCarryKills": 0,
+        "rewardCarryHits": 73,
+        "early": {
+          "shots": 607,
+          "kills": 880,
+          "killsPerShot": 1.4497528830313016,
+          "multiKillShareAmongHitShots": 0.44642857142857145
+        },
+        "ordinary": {
+          "shots": 2898,
+          "kills": 8019,
+          "killsPerShot": 2.767080745341615,
+          "multiKillShareAmongHitShots": 0.6660714285714285
+        },
+        "stage2": {
+          "shots": 109,
+          "kills": 144,
+          "killsPerShot": 1.3211009174311927,
+          "multiKillShareAmongHitShots": 0.41
+        },
+        "stage10": {
+          "shots": 139,
+          "kills": 400,
+          "killsPerShot": 2.8776978417266186,
+          "multiKillShareAmongHitShots": 0.6934306569343066
+        }
+      },
+      "runs": [
+        {
+          "seed": 1,
+          "stage": 12,
+          "score": 16658,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 613.5416666666666,
+          "activeCombatSeconds": 542.2083333330196,
+          "worldSeconds": 514.061083333048,
+          "combatShots": 220,
+          "actualShotsPerCombatMinute": 24.344885883361506,
+          "early": {
+            "shots": 63,
+            "kills": 110,
+            "multiKillShots": 30,
+            "hitShots": 57,
+            "killsPerShot": 1.746031746031746,
+            "multiKillShareAmongHitShots": 0.5263157894736842
+          },
+          "ordinary": {
+            "shots": 208,
+            "kills": 408,
+            "multiKillShots": 105,
+            "hitShots": 197,
+            "killsPerShot": 1.9615384615384615,
+            "multiKillShareAmongHitShots": 0.5329949238578681
+          },
+          "stage2": {
+            "shots": 13,
+            "kills": 18,
+            "multiKillShots": 6,
+            "hitShots": 11,
+            "killsPerShot": 1.3846153846153846,
+            "multiKillShareAmongHitShots": 0.5454545454545454
+          },
+          "stage10": {
+            "shots": 19,
+            "kills": 50,
+            "multiKillShots": 12,
+            "hitShots": 19,
+            "killsPerShot": 2.6315789473684212,
+            "multiKillShareAmongHitShots": 0.631578947368421
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 520,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.849999999999994,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 15.375000000000057,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 14,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 5,
+          "rewardCarryByStage": {
+            "7": {
+              "kills": 0,
+              "hits": 2
+            },
+            "12": {
+              "kills": 0,
+              "hits": 3
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "energy"
+            },
+            {
+              "stage": 2,
+              "id": "bank"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 6,
+              "id": "density"
+            },
+            {
+              "stage": 7,
+              "id": "energy"
+            },
+            {
+              "stage": 8,
+              "id": "magnet"
+            },
+            {
+              "stage": 9,
+              "id": "split"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "pierce"
+            },
+            {
+              "stage": 11,
+              "id": "penetration"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 28.533333333332354,
+            "2": 29.966666666665606,
+            "3": 37.59999999999851,
+            "4": 29.758333333332285,
+            "5": 26.324999999999147,
+            "6": 51.61666666666438,
+            "7": 69.93333333333506,
+            "8": 55.9083333333308,
+            "9": 59.649999999997256,
+            "10": 51.48333333333105,
+            "11": 44.03333333333148,
+            "12": 31.17499999999887
+          }
+        },
+        {
+          "seed": 2,
+          "stage": 17,
+          "score": 39565,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 963.6666666666666,
+          "activeCombatSeconds": 856.9128463765043,
+          "worldSeconds": 813.6706666665909,
+          "combatShots": 336,
+          "actualShotsPerCombatMinute": 23.526313189547217,
+          "early": {
+            "shots": 81,
+            "kills": 110,
+            "multiKillShots": 32,
+            "hitShots": 72,
+            "killsPerShot": 1.3580246913580247,
+            "multiKillShareAmongHitShots": 0.4444444444444444
+          },
+          "ordinary": {
+            "shots": 319,
+            "kills": 780,
+            "multiKillShots": 193,
+            "hitShots": 305,
+            "killsPerShot": 2.445141065830721,
+            "multiKillShareAmongHitShots": 0.6327868852459017
+          },
+          "stage2": {
+            "shots": 16,
+            "kills": 18,
+            "multiKillShots": 3,
+            "hitShots": 15,
+            "killsPerShot": 1.125,
+            "multiKillShareAmongHitShots": 0.2
+          },
+          "stage10": {
+            "shots": 16,
+            "kills": 50,
+            "multiKillShots": 11,
+            "hitShots": 15,
+            "killsPerShot": 3.125,
+            "multiKillShareAmongHitShots": 0.7333333333333333
+          },
+          "maxCombo": 15,
+          "maxPopulation": 28,
+          "nonlethalHits": 1728,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 18.09166666666667,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 12.024999999999977,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 9.625,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 20,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 5,
+          "rewardCarryByStage": {
+            "10": {
+              "kills": 0,
+              "hits": 2
+            },
+            "11": {
+              "kills": 0,
+              "hits": 3
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "bank"
+            },
+            {
+              "stage": 2,
+              "id": "pierce"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "split"
+            },
+            {
+              "stage": 5,
+              "id": "growth"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "boomerang"
+            },
+            {
+              "stage": 8,
+              "id": "energy"
+            },
+            {
+              "stage": 9,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "magnet"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "density"
+            },
+            {
+              "stage": 12,
+              "id": "gravity"
+            },
+            {
+              "stage": 13,
+              "id": "penetration"
+            },
+            {
+              "stage": 14,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "magnet"
+            },
+            {
+              "stage": 15,
+              "id": "growth"
+            },
+            {
+              "stage": 16,
+              "id": "energy"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 30.47499999999891,
+            "2": 38.07499999999848,
+            "3": 33.81666666666539,
+            "4": 54.62499999999754,
+            "5": 36.72499999999856,
+            "6": 45.41666666666473,
+            "7": 55.483333333330826,
+            "8": 32.21666666666548,
+            "9": 44.8249999999981,
+            "10": 44.1916666666648,
+            "11": 52.90833333333097,
+            "12": 61.283333333330496,
+            "13": 61.774999999997135,
+            "14": 62.966666666663734,
+            "15": 53.94166666666425,
+            "16": 67.8166666666667,
+            "17": 40.63333333333167
+          }
+        },
+        {
+          "seed": 3,
+          "stage": 25,
+          "score": 87462,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 1365.3333333333335,
+          "activeCombatSeconds": 1215.4504032120465,
+          "worldSeconds": 1158.9301666683832,
+          "combatShots": 463,
+          "actualShotsPerCombatMinute": 22.855724862640507,
+          "early": {
+            "shots": 66,
+            "kills": 110,
+            "multiKillShots": 32,
+            "hitShots": 62,
+            "killsPerShot": 1.6666666666666667,
+            "multiKillShareAmongHitShots": 0.5161290322580645
+          },
+          "ordinary": {
+            "shots": 448,
+            "kills": 1457,
+            "multiKillShots": 317,
+            "hitShots": 439,
+            "killsPerShot": 3.252232142857143,
+            "multiKillShareAmongHitShots": 0.7220956719817767
+          },
+          "stage2": {
+            "shots": 15,
+            "kills": 18,
+            "multiKillShots": 6,
+            "hitShots": 13,
+            "killsPerShot": 1.2,
+            "multiKillShareAmongHitShots": 0.46153846153846156
+          },
+          "stage10": {
+            "shots": 19,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 19,
+            "killsPerShot": 2.6315789473684212,
+            "multiKillShareAmongHitShots": 0.6842105263157895
+          },
+          "maxCombo": 12,
+          "maxPopulation": 28,
+          "nonlethalHits": 3072,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.741666666666646,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 8.275000000000034,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 9.350000000000023,
+              "result": "win"
+            },
+            {
+              "stage": 20,
+              "seconds": 6.891666666666765,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 29,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 11,
+          "rewardCarryByStage": {
+            "6": {
+              "kills": 0,
+              "hits": 3
+            },
+            "9": {
+              "kills": 0,
+              "hits": 3
+            },
+            "16": {
+              "kills": 0,
+              "hits": 2
+            },
+            "22": {
+              "kills": 0,
+              "hits": 2
+            },
+            "25": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 1,
+              "id": "boomerang"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "split"
+            },
+            {
+              "stage": 4,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 6,
+              "id": "pierce"
+            },
+            {
+              "stage": 7,
+              "id": "rubber"
+            },
+            {
+              "stage": 8,
+              "id": "pulse"
+            },
+            {
+              "stage": 9,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "growth"
+            },
+            {
+              "stage": 10,
+              "id": "bank"
+            },
+            {
+              "stage": 11,
+              "id": "density"
+            },
+            {
+              "stage": 12,
+              "id": "density"
+            },
+            {
+              "stage": 13,
+              "id": "magnet"
+            },
+            {
+              "stage": 14,
+              "id": "magnet"
+            },
+            {
+              "stage": 15,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "gravity"
+            },
+            {
+              "stage": 16,
+              "id": "growth"
+            },
+            {
+              "stage": 17,
+              "id": "energy"
+            },
+            {
+              "stage": 18,
+              "id": "density"
+            },
+            {
+              "stage": 19,
+              "id": "density"
+            },
+            {
+              "stage": 20,
+              "id": "breath"
+            },
+            {
+              "stage": 20,
+              "id": "penetration"
+            },
+            {
+              "stage": 21,
+              "id": "shockwave"
+            },
+            {
+              "stage": 22,
+              "id": "overspeed"
+            },
+            {
+              "stage": 23,
+              "id": "overspeed"
+            },
+            {
+              "stage": 24,
+              "id": "frenzy"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 20.433333333332815,
+            "2": 34.10833333333204,
+            "3": 34.82499999999867,
+            "4": 27.191666666665764,
+            "5": 38.41666666666513,
+            "6": 47.233333333331295,
+            "7": 54.47499999999755,
+            "8": 34.033333333332045,
+            "9": 49.96666666666447,
+            "10": 49.69999999999782,
+            "11": 37.52499999999851,
+            "12": 37.71666666666517,
+            "13": 45.983333333331366,
+            "14": 45.24166666666474,
+            "15": 43.22499999999819,
+            "16": 49.099999999997856,
+            "17": 41.991666666664926,
+            "18": 48.62499999999788,
+            "19": 52.591666666664324,
+            "20": 56.241666666664116,
+            "21": 67.59166666666653,
+            "22": 85.94166666668113,
+            "23": 75.1333333333392,
+            "24": 78.79166666667544,
+            "25": 24.11666666666594
+          }
+        },
+        {
+          "seed": 4,
+          "stage": 25,
+          "score": 80499,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 1530.8416666666667,
+          "activeCombatSeconds": 1379.9109915897184,
+          "worldSeconds": 1298.2936809666032,
+          "combatShots": 526,
+          "actualShotsPerCombatMinute": 22.871040373148624,
+          "early": {
+            "shots": 84,
+            "kills": 110,
+            "multiKillShots": 33,
+            "hitShots": 75,
+            "killsPerShot": 1.3095238095238095,
+            "multiKillShareAmongHitShots": 0.44
+          },
+          "ordinary": {
+            "shots": 508,
+            "kills": 1476,
+            "multiKillShots": 336,
+            "hitShots": 490,
+            "killsPerShot": 2.905511811023622,
+            "multiKillShareAmongHitShots": 0.6857142857142857
+          },
+          "stage2": {
+            "shots": 12,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 11,
+            "killsPerShot": 1.5,
+            "multiKillShareAmongHitShots": 0.45454545454545453
+          },
+          "stage10": {
+            "shots": 11,
+            "kills": 50,
+            "multiKillShots": 10,
+            "hitShots": 11,
+            "killsPerShot": 4.545454545454546,
+            "multiKillShareAmongHitShots": 0.9090909090909091
+          },
+          "maxCombo": 11,
+          "maxPopulation": 28,
+          "nonlethalHits": 3414,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 13.658333333333331,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 11.733333333333348,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 9.88333333333344,
+              "result": "win"
+            },
+            {
+              "stage": 20,
+              "seconds": 7.566666666666606,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 29,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 15,
+          "rewardCarryByStage": {
+            "14": {
+              "kills": 0,
+              "hits": 2
+            },
+            "15": {
+              "kills": 0,
+              "hits": 1
+            },
+            "22": {
+              "kills": 0,
+              "hits": 4
+            },
+            "23": {
+              "kills": 0,
+              "hits": 3
+            },
+            "24": {
+              "kills": 0,
+              "hits": 1
+            },
+            "25": {
+              "kills": 0,
+              "hits": 4
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "split"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "pierce"
+            },
+            {
+              "stage": 8,
+              "id": "energy"
+            },
+            {
+              "stage": 9,
+              "id": "pulse"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "gravity"
+            },
+            {
+              "stage": 11,
+              "id": "density"
+            },
+            {
+              "stage": 12,
+              "id": "penetration"
+            },
+            {
+              "stage": 13,
+              "id": "density"
+            },
+            {
+              "stage": 14,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "growth"
+            },
+            {
+              "stage": 15,
+              "id": "energy"
+            },
+            {
+              "stage": 16,
+              "id": "growth"
+            },
+            {
+              "stage": 17,
+              "id": "boomerang"
+            },
+            {
+              "stage": 18,
+              "id": "magnet"
+            },
+            {
+              "stage": 19,
+              "id": "bank"
+            },
+            {
+              "stage": 20,
+              "id": "magnet"
+            },
+            {
+              "stage": 20,
+              "id": "shockwave"
+            },
+            {
+              "stage": 21,
+              "id": "breath"
+            },
+            {
+              "stage": 22,
+              "id": "overspeed"
+            },
+            {
+              "stage": 23,
+              "id": "overspeed"
+            },
+            {
+              "stage": 24,
+              "id": "frenzy"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 27.64999999999907,
+            "2": 28.441666666665693,
+            "3": 47.6916666666646,
+            "4": 53.31666666666428,
+            "5": 43.74999999999816,
+            "6": 48.61666666666455,
+            "7": 56.11666666666412,
+            "8": 63.5416666666637,
+            "9": 43.441666666664844,
+            "10": 29.358333333332308,
+            "11": 49.11666666666452,
+            "12": 57.899999999997355,
+            "13": 40.149999999998364,
+            "14": 59.299999999997276,
+            "15": 63.491666666663704,
+            "16": 61.92499999999713,
+            "17": 65.8749999999985,
+            "18": 61.55833333333048,
+            "19": 65.0416666666645,
+            "20": 49.241666666664514,
+            "21": 65.3749999999981,
+            "22": 80.55833333334351,
+            "23": 62.29166666666377,
+            "24": 81.13333333334397,
+            "25": 32.19166666666548
+          }
+        },
+        {
+          "seed": 5,
+          "stage": 26,
+          "score": 91513,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 1505.7333333333333,
+          "activeCombatSeconds": 1344.5092260565575,
+          "worldSeconds": 1281.501250003181,
+          "combatShots": 504,
+          "actualShotsPerCombatMinute": 22.491478239010565,
+          "early": {
+            "shots": 83,
+            "kills": 110,
+            "multiKillShots": 32,
+            "hitShots": 79,
+            "killsPerShot": 1.3253012048192772,
+            "multiKillShareAmongHitShots": 0.4050632911392405
+          },
+          "ordinary": {
+            "shots": 483,
+            "kills": 1559,
+            "multiKillShots": 342,
+            "hitShots": 474,
+            "killsPerShot": 3.227743271221532,
+            "multiKillShareAmongHitShots": 0.7215189873417721
+          },
+          "stage2": {
+            "shots": 17,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 17,
+            "killsPerShot": 1.0588235294117647,
+            "multiKillShareAmongHitShots": 0.29411764705882354
+          },
+          "stage10": {
+            "shots": 15,
+            "kills": 50,
+            "multiKillShots": 12,
+            "hitShots": 15,
+            "killsPerShot": 3.3333333333333335,
+            "multiKillShareAmongHitShots": 0.8
+          },
+          "maxCombo": 12,
+          "maxPopulation": 28,
+          "nonlethalHits": 3414,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 12.191666666666691,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 9.808333333333337,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 12.791666666666629,
+              "result": "win"
+            },
+            {
+              "stage": 20,
+              "seconds": 7.1083333333333485,
+              "result": "win"
+            },
+            {
+              "stage": 25,
+              "seconds": 8.474999999999909,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 31,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 14,
+          "rewardCarryByStage": {
+            "5": {
+              "kills": 0,
+              "hits": 2
+            },
+            "7": {
+              "kills": 0,
+              "hits": 2
+            },
+            "15": {
+              "kills": 0,
+              "hits": 5
+            },
+            "21": {
+              "kills": 0,
+              "hits": 4
+            },
+            "24": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "energy"
+            },
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "gravity"
+            },
+            {
+              "stage": 4,
+              "id": "pierce"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "boomerang"
+            },
+            {
+              "stage": 6,
+              "id": "density"
+            },
+            {
+              "stage": 7,
+              "id": "split"
+            },
+            {
+              "stage": 8,
+              "id": "rubber"
+            },
+            {
+              "stage": 9,
+              "id": "penetration"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 11,
+              "id": "energy"
+            },
+            {
+              "stage": 12,
+              "id": "magnet"
+            },
+            {
+              "stage": 13,
+              "id": "bank"
+            },
+            {
+              "stage": 14,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "magnet"
+            },
+            {
+              "stage": 15,
+              "id": "density"
+            },
+            {
+              "stage": 16,
+              "id": "growth"
+            },
+            {
+              "stage": 17,
+              "id": "density"
+            },
+            {
+              "stage": 18,
+              "id": "density"
+            },
+            {
+              "stage": 19,
+              "id": "breath"
+            },
+            {
+              "stage": 20,
+              "id": "growth"
+            },
+            {
+              "stage": 20,
+              "id": "pulse"
+            },
+            {
+              "stage": 21,
+              "id": "shockwave"
+            },
+            {
+              "stage": 22,
+              "id": "overspeed"
+            },
+            {
+              "stage": 23,
+              "id": "overspeed"
+            },
+            {
+              "stage": 24,
+              "id": "frenzy"
+            },
+            {
+              "stage": 25,
+              "id": "risk"
+            },
+            {
+              "stage": 25,
+              "id": "risk"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 24.824999999999232,
+            "2": 40.78333333333166,
+            "3": 41.14999999999831,
+            "4": 42.26666666666491,
+            "5": 44.1666666666648,
+            "6": 30.199999999998926,
+            "7": 45.20833333333141,
+            "8": 31.308333333332197,
+            "9": 41.04999999999831,
+            "10": 39.19999999999842,
+            "11": 38.108333333331814,
+            "12": 40.77499999999833,
+            "13": 50.99999999999775,
+            "14": 45.31666666666474,
+            "15": 43.45833333333151,
+            "16": 43.95833333333148,
+            "17": 54.12499999999757,
+            "18": 47.83333333333126,
+            "19": 69.64166666666816,
+            "20": 73.7166666666714,
+            "21": 81.26666666667741,
+            "22": 69.65833333333484,
+            "23": 79.3250000000092,
+            "24": 77.44166666667437,
+            "25": 85.57500000001417,
+            "26": 12.783333333333248
+          }
+        },
+        {
+          "seed": 6,
+          "stage": 20,
+          "score": 55242,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 1003.5833333333334,
+          "activeCombatSeconds": 887.8807361576366,
+          "worldSeconds": 850.0002387670211,
+          "combatShots": 342,
+          "actualShotsPerCombatMinute": 23.111212085534902,
+          "early": {
+            "shots": 75,
+            "kills": 110,
+            "multiKillShots": 30,
+            "hitShots": 70,
+            "killsPerShot": 1.4666666666666666,
+            "multiKillShareAmongHitShots": 0.42857142857142855
+          },
+          "ordinary": {
+            "shots": 328,
+            "kills": 999,
+            "multiKillShots": 225,
+            "hitShots": 316,
+            "killsPerShot": 3.0457317073170733,
+            "multiKillShareAmongHitShots": 0.7120253164556962
+          },
+          "stage2": {
+            "shots": 14,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 12,
+            "killsPerShot": 1.2857142857142858,
+            "multiKillShareAmongHitShots": 0.4166666666666667
+          },
+          "stage10": {
+            "shots": 11,
+            "kills": 50,
+            "multiKillShots": 10,
+            "hitShots": 11,
+            "killsPerShot": 4.545454545454546,
+            "multiKillShareAmongHitShots": 0.9090909090909091
+          },
+          "maxCombo": 13,
+          "maxPopulation": 28,
+          "nonlethalHits": 1843,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 14.133333333333354,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 11.90833333333336,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 8.141666666666652,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 23,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 5,
+          "rewardCarryByStage": {
+            "4": {
+              "kills": 0,
+              "hits": 2
+            },
+            "7": {
+              "kills": 0,
+              "hits": 2
+            },
+            "16": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 1,
+              "id": "pierce"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "split"
+            },
+            {
+              "stage": 4,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "growth"
+            },
+            {
+              "stage": 8,
+              "id": "penetration"
+            },
+            {
+              "stage": 9,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 11,
+              "id": "gravity"
+            },
+            {
+              "stage": 12,
+              "id": "density"
+            },
+            {
+              "stage": 13,
+              "id": "pulse"
+            },
+            {
+              "stage": 14,
+              "id": "density"
+            },
+            {
+              "stage": 15,
+              "id": "boomerang"
+            },
+            {
+              "stage": 15,
+              "id": "magnet"
+            },
+            {
+              "stage": 16,
+              "id": "rubber"
+            },
+            {
+              "stage": 17,
+              "id": "density"
+            },
+            {
+              "stage": 18,
+              "id": "growth"
+            },
+            {
+              "stage": 19,
+              "id": "magnet"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 27.49999999999908,
+            "2": 32.35833333333214,
+            "3": 47.32499999999796,
+            "4": 36.016666666665266,
+            "5": 34.24166666666537,
+            "6": 47.42499999999795,
+            "7": 45.25833333333141,
+            "8": 34.89166666666533,
+            "9": 45.44999999999806,
+            "10": 30.399999999998915,
+            "11": 36.51666666666524,
+            "12": 46.20833333333135,
+            "13": 53.09999999999763,
+            "14": 46.274999999998016,
+            "15": 53.53333333333094,
+            "16": 43.6083333333315,
+            "17": 45.12499999999808,
+            "18": 54.24166666666423,
+            "19": 54.7166666666642,
+            "20": 39.508333333331734
+          }
+        },
+        {
+          "seed": 7,
+          "stage": 15,
+          "score": 24828,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 882.075,
+          "activeCombatSeconds": 794.0244949111242,
+          "worldSeconds": 741.1543333332103,
+          "combatShots": 316,
+          "actualShotsPerCombatMinute": 23.87835655135829,
+          "early": {
+            "shots": 73,
+            "kills": 110,
+            "multiKillShots": 35,
+            "hitShots": 68,
+            "killsPerShot": 1.5068493150684932,
+            "multiKillShareAmongHitShots": 0.5147058823529411
+          },
+          "ordinary": {
+            "shots": 303,
+            "kills": 603,
+            "multiKillShots": 167,
+            "hitShots": 291,
+            "killsPerShot": 1.99009900990099,
+            "multiKillShareAmongHitShots": 0.5738831615120275
+          },
+          "stage2": {
+            "shots": 11,
+            "kills": 18,
+            "multiKillShots": 7,
+            "hitShots": 10,
+            "killsPerShot": 1.6363636363636365,
+            "multiKillShareAmongHitShots": 0.7
+          },
+          "stage10": {
+            "shots": 27,
+            "kills": 50,
+            "multiKillShots": 14,
+            "hitShots": 27,
+            "killsPerShot": 1.8518518518518519,
+            "multiKillShareAmongHitShots": 0.5185185185185185
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 1199,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.991666666666674,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 17.700000000000045,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 17,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 2,
+          "rewardCarryByStage": {
+            "12": {
+              "kills": 0,
+              "hits": 2
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "split"
+            },
+            {
+              "stage": 2,
+              "id": "rubber"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "gravity"
+            },
+            {
+              "stage": 6,
+              "id": "penetration"
+            },
+            {
+              "stage": 7,
+              "id": "density"
+            },
+            {
+              "stage": 8,
+              "id": "pulse"
+            },
+            {
+              "stage": 9,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "density"
+            },
+            {
+              "stage": 12,
+              "id": "energy"
+            },
+            {
+              "stage": 13,
+              "id": "energy"
+            },
+            {
+              "stage": 14,
+              "id": "pierce"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 20.599999999999472,
+            "2": 26.19166666666582,
+            "3": 40.48333333333168,
+            "4": 42.09166666666492,
+            "5": 50.24166666666446,
+            "6": 62.51666666666376,
+            "7": 66.87499999999929,
+            "8": 73.47500000000454,
+            "9": 59.92499999999724,
+            "10": 68.0250000000002,
+            "11": 46.25833333333135,
+            "12": 59.49166666666393,
+            "13": 64.84999999999768,
+            "14": 59.19166666666395,
+            "15": 25.116666666665882
+          }
+        },
+        {
+          "seed": 8,
+          "stage": 17,
+          "score": 35187,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 912.0583333333333,
+          "activeCombatSeconds": 811.2543721752232,
+          "worldSeconds": 770.4289999998804,
+          "combatShots": 316,
+          "actualShotsPerCombatMinute": 23.371214566354066,
+          "early": {
+            "shots": 82,
+            "kills": 110,
+            "multiKillShots": 26,
+            "hitShots": 77,
+            "killsPerShot": 1.3414634146341464,
+            "multiKillShareAmongHitShots": 0.33766233766233766
+          },
+          "ordinary": {
+            "shots": 301,
+            "kills": 737,
+            "multiKillShots": 180,
+            "hitShots": 288,
+            "killsPerShot": 2.4485049833887045,
+            "multiKillShareAmongHitShots": 0.625
+          },
+          "stage2": {
+            "shots": 11,
+            "kills": 18,
+            "multiKillShots": 4,
+            "hitShots": 11,
+            "killsPerShot": 1.6363636363636365,
+            "multiKillShareAmongHitShots": 0.36363636363636365
+          },
+          "stage10": {
+            "shots": 21,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 20,
+            "killsPerShot": 2.380952380952381,
+            "multiKillShareAmongHitShots": 0.65
+          },
+          "maxCombo": 10,
+          "maxPopulation": 28,
+          "nonlethalHits": 1095,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 13.725000000000023,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 9.358333333333348,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 10.799999999999955,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 20,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 16,
+          "rewardCarryByStage": {
+            "6": {
+              "kills": 0,
+              "hits": 2
+            },
+            "12": {
+              "kills": 0,
+              "hits": 4
+            },
+            "14": {
+              "kills": 0,
+              "hits": 3
+            },
+            "16": {
+              "kills": 0,
+              "hits": 2
+            },
+            "17": {
+              "kills": 0,
+              "hits": 5
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 6,
+              "id": "density"
+            },
+            {
+              "stage": 7,
+              "id": "pulse"
+            },
+            {
+              "stage": 8,
+              "id": "split"
+            },
+            {
+              "stage": 9,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "gravity"
+            },
+            {
+              "stage": 12,
+              "id": "pierce"
+            },
+            {
+              "stage": 13,
+              "id": "penetration"
+            },
+            {
+              "stage": 14,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "density"
+            },
+            {
+              "stage": 15,
+              "id": "growth"
+            },
+            {
+              "stage": 16,
+              "id": "bank"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 28.149999999999043,
+            "2": 25.14166666666588,
+            "3": 49.36666666666451,
+            "4": 43.766666666664825,
+            "5": 48.47499999999789,
+            "6": 45.866666666664706,
+            "7": 55.66666666666415,
+            "8": 48.283333333331235,
+            "9": 48.21666666666457,
+            "10": 54.29166666666423,
+            "11": 52.974999999997635,
+            "12": 49.49999999999783,
+            "13": 48.99166666666453,
+            "14": 53.92499999999758,
+            "15": 47.758333333331265,
+            "16": 59.21666666666395,
+            "17": 17.783333333332966
+          }
+        }
+      ]
+    },
+    "v7.0.0-hp-1.18": {
+      "summary": {
+        "runs": 8,
+        "meanStage": 16.375,
+        "stageRange": [
+          13,
+          21
+        ],
+        "meanRealMinutes": 14.39394097222222,
+        "meanScore": 32947.5,
+        "meanActualShotsPerCombatMinute": 23.51181639558275,
+        "censored": 0,
+        "bossWins": 22,
+        "bossLosses": 0,
+        "rewardCarryKills": 0,
+        "rewardCarryHits": 59,
+        "early": {
+          "shots": 642,
+          "kills": 880,
+          "killsPerShot": 1.3707165109034267,
+          "multiKillShareAmongHitShots": 0.44966442953020136
+        },
+        "ordinary": {
+          "shots": 2280,
+          "kills": 5590,
+          "killsPerShot": 2.4517543859649122,
+          "multiKillShareAmongHitShots": 0.6522136010953903
+        },
+        "stage2": {
+          "shots": 109,
+          "kills": 144,
+          "killsPerShot": 1.3211009174311927,
+          "multiKillShareAmongHitShots": 0.41
+        },
+        "stage10": {
+          "shots": 154,
+          "kills": 400,
+          "killsPerShot": 2.5974025974025974,
+          "multiKillShareAmongHitShots": 0.6986301369863014
+        }
+      },
+      "runs": [
+        {
+          "seed": 1,
+          "stage": 14,
+          "score": 20893,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 698.325,
+          "activeCombatSeconds": 617.7064482464428,
+          "worldSeconds": 586.5990833331092,
+          "combatShots": 247,
+          "actualShotsPerCombatMinute": 23.991978782269967,
+          "early": {
+            "shots": 68,
+            "kills": 110,
+            "multiKillShots": 35,
+            "hitShots": 61,
+            "killsPerShot": 1.6176470588235294,
+            "multiKillShareAmongHitShots": 0.5737704918032787
+          },
+          "ordinary": {
+            "shots": 238,
+            "kills": 530,
+            "multiKillShots": 145,
+            "hitShots": 227,
+            "killsPerShot": 2.226890756302521,
+            "multiKillShareAmongHitShots": 0.6387665198237885
+          },
+          "stage2": {
+            "shots": 13,
+            "kills": 18,
+            "multiKillShots": 6,
+            "hitShots": 11,
+            "killsPerShot": 1.3846153846153846,
+            "multiKillShareAmongHitShots": 0.5454545454545454
+          },
+          "stage10": {
+            "shots": 16,
+            "kills": 50,
+            "multiKillShots": 11,
+            "hitShots": 16,
+            "killsPerShot": 3.125,
+            "multiKillShareAmongHitShots": 0.6875
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 882,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 11.908333333333331,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 9.724999999999966,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 16,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 2,
+          "rewardCarryByStage": {
+            "8": {
+              "kills": 0,
+              "hits": 1
+            },
+            "10": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "energy"
+            },
+            {
+              "stage": 2,
+              "id": "bank"
+            },
+            {
+              "stage": 3,
+              "id": "energy"
+            },
+            {
+              "stage": 4,
+              "id": "split"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "growth"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "penetration"
+            },
+            {
+              "stage": 8,
+              "id": "magnet"
+            },
+            {
+              "stage": 9,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "pulse"
+            },
+            {
+              "stage": 10,
+              "id": "magnet"
+            },
+            {
+              "stage": 11,
+              "id": "energy"
+            },
+            {
+              "stage": 12,
+              "id": "pierce"
+            },
+            {
+              "stage": 13,
+              "id": "growth"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 28.533333333332354,
+            "2": 29.966666666665606,
+            "3": 31.049999999998878,
+            "4": 34.30833333333203,
+            "5": 38.50833333333179,
+            "6": 37.966666666665155,
+            "7": 50.79999999999776,
+            "8": 41.433333333331625,
+            "9": 65.17499999999794,
+            "10": 42.108333333331586,
+            "11": 42.37499999999824,
+            "12": 58.04999999999735,
+            "13": 48.79166666666454,
+            "14": 47.00833333333131
+          }
+        },
+        {
+          "seed": 2,
+          "stage": 16,
+          "score": 29000,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 896.15,
+          "activeCombatSeconds": 796.6707382650393,
+          "worldSeconds": 756.9754166665541,
+          "combatShots": 311,
+          "actualShotsPerCombatMinute": 23.42247443484252,
+          "early": {
+            "shots": 81,
+            "kills": 110,
+            "multiKillShots": 33,
+            "hitShots": 72,
+            "killsPerShot": 1.3580246913580247,
+            "multiKillShareAmongHitShots": 0.4583333333333333
+          },
+          "ordinary": {
+            "shots": 295,
+            "kills": 675,
+            "multiKillShots": 186,
+            "hitShots": 278,
+            "killsPerShot": 2.288135593220339,
+            "multiKillShareAmongHitShots": 0.6690647482014388
+          },
+          "stage2": {
+            "shots": 16,
+            "kills": 18,
+            "multiKillShots": 3,
+            "hitShots": 15,
+            "killsPerShot": 1.125,
+            "multiKillShareAmongHitShots": 0.2
+          },
+          "stage10": {
+            "shots": 17,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 16,
+            "killsPerShot": 2.9411764705882355,
+            "multiKillShareAmongHitShots": 0.8125
+          },
+          "maxCombo": 7,
+          "maxPopulation": 28,
+          "nonlethalHits": 1213,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 15.466666666666669,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 9.5,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 11.649999999999977,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 19,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 9,
+          "rewardCarryByStage": {
+            "11": {
+              "kills": 0,
+              "hits": 2
+            },
+            "13": {
+              "kills": 0,
+              "hits": 6
+            },
+            "15": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "bank"
+            },
+            {
+              "stage": 2,
+              "id": "pierce"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "rubber"
+            },
+            {
+              "stage": 8,
+              "id": "energy"
+            },
+            {
+              "stage": 9,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "shockwave"
+            },
+            {
+              "stage": 10,
+              "id": "penetration"
+            },
+            {
+              "stage": 11,
+              "id": "growth"
+            },
+            {
+              "stage": 12,
+              "id": "split"
+            },
+            {
+              "stage": 13,
+              "id": "density"
+            },
+            {
+              "stage": 14,
+              "id": "magnet"
+            },
+            {
+              "stage": 15,
+              "id": "gravity"
+            },
+            {
+              "stage": 15,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 30.47499999999891,
+            "2": 38.07499999999848,
+            "3": 36.566666666665235,
+            "4": 42.049999999998256,
+            "5": 47.97499999999792,
+            "6": 38.62499999999845,
+            "7": 43.474999999998175,
+            "8": 44.583333333331446,
+            "9": 49.45833333333117,
+            "10": 45.424999999998064,
+            "11": 70.47500000000215,
+            "12": 59.74166666666392,
+            "13": 49.766666666664484,
+            "14": 62.89166666666374,
+            "15": 70.76666666666905,
+            "16": 29.708333333332288
+          }
+        },
+        {
+          "seed": 3,
+          "stage": 21,
+          "score": 60325,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 1018.3583333333333,
+          "activeCombatSeconds": 887.1207539899461,
+          "worldSeconds": 868.634166666606,
+          "combatShots": 330,
+          "actualShotsPerCombatMinute": 22.31939666719193,
+          "early": {
+            "shots": 67,
+            "kills": 110,
+            "multiKillShots": 35,
+            "hitShots": 63,
+            "killsPerShot": 1.6417910447761195,
+            "multiKillShareAmongHitShots": 0.5555555555555556
+          },
+          "ordinary": {
+            "shots": 314,
+            "kills": 1078,
+            "multiKillShots": 249,
+            "hitShots": 308,
+            "killsPerShot": 3.43312101910828,
+            "multiKillShareAmongHitShots": 0.8084415584415584
+          },
+          "stage2": {
+            "shots": 15,
+            "kills": 18,
+            "multiKillShots": 6,
+            "hitShots": 13,
+            "killsPerShot": 1.2,
+            "multiKillShareAmongHitShots": 0.46153846153846156
+          },
+          "stage10": {
+            "shots": 15,
+            "kills": 50,
+            "multiKillShots": 14,
+            "hitShots": 14,
+            "killsPerShot": 3.3333333333333335,
+            "multiKillShareAmongHitShots": 1
+          },
+          "maxCombo": 10,
+          "maxPopulation": 28,
+          "nonlethalHits": 1920,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.724999999999994,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 7.675000000000011,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 10.658333333333303,
+              "result": "win"
+            },
+            {
+              "stage": 20,
+              "seconds": 9.208333333333258,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 25,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 9,
+          "rewardCarryByStage": {
+            "5": {
+              "kills": 0,
+              "hits": 1
+            },
+            "10": {
+              "kills": 0,
+              "hits": 3
+            },
+            "11": {
+              "kills": 0,
+              "hits": 1
+            },
+            "12": {
+              "kills": 0,
+              "hits": 4
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 1,
+              "id": "boomerang"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "split"
+            },
+            {
+              "stage": 4,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "bank"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "energy"
+            },
+            {
+              "stage": 8,
+              "id": "energy"
+            },
+            {
+              "stage": 9,
+              "id": "penetration"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 11,
+              "id": "pierce"
+            },
+            {
+              "stage": 12,
+              "id": "pulse"
+            },
+            {
+              "stage": 13,
+              "id": "rubber"
+            },
+            {
+              "stage": 14,
+              "id": "growth"
+            },
+            {
+              "stage": 15,
+              "id": "rubber"
+            },
+            {
+              "stage": 15,
+              "id": "shockwave"
+            },
+            {
+              "stage": 16,
+              "id": "density"
+            },
+            {
+              "stage": 17,
+              "id": "gravity"
+            },
+            {
+              "stage": 18,
+              "id": "magnet"
+            },
+            {
+              "stage": 19,
+              "id": "density"
+            },
+            {
+              "stage": 20,
+              "id": "growth"
+            },
+            {
+              "stage": 20,
+              "id": "magnet"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 20.433333333332815,
+            "2": 34.10833333333204,
+            "3": 35.666666666665286,
+            "4": 34.33333333333203,
+            "5": 32.87499999999878,
+            "6": 34.558333333332016,
+            "7": 31.43333333333219,
+            "8": 31.166666666665538,
+            "9": 26.77499999999912,
+            "10": 39.44166666666507,
+            "11": 32.15833333333215,
+            "12": 31.483333333332187,
+            "13": 32.81666666666545,
+            "14": 45.46666666666473,
+            "15": 44.7749999999981,
+            "16": 49.54999999999783,
+            "17": 58.16666666666401,
+            "18": 62.474999999997095,
+            "19": 69.441666666668,
+            "20": 62.89166666666374,
+            "21": 38.841666666665105
+          }
+        },
+        {
+          "seed": 4,
+          "stage": 18,
+          "score": 38487,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 967.2666666666667,
+          "activeCombatSeconds": 857.472290588135,
+          "worldSeconds": 817.0092499999099,
+          "combatShots": 336,
+          "actualShotsPerCombatMinute": 23.51096381921844,
+          "early": {
+            "shots": 90,
+            "kills": 110,
+            "multiKillShots": 36,
+            "hitShots": 84,
+            "killsPerShot": 1.2222222222222223,
+            "multiKillShareAmongHitShots": 0.42857142857142855
+          },
+          "ordinary": {
+            "shots": 320,
+            "kills": 788,
+            "multiKillShots": 201,
+            "hitShots": 308,
+            "killsPerShot": 2.4625,
+            "multiKillShareAmongHitShots": 0.6525974025974026
+          },
+          "stage2": {
+            "shots": 12,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 11,
+            "killsPerShot": 1.5,
+            "multiKillShareAmongHitShots": 0.45454545454545453
+          },
+          "stage10": {
+            "shots": 21,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 20,
+            "killsPerShot": 2.380952380952381,
+            "multiKillShareAmongHitShots": 0.65
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 1533,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 13.508333333333326,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 13.091666666666583,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 9.875,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 21,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 8,
+          "rewardCarryByStage": {
+            "7": {
+              "kills": 0,
+              "hits": 2
+            },
+            "11": {
+              "kills": 0,
+              "hits": 1
+            },
+            "12": {
+              "kills": 0,
+              "hits": 2
+            },
+            "17": {
+              "kills": 0,
+              "hits": 3
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "split"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "pulse"
+            },
+            {
+              "stage": 4,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "pierce"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "bank"
+            },
+            {
+              "stage": 8,
+              "id": "rubber"
+            },
+            {
+              "stage": 9,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "density"
+            },
+            {
+              "stage": 12,
+              "id": "energy"
+            },
+            {
+              "stage": 13,
+              "id": "density"
+            },
+            {
+              "stage": 14,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "growth"
+            },
+            {
+              "stage": 15,
+              "id": "penetration"
+            },
+            {
+              "stage": 16,
+              "id": "shockwave"
+            },
+            {
+              "stage": 17,
+              "id": "growth"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 27.64999999999907,
+            "2": 28.441666666665693,
+            "3": 55.424999999997496,
+            "4": 43.62499999999817,
+            "5": 57.58333333333071,
+            "6": 39.916666666665044,
+            "7": 38.3583333333318,
+            "8": 36.5833333333319,
+            "9": 60.33333333333055,
+            "10": 53.208333333330955,
+            "11": 53.15833333333096,
+            "12": 50.83333333333109,
+            "13": 52.69166666666432,
+            "14": 45.68333333333138,
+            "15": 47.07499999999797,
+            "16": 55.72499999999748,
+            "17": 69.38333333333462,
+            "18": 5.325000000000054
+          }
+        },
+        {
+          "seed": 5,
+          "stage": 19,
+          "score": 43892,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 997.4916666666667,
+          "activeCombatSeconds": 882.0063773973453,
+          "worldSeconds": 843.1794999999104,
+          "combatShots": 345,
+          "actualShotsPerCombatMinute": 23.469218058357207,
+          "early": {
+            "shots": 85,
+            "kills": 110,
+            "multiKillShots": 34,
+            "hitShots": 81,
+            "killsPerShot": 1.2941176470588236,
+            "multiKillShareAmongHitShots": 0.41975308641975306
+          },
+          "ordinary": {
+            "shots": 328,
+            "kills": 871,
+            "multiKillShots": 211,
+            "hitShots": 316,
+            "killsPerShot": 2.6554878048780486,
+            "multiKillShareAmongHitShots": 0.6677215189873418
+          },
+          "stage2": {
+            "shots": 17,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 17,
+            "killsPerShot": 1.0588235294117647,
+            "multiKillShareAmongHitShots": 0.29411764705882354
+          },
+          "stage10": {
+            "shots": 13,
+            "kills": 50,
+            "multiKillShots": 9,
+            "hitShots": 13,
+            "killsPerShot": 3.8461538461538463,
+            "multiKillShareAmongHitShots": 0.6923076923076923
+          },
+          "maxCombo": 10,
+          "maxPopulation": 28,
+          "nonlethalHits": 1546,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 15.416666666666686,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 11.30833333333328,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 10.774999999999977,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 22,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 14,
+          "rewardCarryByStage": {
+            "5": {
+              "kills": 0,
+              "hits": 2
+            },
+            "6": {
+              "kills": 0,
+              "hits": 1
+            },
+            "8": {
+              "kills": 0,
+              "hits": 2
+            },
+            "14": {
+              "kills": 0,
+              "hits": 3
+            },
+            "16": {
+              "kills": 0,
+              "hits": 4
+            },
+            "19": {
+              "kills": 0,
+              "hits": 2
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "energy"
+            },
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "gravity"
+            },
+            {
+              "stage": 4,
+              "id": "pierce"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "growth"
+            },
+            {
+              "stage": 8,
+              "id": "bank"
+            },
+            {
+              "stage": 9,
+              "id": "split"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 11,
+              "id": "rubber"
+            },
+            {
+              "stage": 12,
+              "id": "energy"
+            },
+            {
+              "stage": 13,
+              "id": "pulse"
+            },
+            {
+              "stage": 14,
+              "id": "density"
+            },
+            {
+              "stage": 15,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "boomerang"
+            },
+            {
+              "stage": 16,
+              "id": "density"
+            },
+            {
+              "stage": 17,
+              "id": "growth"
+            },
+            {
+              "stage": 18,
+              "id": "magnet"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 24.824999999999232,
+            "2": 40.78333333333166,
+            "3": 41.14999999999831,
+            "4": 42.26666666666491,
+            "5": 50.91666666666442,
+            "6": 54.59166666666421,
+            "7": 51.94166666666436,
+            "8": 51.258333333331066,
+            "9": 56.208333333330785,
+            "10": 34.39999999999869,
+            "11": 43.0499999999982,
+            "12": 41.44999999999829,
+            "13": 45.516666666664726,
+            "14": 61.891666666663795,
+            "15": 48.016666666664584,
+            "16": 50.583333333331105,
+            "17": 49.591666666664494,
+            "18": 48.61666666666455,
+            "19": 7.45000000000016
+          }
+        },
+        {
+          "seed": 6,
+          "stage": 16,
+          "score": 31166,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 858.5666666666666,
+          "activeCombatSeconds": 760.1392940211153,
+          "worldSeconds": 725.2387499998524,
+          "combatShots": 297,
+          "actualShotsPerCombatMinute": 23.443071737197936,
+          "early": {
+            "shots": 82,
+            "kills": 110,
+            "multiKillShots": 33,
+            "hitShots": 75,
+            "killsPerShot": 1.3414634146341464,
+            "multiKillShareAmongHitShots": 0.44
+          },
+          "ordinary": {
+            "shots": 282,
+            "kills": 686,
+            "multiKillShots": 178,
+            "hitShots": 273,
+            "killsPerShot": 2.4326241134751774,
+            "multiKillShareAmongHitShots": 0.652014652014652
+          },
+          "stage2": {
+            "shots": 14,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 12,
+            "killsPerShot": 1.2857142857142858,
+            "multiKillShareAmongHitShots": 0.4166666666666667
+          },
+          "stage10": {
+            "shots": 24,
+            "kills": 50,
+            "multiKillShots": 14,
+            "hitShots": 24,
+            "killsPerShot": 2.0833333333333335,
+            "multiKillShareAmongHitShots": 0.5833333333333334
+          },
+          "maxCombo": 10,
+          "maxPopulation": 28,
+          "nonlethalHits": 1387,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 13.066666666666663,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 12.024999999999977,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 9.158333333333303,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 19,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 5,
+          "rewardCarryByStage": {
+            "4": {
+              "kills": 0,
+              "hits": 2
+            },
+            "7": {
+              "kills": 0,
+              "hits": 1
+            },
+            "12": {
+              "kills": 0,
+              "hits": 2
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 1,
+              "id": "pierce"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "split"
+            },
+            {
+              "stage": 4,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 6,
+              "id": "density"
+            },
+            {
+              "stage": 7,
+              "id": "rubber"
+            },
+            {
+              "stage": 8,
+              "id": "density"
+            },
+            {
+              "stage": 9,
+              "id": "penetration"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 11,
+              "id": "rubber"
+            },
+            {
+              "stage": 12,
+              "id": "bank"
+            },
+            {
+              "stage": 13,
+              "id": "energy"
+            },
+            {
+              "stage": 14,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "magnet"
+            },
+            {
+              "stage": 15,
+              "id": "magnet"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 27.49999999999908,
+            "2": 32.35833333333214,
+            "3": 45.54999999999806,
+            "4": 42.26666666666491,
+            "5": 49.90833333333114,
+            "6": 37.791666666665165,
+            "7": 39.58333333333173,
+            "8": 31.474999999998854,
+            "9": 52.333333333331005,
+            "10": 60.51666666666387,
+            "11": 52.25833333333101,
+            "12": 40.324999999998354,
+            "13": 58.32499999999733,
+            "14": 56.01666666666413,
+            "15": 42.09999999999825,
+            "16": 57.58333333333071
+          }
+        },
+        {
+          "seed": 7,
+          "stage": 14,
+          "score": 23732,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 686.1083333333333,
+          "activeCombatSeconds": 605.6409723742383,
+          "worldSeconds": 578.9049166664128,
+          "combatShots": 237,
+          "actualShotsPerCombatMinute": 23.47925693378149,
+          "early": {
+            "shots": 79,
+            "kills": 110,
+            "multiKillShots": 32,
+            "hitShots": 75,
+            "killsPerShot": 1.3924050632911393,
+            "multiKillShareAmongHitShots": 0.4266666666666667
+          },
+          "ordinary": {
+            "shots": 226,
+            "kills": 530,
+            "multiKillShots": 136,
+            "hitShots": 220,
+            "killsPerShot": 2.3451327433628317,
+            "multiKillShareAmongHitShots": 0.6181818181818182
+          },
+          "stage2": {
+            "shots": 11,
+            "kills": 18,
+            "multiKillShots": 7,
+            "hitShots": 10,
+            "killsPerShot": 1.6363636363636365,
+            "multiKillShareAmongHitShots": 0.7
+          },
+          "stage10": {
+            "shots": 19,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 18,
+            "killsPerShot": 2.6315789473684212,
+            "multiKillShareAmongHitShots": 0.7222222222222222
+          },
+          "maxCombo": 12,
+          "maxPopulation": 28,
+          "nonlethalHits": 931,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.783333333333331,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 13.40833333333336,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 16,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 11,
+          "rewardCarryByStage": {
+            "11": {
+              "kills": 0,
+              "hits": 8
+            },
+            "14": {
+              "kills": 0,
+              "hits": 3
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "split"
+            },
+            {
+              "stage": 2,
+              "id": "rubber"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "gravity"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "density"
+            },
+            {
+              "stage": 8,
+              "id": "density"
+            },
+            {
+              "stage": 9,
+              "id": "bank"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "pierce"
+            },
+            {
+              "stage": 11,
+              "id": "energy"
+            },
+            {
+              "stage": 12,
+              "id": "pulse"
+            },
+            {
+              "stage": 13,
+              "id": "penetration"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 20.599999999999472,
+            "2": 26.19166666666582,
+            "3": 47.54166666666461,
+            "4": 51.06666666666441,
+            "5": 40.39999999999835,
+            "6": 52.158333333331015,
+            "7": 50.174999999997794,
+            "8": 39.37499999999841,
+            "9": 52.041666666664355,
+            "10": 54.06666666666424,
+            "11": 39.04999999999843,
+            "12": 40.29166666666502,
+            "13": 43.57499999999817,
+            "14": 24.916666666665893
+          }
+        },
+        {
+          "seed": 8,
+          "stage": 13,
+          "score": 16085,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 786.825,
+          "activeCombatSeconds": 708.9655309934162,
+          "worldSeconds": 657.799666666482,
+          "combatShots": 289,
+          "actualShotsPerCombatMinute": 24.458170731802515,
+          "early": {
+            "shots": 90,
+            "kills": 110,
+            "multiKillShots": 30,
+            "hitShots": 85,
+            "killsPerShot": 1.2222222222222223,
+            "multiKillShareAmongHitShots": 0.35294117647058826
+          },
+          "ordinary": {
+            "shots": 277,
+            "kills": 432,
+            "multiKillShots": 123,
+            "hitShots": 261,
+            "killsPerShot": 1.55956678700361,
+            "multiKillShareAmongHitShots": 0.47126436781609193
+          },
+          "stage2": {
+            "shots": 11,
+            "kills": 18,
+            "multiKillShots": 4,
+            "hitShots": 11,
+            "killsPerShot": 1.6363636363636365,
+            "multiKillShareAmongHitShots": 0.36363636363636365
+          },
+          "stage10": {
+            "shots": 29,
+            "kills": 50,
+            "multiKillShots": 15,
+            "hitShots": 25,
+            "killsPerShot": 1.7241379310344827,
+            "multiKillShareAmongHitShots": 0.6
+          },
+          "maxCombo": 7,
+          "maxPopulation": 28,
+          "nonlethalHits": 1053,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 13.066666666666663,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 13.083333333333371,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 15,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 1,
+          "rewardCarryByStage": {
+            "12": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "split"
+            },
+            {
+              "stage": 5,
+              "id": "magnet"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 6,
+              "id": "rubber"
+            },
+            {
+              "stage": 7,
+              "id": "density"
+            },
+            {
+              "stage": 8,
+              "id": "magnet"
+            },
+            {
+              "stage": 9,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "pierce"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "energy"
+            },
+            {
+              "stage": 12,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 28.149999999999043,
+            "2": 25.14166666666588,
+            "3": 45.3333333333314,
+            "4": 62.45833333333043,
+            "5": 53.97499999999758,
+            "6": 61.35833333333049,
+            "7": 62.85833333333041,
+            "8": 64.93333333333108,
+            "9": 68.1083333333336,
+            "10": 70.87500000000247,
+            "11": 64.77499999999762,
+            "12": 57.90833333333069,
+            "13": 16.941666666666347
+          }
+        }
+      ]
+    },
+    "v7.0.0-hp-1.20": {
+      "summary": {
+        "runs": 8,
+        "meanStage": 14.875,
+        "stageRange": [
+          11,
+          17
+        ],
+        "meanRealMinutes": 13.328020833333332,
+        "meanScore": 25006.5,
+        "meanActualShotsPerCombatMinute": 23.966044159406287,
+        "censored": 0,
+        "bossWins": 19,
+        "bossLosses": 0,
+        "rewardCarryKills": 0,
+        "rewardCarryHits": 51,
+        "early": {
+          "shots": 677,
+          "kills": 880,
+          "killsPerShot": 1.2998522895125555,
+          "multiKillShareAmongHitShots": 0.42604501607717044
+        },
+        "ordinary": {
+          "shots": 2169,
+          "kills": 4694,
+          "killsPerShot": 2.164130935915168,
+          "multiKillShareAmongHitShots": 0.6141541444498303
+        },
+        "stage2": {
+          "shots": 109,
+          "kills": 144,
+          "killsPerShot": 1.3211009174311927,
+          "multiKillShareAmongHitShots": 0.41
+        },
+        "stage10": {
+          "shots": 141,
+          "kills": 400,
+          "killsPerShot": 2.8368794326241136,
+          "multiKillShareAmongHitShots": 0.7608695652173914
+        }
+      },
+      "runs": [
+        {
+          "seed": 1,
+          "stage": 11,
+          "score": 12340,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 563.0083333333333,
+          "activeCombatSeconds": 496.4232680575749,
+          "worldSeconds": 470.522499999747,
+          "combatShots": 204,
+          "actualShotsPerCombatMinute": 24.656378513225555,
+          "early": {
+            "shots": 79,
+            "kills": 110,
+            "multiKillShots": 32,
+            "hitShots": 72,
+            "killsPerShot": 1.3924050632911393,
+            "multiKillShareAmongHitShots": 0.4444444444444444
+          },
+          "ordinary": {
+            "shots": 193,
+            "kills": 343,
+            "multiKillShots": 99,
+            "hitShots": 182,
+            "killsPerShot": 1.7772020725388602,
+            "multiKillShareAmongHitShots": 0.5439560439560439
+          },
+          "stage2": {
+            "shots": 13,
+            "kills": 18,
+            "multiKillShots": 6,
+            "hitShots": 11,
+            "killsPerShot": 1.3846153846153846,
+            "multiKillShareAmongHitShots": 0.5454545454545454
+          },
+          "stage10": {
+            "shots": 17,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 17,
+            "killsPerShot": 2.9411764705882355,
+            "multiKillShareAmongHitShots": 0.7647058823529411
+          },
+          "maxCombo": 6,
+          "maxPopulation": 28,
+          "nonlethalHits": 470,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 16.958333333333343,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 9.316666666666606,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 13,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 6,
+          "rewardCarryByStage": {
+            "5": {
+              "kills": 0,
+              "hits": 1
+            },
+            "11": {
+              "kills": 0,
+              "hits": 5
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "energy"
+            },
+            {
+              "stage": 2,
+              "id": "bank"
+            },
+            {
+              "stage": 3,
+              "id": "pierce"
+            },
+            {
+              "stage": 4,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "growth"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "rubber"
+            },
+            {
+              "stage": 8,
+              "id": "rubber"
+            },
+            {
+              "stage": 9,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "boomerang"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 28.533333333332354,
+            "2": 29.966666666665606,
+            "3": 41.024999999998315,
+            "4": 38.69999999999845,
+            "5": 49.04999999999786,
+            "6": 46.16666666666469,
+            "7": 53.43333333333094,
+            "8": 55.92499999999747,
+            "9": 70.22500000000196,
+            "10": 41.64999999999828,
+            "11": 15.474999999999762
+          }
+        },
+        {
+          "seed": 2,
+          "stage": 16,
+          "score": 30032,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 908.4916666666667,
+          "activeCombatSeconds": 807.986945118962,
+          "worldSeconds": 767.0129166665614,
+          "combatShots": 316,
+          "actualShotsPerCombatMinute": 23.465725671110278,
+          "early": {
+            "shots": 83,
+            "kills": 110,
+            "multiKillShots": 32,
+            "hitShots": 75,
+            "killsPerShot": 1.3253012048192772,
+            "multiKillShareAmongHitShots": 0.4266666666666667
+          },
+          "ordinary": {
+            "shots": 298,
+            "kills": 681,
+            "multiKillShots": 184,
+            "hitShots": 283,
+            "killsPerShot": 2.285234899328859,
+            "multiKillShareAmongHitShots": 0.6501766784452296
+          },
+          "stage2": {
+            "shots": 16,
+            "kills": 18,
+            "multiKillShots": 3,
+            "hitShots": 15,
+            "killsPerShot": 1.125,
+            "multiKillShareAmongHitShots": 0.2
+          },
+          "stage10": {
+            "shots": 17,
+            "kills": 50,
+            "multiKillShots": 15,
+            "hitShots": 17,
+            "killsPerShot": 2.9411764705882355,
+            "multiKillShareAmongHitShots": 0.8823529411764706
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 1425,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 14.783333333333331,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 13.81666666666672,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 13.091666666666697,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 19,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 5,
+          "rewardCarryByStage": {
+            "13": {
+              "kills": 0,
+              "hits": 2
+            },
+            "15": {
+              "kills": 0,
+              "hits": 2
+            },
+            "16": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "bank"
+            },
+            {
+              "stage": 2,
+              "id": "pierce"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "magnet"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "split"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "energy"
+            },
+            {
+              "stage": 8,
+              "id": "density"
+            },
+            {
+              "stage": 9,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "boomerang"
+            },
+            {
+              "stage": 12,
+              "id": "magnet"
+            },
+            {
+              "stage": 13,
+              "id": "rubber"
+            },
+            {
+              "stage": 14,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "rubber"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 30.47499999999891,
+            "2": 38.07499999999848,
+            "3": 33.741666666665395,
+            "4": 38.783333333331775,
+            "5": 57.691666666664034,
+            "6": 58.64999999999731,
+            "7": 58.333333333330664,
+            "8": 32.53333333333213,
+            "9": 49.52499999999783,
+            "10": 44.96666666666476,
+            "11": 55.45833333333083,
+            "12": 41.258333333331635,
+            "13": 44.62499999999811,
+            "14": 72.56666666667049,
+            "15": 61.2333333333305,
+            "16": 48.38333333333123
+          }
+        },
+        {
+          "seed": 3,
+          "stage": 15,
+          "score": 27259,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 669.175,
+          "activeCombatSeconds": 582.670375005286,
+          "worldSeconds": 564.7476666664168,
+          "combatShots": 229,
+          "actualShotsPerCombatMinute": 23.581085617876745,
+          "early": {
+            "shots": 74,
+            "kills": 110,
+            "multiKillShots": 36,
+            "hitShots": 68,
+            "killsPerShot": 1.4864864864864864,
+            "multiKillShareAmongHitShots": 0.5294117647058824
+          },
+          "ordinary": {
+            "shots": 221,
+            "kills": 589,
+            "multiKillShots": 158,
+            "hitShots": 214,
+            "killsPerShot": 2.665158371040724,
+            "multiKillShareAmongHitShots": 0.7383177570093458
+          },
+          "stage2": {
+            "shots": 15,
+            "kills": 18,
+            "multiKillShots": 6,
+            "hitShots": 13,
+            "killsPerShot": 1.2,
+            "multiKillShareAmongHitShots": 0.46153846153846156
+          },
+          "stage10": {
+            "shots": 19,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 19,
+            "killsPerShot": 2.6315789473684212,
+            "multiKillShareAmongHitShots": 0.6842105263157895
+          },
+          "maxCombo": 10,
+          "maxPopulation": 28,
+          "nonlethalHits": 1194,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.116666666666674,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 8.858333333333292,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 17,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 9,
+          "rewardCarryByStage": {
+            "9": {
+              "kills": 0,
+              "hits": 2
+            },
+            "13": {
+              "kills": 0,
+              "hits": 3
+            },
+            "15": {
+              "kills": 0,
+              "hits": 4
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 1,
+              "id": "boomerang"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "energy"
+            },
+            {
+              "stage": 4,
+              "id": "split"
+            },
+            {
+              "stage": 5,
+              "id": "pierce"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "rubber"
+            },
+            {
+              "stage": 8,
+              "id": "growth"
+            },
+            {
+              "stage": 9,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "rubber"
+            },
+            {
+              "stage": 12,
+              "id": "gravity"
+            },
+            {
+              "stage": 13,
+              "id": "pulse"
+            },
+            {
+              "stage": 14,
+              "id": "penetration"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 20.433333333332815,
+            "2": 34.10833333333204,
+            "3": 42.59166666666489,
+            "4": 44.958333333331424,
+            "5": 29.983333333332272,
+            "6": 26.39166666666581,
+            "7": 33.17499999999876,
+            "8": 38.94999999999843,
+            "9": 38.52499999999846,
+            "10": 48.9083333333312,
+            "11": 37.36666666666519,
+            "12": 35.374999999998636,
+            "13": 46.20833333333135,
+            "14": 60.70833333333053,
+            "15": 26.01666666666583
+          }
+        },
+        {
+          "seed": 4,
+          "stage": 17,
+          "score": 33152,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 880.4416666666666,
+          "activeCombatSeconds": 776.2379722721436,
+          "worldSeconds": 741.4781666665588,
+          "combatShots": 309,
+          "actualShotsPerCombatMinute": 23.884428052045884,
+          "early": {
+            "shots": 80,
+            "kills": 110,
+            "multiKillShots": 34,
+            "hitShots": 75,
+            "killsPerShot": 1.375,
+            "multiKillShareAmongHitShots": 0.4533333333333333
+          },
+          "ordinary": {
+            "shots": 292,
+            "kills": 728,
+            "multiKillShots": 188,
+            "hitShots": 274,
+            "killsPerShot": 2.493150684931507,
+            "multiKillShareAmongHitShots": 0.6861313868613139
+          },
+          "stage2": {
+            "shots": 12,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 11,
+            "killsPerShot": 1.5,
+            "multiKillShareAmongHitShots": 0.45454545454545453
+          },
+          "stage10": {
+            "shots": 14,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 13,
+            "killsPerShot": 3.5714285714285716,
+            "multiKillShareAmongHitShots": 1
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 1239,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.541666666666657,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 13.766666666666652,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 16.383333333333326,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 20,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 8,
+          "rewardCarryByStage": {
+            "6": {
+              "kills": 0,
+              "hits": 2
+            },
+            "9": {
+              "kills": 0,
+              "hits": 1
+            },
+            "12": {
+              "kills": 0,
+              "hits": 1
+            },
+            "13": {
+              "kills": 0,
+              "hits": 2
+            },
+            "17": {
+              "kills": 0,
+              "hits": 2
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "split"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "pulse"
+            },
+            {
+              "stage": 4,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 5,
+              "id": "energy"
+            },
+            {
+              "stage": 6,
+              "id": "density"
+            },
+            {
+              "stage": 7,
+              "id": "magnet"
+            },
+            {
+              "stage": 8,
+              "id": "bank"
+            },
+            {
+              "stage": 9,
+              "id": "pierce"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "rubber"
+            },
+            {
+              "stage": 12,
+              "id": "density"
+            },
+            {
+              "stage": 13,
+              "id": "gravity"
+            },
+            {
+              "stage": 14,
+              "id": "magnet"
+            },
+            {
+              "stage": 15,
+              "id": "energy"
+            },
+            {
+              "stage": 15,
+              "id": "penetration"
+            },
+            {
+              "stage": 16,
+              "id": "shockwave"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 27.64999999999907,
+            "2": 28.441666666665693,
+            "3": 55.424999999997496,
+            "4": 39.799999999998384,
+            "5": 39.64999999999839,
+            "6": 34.30833333333203,
+            "7": 39.4999999999984,
+            "8": 39.96666666666504,
+            "9": 46.34999999999801,
+            "10": 37.34166666666519,
+            "11": 35.12499999999865,
+            "12": 51.32499999999773,
+            "13": 54.24166666666423,
+            "14": 55.949999999997466,
+            "15": 62.68333333333042,
+            "16": 66.85833333333261,
+            "17": 20.933333333332786
+          }
+        },
+        {
+          "seed": 5,
+          "stage": 15,
+          "score": 22852,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 787.725,
+          "activeCombatSeconds": 701.3743057074857,
+          "worldSeconds": 660.5651666664903,
+          "combatShots": 283,
+          "actualShotsPerCombatMinute": 24.209612273822955,
+          "early": {
+            "shots": 87,
+            "kills": 110,
+            "multiKillShots": 33,
+            "hitShots": 81,
+            "killsPerShot": 1.264367816091954,
+            "multiKillShareAmongHitShots": 0.4074074074074074
+          },
+          "ordinary": {
+            "shots": 273,
+            "kills": 565,
+            "multiKillShots": 154,
+            "hitShots": 264,
+            "killsPerShot": 2.06959706959707,
+            "multiKillShareAmongHitShots": 0.5833333333333334
+          },
+          "stage2": {
+            "shots": 17,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 17,
+            "killsPerShot": 1.0588235294117647,
+            "multiKillShareAmongHitShots": 0.29411764705882354
+          },
+          "stage10": {
+            "shots": 15,
+            "kills": 50,
+            "multiKillShots": 10,
+            "hitShots": 15,
+            "killsPerShot": 3.3333333333333335,
+            "multiKillShareAmongHitShots": 0.6666666666666666
+          },
+          "maxCombo": 8,
+          "maxPopulation": 28,
+          "nonlethalHits": 1021,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.783333333333331,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 10.774999999999977,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 17,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 5,
+          "rewardCarryByStage": {
+            "5": {
+              "kills": 0,
+              "hits": 2
+            },
+            "13": {
+              "kills": 0,
+              "hits": 1
+            },
+            "15": {
+              "kills": 0,
+              "hits": 2
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "energy"
+            },
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "gravity"
+            },
+            {
+              "stage": 4,
+              "id": "pierce"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "energy"
+            },
+            {
+              "stage": 8,
+              "id": "rubber"
+            },
+            {
+              "stage": 9,
+              "id": "split"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "energy"
+            },
+            {
+              "stage": 12,
+              "id": "rubber"
+            },
+            {
+              "stage": 13,
+              "id": "density"
+            },
+            {
+              "stage": 14,
+              "id": "bank"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 24.824999999999232,
+            "2": 40.78333333333166,
+            "3": 41.14999999999831,
+            "4": 42.26666666666491,
+            "5": 55.2999999999975,
+            "6": 43.69999999999816,
+            "7": 52.449999999997665,
+            "8": 55.41666666666416,
+            "9": 42.70833333333155,
+            "10": 40.066666666665036,
+            "11": 53.35833333333095,
+            "12": 51.96666666666436,
+            "13": 52.98333333333097,
+            "14": 71.64166666666975,
+            "15": 11.200000000000005
+          }
+        },
+        {
+          "seed": 6,
+          "stage": 16,
+          "score": 30133,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 941.0166666666667,
+          "activeCombatSeconds": 844.0868323757932,
+          "worldSeconds": 791.3087499999324,
+          "combatShots": 336,
+          "actualShotsPerCombatMinute": 23.883798712102916,
+          "early": {
+            "shots": 90,
+            "kills": 110,
+            "multiKillShots": 33,
+            "hitShots": 81,
+            "killsPerShot": 1.2222222222222223,
+            "multiKillShareAmongHitShots": 0.4074074074074074
+          },
+          "ordinary": {
+            "shots": 321,
+            "kills": 692,
+            "multiKillShots": 185,
+            "hitShots": 304,
+            "killsPerShot": 2.155763239875389,
+            "multiKillShareAmongHitShots": 0.6085526315789473
+          },
+          "stage2": {
+            "shots": 14,
+            "kills": 18,
+            "multiKillShots": 5,
+            "hitShots": 12,
+            "killsPerShot": 1.2857142857142858,
+            "multiKillShareAmongHitShots": 0.4166666666666667
+          },
+          "stage10": {
+            "shots": 21,
+            "kills": 50,
+            "multiKillShots": 15,
+            "hitShots": 21,
+            "killsPerShot": 2.380952380952381,
+            "multiKillShareAmongHitShots": 0.7142857142857143
+          },
+          "maxCombo": 11,
+          "maxPopulation": 28,
+          "nonlethalHits": 1378,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 9.741666666666674,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 12.325000000000045,
+              "result": "win"
+            },
+            {
+              "stage": 15,
+              "seconds": 13.108333333333348,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 19,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 12,
+          "rewardCarryByStage": {
+            "4": {
+              "kills": 0,
+              "hits": 2
+            },
+            "6": {
+              "kills": 0,
+              "hits": 2
+            },
+            "8": {
+              "kills": 0,
+              "hits": 3
+            },
+            "14": {
+              "kills": 0,
+              "hits": 4
+            },
+            "16": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "density"
+            },
+            {
+              "stage": 1,
+              "id": "pierce"
+            },
+            {
+              "stage": 2,
+              "id": "energy"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "growth"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 5,
+              "id": "bank"
+            },
+            {
+              "stage": 6,
+              "id": "boomerang"
+            },
+            {
+              "stage": 7,
+              "id": "gravity"
+            },
+            {
+              "stage": 8,
+              "id": "penetration"
+            },
+            {
+              "stage": 9,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 11,
+              "id": "energy"
+            },
+            {
+              "stage": 12,
+              "id": "density"
+            },
+            {
+              "stage": 13,
+              "id": "split"
+            },
+            {
+              "stage": 14,
+              "id": "density"
+            },
+            {
+              "stage": 15,
+              "id": "magnet"
+            },
+            {
+              "stage": 15,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 27.49999999999908,
+            "2": 32.35833333333214,
+            "3": 49.02499999999786,
+            "4": 53.65833333333093,
+            "5": 54.30833333333089,
+            "6": 38.083333333331815,
+            "7": 49.20833333333118,
+            "8": 39.99999999999837,
+            "9": 69.20833333333448,
+            "10": 52.01666666666436,
+            "11": 57.34999999999739,
+            "12": 56.266666666664115,
+            "13": 69.92500000000172,
+            "14": 55.64166666666415,
+            "15": 48.691666666664545,
+            "16": 55.67499999999748
+          }
+        },
+        {
+          "seed": 7,
+          "stage": 14,
+          "score": 22040,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 804.3333333333334,
+          "activeCombatSeconds": 721.7083333328471,
+          "worldSeconds": 675.2782499998267,
+          "combatShots": 288,
+          "actualShotsPerCombatMinute": 23.943190346993788,
+          "early": {
+            "shots": 88,
+            "kills": 110,
+            "multiKillShots": 33,
+            "hitShots": 82,
+            "killsPerShot": 1.25,
+            "multiKillShareAmongHitShots": 0.4024390243902439
+          },
+          "ordinary": {
+            "shots": 278,
+            "kills": 529,
+            "multiKillShots": 144,
+            "hitShots": 265,
+            "killsPerShot": 1.9028776978417266,
+            "multiKillShareAmongHitShots": 0.5433962264150943
+          },
+          "stage2": {
+            "shots": 11,
+            "kills": 18,
+            "multiKillShots": 7,
+            "hitShots": 10,
+            "killsPerShot": 1.6363636363636365,
+            "multiKillShareAmongHitShots": 0.7
+          },
+          "stage10": {
+            "shots": 21,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 19,
+            "killsPerShot": 2.380952380952381,
+            "multiKillShareAmongHitShots": 0.6842105263157895
+          },
+          "maxCombo": 9,
+          "maxPopulation": 28,
+          "nonlethalHits": 1120,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.925000000000011,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 11.400000000000091,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 16,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 1,
+          "rewardCarryByStage": {
+            "10": {
+              "kills": 0,
+              "hits": 1
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "split"
+            },
+            {
+              "stage": 2,
+              "id": "rubber"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "rubber"
+            },
+            {
+              "stage": 6,
+              "id": "energy"
+            },
+            {
+              "stage": 7,
+              "id": "density"
+            },
+            {
+              "stage": 8,
+              "id": "density"
+            },
+            {
+              "stage": 9,
+              "id": "density"
+            },
+            {
+              "stage": 10,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "bank"
+            },
+            {
+              "stage": 11,
+              "id": "pierce"
+            },
+            {
+              "stage": 12,
+              "id": "boomerang"
+            },
+            {
+              "stage": 13,
+              "id": "penetration"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 20.599999999999472,
+            "2": 26.19166666666582,
+            "3": 45.166666666664746,
+            "4": 58.391666666663994,
+            "5": 56.641666666664094,
+            "6": 55.59166666666415,
+            "7": 45.99999999999803,
+            "8": 45.03333333333142,
+            "9": 68.05000000000022,
+            "10": 52.999999999997634,
+            "11": 57.97499999999735,
+            "12": 58.37499999999733,
+            "13": 61.35833333333049,
+            "14": 47.00833333333131
+          }
+        },
+        {
+          "seed": 8,
+          "stage": 15,
+          "score": 22244,
+          "reason": "capacity",
+          "censored": false,
+          "realSeconds": 843.2583333333333,
+          "activeCombatSeconds": 756.7166666661547,
+          "worldSeconds": 707.6401666665237,
+          "combatShots": 304,
+          "actualShotsPerCombatMinute": 24.104134088072165,
+          "early": {
+            "shots": 96,
+            "kills": 110,
+            "multiKillShots": 32,
+            "hitShots": 88,
+            "killsPerShot": 1.1458333333333333,
+            "multiKillShareAmongHitShots": 0.36363636363636365
+          },
+          "ordinary": {
+            "shots": 293,
+            "kills": 567,
+            "multiKillShots": 155,
+            "hitShots": 277,
+            "killsPerShot": 1.9351535836177474,
+            "multiKillShareAmongHitShots": 0.5595667870036101
+          },
+          "stage2": {
+            "shots": 11,
+            "kills": 18,
+            "multiKillShots": 4,
+            "hitShots": 11,
+            "killsPerShot": 1.6363636363636365,
+            "multiKillShareAmongHitShots": 0.36363636363636365
+          },
+          "stage10": {
+            "shots": 17,
+            "kills": 50,
+            "multiKillShots": 13,
+            "hitShots": 17,
+            "killsPerShot": 2.9411764705882355,
+            "multiKillShareAmongHitShots": 0.7647058823529411
+          },
+          "maxCombo": 8,
+          "maxPopulation": 28,
+          "nonlethalHits": 1119,
+          "bosses": [
+            {
+              "stage": 5,
+              "seconds": 10.75,
+              "result": "win"
+            },
+            {
+              "stage": 10,
+              "seconds": 13.983333333333348,
+              "result": "win"
+            }
+          ],
+          "rewardShots": 17,
+          "rewardCarryKills": 0,
+          "rewardCarryHits": 5,
+          "rewardCarryByStage": {
+            "9": {
+              "kills": 0,
+              "hits": 1
+            },
+            "10": {
+              "kills": 0,
+              "hits": 1
+            },
+            "14": {
+              "kills": 0,
+              "hits": 3
+            }
+          },
+          "upgrades": [
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 1,
+              "id": "rubber"
+            },
+            {
+              "stage": 2,
+              "id": "density"
+            },
+            {
+              "stage": 3,
+              "id": "rubber"
+            },
+            {
+              "stage": 4,
+              "id": "density"
+            },
+            {
+              "stage": 5,
+              "id": "split"
+            },
+            {
+              "stage": 5,
+              "id": "bank"
+            },
+            {
+              "stage": 6,
+              "id": "density"
+            },
+            {
+              "stage": 7,
+              "id": "energy"
+            },
+            {
+              "stage": 8,
+              "id": "pierce"
+            },
+            {
+              "stage": 9,
+              "id": "energy"
+            },
+            {
+              "stage": 10,
+              "id": "rubber"
+            },
+            {
+              "stage": 10,
+              "id": "density"
+            },
+            {
+              "stage": 11,
+              "id": "gravity"
+            },
+            {
+              "stage": 12,
+              "id": "energy"
+            },
+            {
+              "stage": 13,
+              "id": "energy"
+            },
+            {
+              "stage": 14,
+              "id": "density"
+            }
+          ],
+          "battleRealSecondsByStage": {
+            "1": 28.149999999999043,
+            "2": 25.14166666666588,
+            "3": 45.3333333333314,
+            "4": 68.13333333333362,
+            "5": 58.04999999999735,
+            "6": 48.94166666666453,
+            "7": 48.46666666666456,
+            "8": 49.999999999997804,
+            "9": 66.18333333333207,
+            "10": 45.75833333333138,
+            "11": 50.499999999997776,
+            "12": 59.33333333333061,
+            "13": 67.02499999999941,
+            "14": 58.14166666666401,
+            "15": 12.824999999999912
+          }
+        }
+      ]
+    }
+  },
+  "hostElapsedSeconds": 126.12585215200001
+}

@@ -1,36 +1,33 @@
 import {World, clamp, length} from './physics.js';
+import {campaignBounds} from './campaign-layout.js';
+export {campaignBounds} from './campaign-layout.js';
 import {UPGRADES} from './upgrades.js';
 import {LegacyCampaignWorld, legacyLevelConfig} from './classes/legacy.js';
 import {wallParams, createWallRules} from './classes/wall.js';
 import {peggleParams, createPeggleRules} from './classes/peggle.js';
 import {poolParams, createPoolRules} from './classes/pool.js';
 import {golfParams, createGolfRules} from './classes/golf.js';
-import {bowlingParams, createBowlingRules} from './classes/bowling.js';
-import {pinballParams, createPinballRules} from './classes/pinball.js';
-import {bricksParams, createBricksRules} from './classes/bricks.js';
-import {glassParams, createGlassRules} from './classes/glass.js';
 import {mergeParams, createMergeRules} from './classes/merge.js';
-import {chainParams, createChainRules} from './classes/chain.js';
 import {staticContact, dynamicContact, resolveStatic, resolveDynamic, zoneContains, sweptZoneEntry} from './campaign-collision.js';
 export {normalizeProgress} from './campaign-progress.js';
 export {LegacyCampaignWorld, legacyLevelConfig};
 
 export const LEVEL_COUNT = 100;
 const levelNumber = v => clamp(Math.floor(Number.isFinite(Number(v)) ? Number(v) : 1), 1, LEVEL_COUNT);
+// r remains the renderer's historic mode identifier. digit is the actual
+// level suffix; rank20 is the strictly ordered challenge within one mode.
 const classes = [
-  ['peggle', '钉板狂热', 7], ['wall', '破墙', 7], ['bowling', '十瓶', 9], ['bricks', '落砖', 10],
-  ['pool', '落袋', 8], ['merge', '合成', 11], ['pinball', '弹珠', 9], ['glass', '碎屏', 10],
-  ['golf', '推杆', 8], ['chain', '链球', 11],
+  ['wall', '破墙', 7, 1], ['pool', '落袋', 8, 4], ['merge', '合成', 11, 5],
+  ['golf', '推杆', 8, 8], ['peggle', '钉板狂热', 7, 0],
 ];
-const registry = {wall: [wallParams, createWallRules], peggle: [peggleParams, createPeggleRules], pool: [poolParams, createPoolRules], golf: [golfParams, createGolfRules],
-  bowling: [bowlingParams, createBowlingRules], pinball: [pinballParams, createPinballRules],
-  bricks: [bricksParams, createBricksRules], glass: [glassParams, createGlassRules],
-  merge: [mergeParams, createMergeRules], chain: [chainParams, createChainRules]};
+const registry = {wall: [wallParams, createWallRules], peggle: [peggleParams, createPeggleRules],
+  pool: [poolParams, createPoolRules], golf: [golfParams, createGolfRules], merge: [mergeParams, createMergeRules]};
 export function levelConfig(level) {
-  const n = levelNumber(level), r = n % 10, k = Math.floor((n - 1) / 10), [classId, name, task] = classes[r];
-  const implemented = !!registry[classId];
-  const params = implemented ? registry[classId][0](k) : legacyLevelConfig(n);
-  return Object.freeze({...params, level: n, r, k, classId, type: classId, name, task, implemented, legacy: !implemented, difficult: k >= 6});
+  const n = levelNumber(level), digit = n % 10, k = Math.floor((n - 1) / 10), variant = (n - 1) % 2;
+  const [classId, name, task, r] = classes[Math.floor(((n - 1) % 10) / 2)];
+  const rank20 = k * 2 + variant, params = registry[classId][0](k, variant);
+  return Object.freeze({...params, level: n, digit, r, k, variant, rank20, classId, type: classId,
+    name, task, implemented: true, legacy: false, difficult: rank20 >= 12});
 }
 export function progressPercent(value, total) {
   return Number.isFinite(total) && total > 0 ? Math.round(clamp((Number(value) || 0) / total, 0, 1) * 100) : 0;
@@ -42,7 +39,7 @@ export const CAMPAIGN_UPGRADES = Object.freeze({
 export function campaignUpgradePool(level) {
   const c = levelConfig(level); if (!c.implemented) return [];
   const precision = ['pool', 'golf', 'bowling'].includes(c.type);
-  const ids = c.task === 11 ? ['gravity', 'density', 'growth', 'pulse'] : c.task === 10 ? ['split', 'energy', 'breath', 'pulse'] : precision ? ['density', 'rubber', 'bank', 'steady'] : ['rubber', 'energy', 'bank', 'pierce'];
+  const ids = c.type === 'wall' ? ['rubber', 'energy', 'bank', 'density'] : c.task === 11 ? ['gravity', 'density', 'growth', 'pulse'] : c.task === 10 ? ['split', 'energy', 'breath', 'pulse'] : precision ? ['density', 'rubber', 'bank', 'steady'] : ['rubber', 'energy', 'bank', 'pierce'];
   const descriptions = {
     density: '提高重量，撞球更有力', rubber: '碰撞回弹由九成五提高到全速',
     bank: precision || c.type === 'pinball' ? '碰墙蓄力，强化下一次碰撞' : c.type === 'peggle' ? '碰墙后下一钉回弹更快' : '碰墙后下一砖伤害更高',
@@ -73,17 +70,22 @@ export class CampaignWorld extends World {
     this.blockedStaticEntries = new Set();
     this.blockedDynamicPairs = new Set();
     this.shotsUsed = 0; this.budget = config.budget; this.remaining = this.budget;
-    this.shotActive = false; this.shotTime = 0; this.shotSlowTime = 0;
+    this.shotActive = false; this.shotTime = 0; this.shotSlowTime = 0; this.shotFinish = null;
     this.freeBalls = 0; this.tutorialLookTime = 0; this.tutorialSeen = options.showTutorial === false || !!options.tutorialSeen; this.celebration = null; this._resultRating = 0;
     this.lastContact = null; this.peakOrigin = null; this.upgradeId = null;
     this.pendingLaunchEnd = null; this.transientSlow = null; this.lastAimAdjustment = 0;
     this.player.born = 1; this.player.solid = true;
+    // Mode-specific colliders are set before layout/teaching is calculated.
+    // World and its endless sizing remain untouched.
+    const radiusRatio = clamp(config.playerRadius ?? 1, .25, 1.2);
+    this.player.r = this.unit * radiusRatio;
+    this.player.mass = this.player.density * radiusRatio * radiusRatio;
     this.rules = registry[config.type][1](this);
     this.rules.setup(config.k);
     if (config.task !== 11) this.remaining = this.budget;
     this.applyCampaignUpgrade(options.upgradeId);
   }
-  get arenaBounds() { return this.rules?.arenaBounds?.() || super.arenaBounds; }
+  get arenaBounds() { return this.mode === 'campaign' ? this.rules?.arenaBounds?.() || campaignBounds(this) : super.arenaBounds; }
   get ready() {
     const resourceAvailable = this.config?.budgetKind === 'misses' ? this.remaining >= 0 : this.remaining > 0;
     return this.phase === 'battle' && !this.shotActive && resourceAvailable && this.rules?.canLaunch?.() !== false;
@@ -92,10 +94,21 @@ export class CampaignWorld extends World {
   get campaignBodies() { return [...this.campaignActors, ...this.enemies]; }
   isCampaignActor(body) { return body === this.player || !!body.isAuxiliary; }
   get continuousControl() { return false; }
+  get baseSpeed() { return this.unit * (this.config?.launchSpeed || 40); }
   get combatActive() { return this.phase === 'battle'; }
   get spawnInterval() { return Infinity; }
   spawnEnemy() { return null; }
-  get tutorialVisible() { return !this.tutorialSeen && this.config.k === 0 && this.shotsUsed === 0 && this.phase === 'battle'; }
+  get tutorialVisible() { return !this.tutorialSeen && this.shotsUsed === 0 && this.phase === 'battle'; }
+  get tutorialPullRatio() {
+    const hint = this.rules.tutorialPullRatio;
+    return clamp(Number(typeof hint === 'function' ? hint() : hint) || 1, .05, 1);
+  }
+  get ratingStatus() {
+    const status = this.rules.ratingStatus?.() || {};
+    return {rating: clamp(Math.floor(status.rating || this.resultRating || 1), 1, 3),
+      summary: status.summary || this.resultSummary, three: status.three || '', two: status.two || ''};
+  }
+  get liveRating() { return this.ratingStatus.rating; }
   get teachingTarget() {
     const target = typeof this.rules.tutorialTarget === 'function' ? this.rules.tutorialTarget() : this.rules.tutorialTarget;
     return target || this.statics.find(s => s.active !== false && !s.dead && (this.config.r === 1 || s.target));
@@ -105,7 +118,7 @@ export class CampaignWorld extends World {
     const peak = this.celebration && this.celebration.elapsed < this.celebration.duration ? this.celebration.scale : 1;
     const transient = this.transientSlow?.remaining > 0 ? this.transientSlow.scale : 1;
     const scale = Math.min(peak, transient);
-    return this.config.task >= 8 ? 1 - (1 - scale) * this.feedbackOptions.strength : scale;
+    return 1 - (1 - scale) * this.feedbackOptions.strength;
   }
   beginCampaignSlow({duration = .3, scale = .3, kind = this.config.type, ...origin} = {}) {
     if (this.phase !== 'battle' || !(duration > 0)) return false;
@@ -236,7 +249,7 @@ export class CampaignWorld extends World {
     this.shotsUsed++; this.totalShots++;
     if (!['lives', 'misses', 'pressure', 'time'].includes(this.config.budgetKind)) this.remaining--;
     this.shotActive = true;
-    this.pendingLaunchEnd = null; this.shotTime = this.shotSlowTime = 0; this.shotKills = 0; this.shotBanked = false; this.shotWallCount = 0;
+    this.pendingLaunchEnd = null; this.shotFinish = null; this.shotTime = this.shotSlowTime = 0; this.shotKills = 0; this.shotBanked = false; this.shotWallCount = 0;
     this.shotZones.clear(); this.zoneContacts.clear(); this.contacts.clear();
     this.shotSplitUsed = false;
     const vx = this.player.vx + (this.player.pendingVx || 0), vy = this.player.vy + (this.player.pendingVy || 0);
@@ -247,7 +260,7 @@ export class CampaignWorld extends World {
   endLaunch({victory = false, reason = 'settled'} = {}) {
     if (!this.shotActive) return false;
     const preserveMotion = this.rules.preserveLaunchMotion?.({victory, reason}) === true;
-    this.shotActive = false; this.pendingLaunchEnd = null; this.cancelPull(); this.player.pendingVx = this.player.pendingVy = 0;
+    this.shotActive = false; this.pendingLaunchEnd = null; this.shotFinish = null; this.cancelPull(); this.player.pendingVx = this.player.pendingVy = 0;
     if (!preserveMotion) {
       this.player.vx = this.player.vy = 0;
       for (const body of this.auxiliaries) body.vx = body.vy = 0;
@@ -256,6 +269,37 @@ export class CampaignWorld extends World {
     this.rules.onLaunchEnd?.({victory, reason}); this.contacts.clear(); this.zoneContacts.clear();
     this.emit('campaignLaunchEnd', {shotsUsed: this.shotsUsed, remaining: this.remaining, victory, reason});
     if (!victory && !preserveMotion) this.releaseOverlaps(); return true;
+  }
+  launchMovingBodies() {
+    const bodies = this.rules.physics?.settleAll ? this.campaignBodies : this.campaignActors;
+    return bodies.filter(body => !body.captured && body.active !== false && body.hp > 0);
+  }
+  advanceLaunchBrake(dt) {
+    const finish = this.shotFinish;
+    if (!this.shotActive || !finish || this.shotTime < finish.brakeAt - 1e-9) return;
+    const remaining = Math.max(0, finish.duration - (this.shotTime - finish.brakeAt));
+    // Multiplicative ratios of the remaining time give a linear envelope at
+    // every physics step, while collisions may still redirect the velocity.
+    const ratio = remaining > 1e-9 ? Math.max(0, remaining - dt) / remaining : 0;
+    for (const body of this.launchMovingBodies()) { body.vx *= ratio; body.vy *= ratio; }
+  }
+  launchDeadlineReached(settled) {
+    const specialDuration = this.rules.physics?.shotDuration;
+    if (Number.isFinite(specialDuration)) return this.shotTime >= specialDuration - 1e-9;
+    if (this.shotTime >= 4 - 1e-9 && !this.shotFinish) {
+      const speed = Math.max(0, ...this.launchMovingBodies().map(length));
+      this.shotFinish = {brakeAt: 4 + (speed > 6 * this.unit ? 1 : 0), duration: .3};
+    }
+    if (this.shotFinish) {
+      if (this.shotTime >= this.shotFinish.brakeAt - 1e-9)
+        return this.shotTime >= this.shotFinish.brakeAt + this.shotFinish.duration - 1e-9;
+      // A high-speed extension may end naturally if the balls settle sooner.
+      if (settled && this.shotSlowTime >= (this.rules.physics?.settleDelay ?? .4) - 1e-9) return true;
+    }
+    return false;
+  }
+  launchEndReason() {
+    return this.shotFinish && this.shotTime >= this.shotFinish.brakeAt + this.shotFinish.duration - 1e-9 ? 'timeout' : 'settled';
   }
   releaseOverlaps(body = this.player, {rotation = false} = {}) {
     if (body.captured || body.active === false || body.hp <= 0 || this.rules.canSeparateBody?.(body) === false) return;
@@ -305,9 +349,14 @@ export class CampaignWorld extends World {
   finishCampaign(won) {
     if (this.phase === 'over') return false;
     this.completed = !!won; this.cancelPull(); this.phase = 'over';
+    if (!won) {
+      const ruleReason = typeof this.rules.failureReason === 'function' ? this.rules.failureReason() : this.rules.failureReason;
+      this.failureReason = ruleReason || (this.config.type === 'merge' ? 'coverage' : 'budget');
+      this.emit('campaignFail', {reason: this.failureReason, level: this.level});
+    }
     this.emit('over', {completed: this.completed, level: this.level, kills: this.kills, totalEnemies: this.totalEnemies,
       rating: this.resultRating, summary: this.resultSummary, shotsUsed: this.shotsUsed, remaining: this.remaining,
-      elapsed: this.elapsed, score: this.score}); return true;
+      elapsed: this.elapsed, score: this.score, reason: this.failureReason || null}); return true;
   }
   checkOutcome() {
     if (this.phase !== 'battle') return;
@@ -380,6 +429,11 @@ export class CampaignWorld extends World {
     while (remaining > 1e-10 && this.phase !== 'over') {
       const speed = Math.max(...this.campaignBodies.map(length), ...this.statics.map(s => Math.hypot(s.vx || 0, s.vy || 0)));
       let h = Math.min(remaining, 1 / 120, speed > 0 ? this.unit * .18 / speed : Infinity);
+      if (this.phase === 'battle' && this.shotActive && !Number.isFinite(this.rules.physics?.shotDuration)) {
+        const next = this.shotFinish ? this.shotTime < this.shotFinish.brakeAt - 1e-9
+          ? this.shotFinish.brakeAt : this.shotFinish.brakeAt + this.shotFinish.duration : 4;
+        if (next - this.shotTime > 1e-9) h = Math.min(h, next - this.shotTime);
+      }
       if (this.phase === 'battle' && this.config.task >= 10) {
         const boundary = this.rules.timeUntilBoundary?.();
         if (Number.isFinite(boundary) && boundary >= 0) h = Math.min(h, boundary);
@@ -428,6 +482,7 @@ export class CampaignWorld extends World {
       this.rules.onAfterTick?.(dt, context);
       this.checkOutcome(); return;
     }
+    this.advanceLaunchBrake(dt);
     const currentContacts = new Set(), currentZones = new Set(), previousPositions = new Map();
     this._acceptedZoneChecks = new Set();
     for (const body of this.campaignBodies) {
@@ -497,15 +552,16 @@ export class CampaignWorld extends World {
       this.enemies = this.enemies.filter(body => body.hp > 0 && body.active !== false && !body.captured);
       this.auxiliaries = this.auxiliaries.filter(body => body.hp > 0 && body.active !== false && !body.captured);
       this.shotTime += dt;
-      const moving = this.rules.physics?.settleAll ? this.campaignBodies.filter(body => !body.captured && body.active !== false) : this.campaignActors;
+      const moving = this.launchMovingBodies();
       const settled = this.rules.isSettled?.() ?? moving.every(body => length(body) < this.unit * (this.rules.physics?.settleSpeed ?? 3));
       this.shotSlowTime = settled ? this.shotSlowTime + dt : 0;
-      settledDeadline = settled && this.shotSlowTime >= (this.rules.physics?.settleDelay ?? .4) - 1e-9 ||
-        this.shotTime >= (this.rules.physics?.shotDuration ?? 4) - 1e-9;
+      const timedOut = this.launchDeadlineReached(settled);
+      const braking = this.shotFinish && this.shotTime >= this.shotFinish.brakeAt - 1e-9;
+      settledDeadline = timedOut || !braking && settled && this.shotSlowTime >= (this.rules.physics?.settleDelay ?? .4) - 1e-9;
       if (this.config.task < 10) {
         this.checkOutcome(); if (this.phase !== 'battle') return;
         if (this.pendingLaunchEnd && (this.pendingLaunchEnd.immediate || !this.rules.physics?.settleAll || settledDeadline)) this.endLaunch(this.pendingLaunchEnd);
-        else if (settledDeadline) this.endLaunch();
+        else if (settledDeadline) this.endLaunch({reason: this.launchEndReason()});
       }
     }
     if (!this.shotActive && this.rules.physics?.nonlethal && !this.rules.physics.freezeTargetsIdle) this.resolveIdleDynamics();
@@ -514,7 +570,7 @@ export class CampaignWorld extends World {
     if (this.config.task >= 10) {
       this.checkOutcome(); if (this.phase !== 'battle') return;
       if (this.pendingLaunchEnd && (this.pendingLaunchEnd.immediate || !this.rules.physics?.settleAll || settledDeadline)) this.endLaunch(this.pendingLaunchEnd);
-      else if (this.shotActive && settledDeadline) this.endLaunch();
+      else if (this.shotActive && settledDeadline) this.endLaunch({reason: this.launchEndReason()});
     }
     this.checkOutcome();
   }
@@ -609,7 +665,7 @@ export class CampaignWorld extends World {
     const positions = new Map(this.campaignBodies.map(body => [body.id, {x: body.x, y: body.y}]));
     previous.positions = positions;
     super.resize(width, height);
-    if (this.rules.arenaBounds) {
+    {
       const old = previous.bounds, now = this.arenaBounds;
       for (const body of this.campaignBodies) {
         const p = positions.get(body.id); if (!p) continue;

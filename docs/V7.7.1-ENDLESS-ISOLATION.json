@@ -1,0 +1,2397 @@
+{
+  "baseline": "a5c1166010534328a8fa7719018fb15e7c2fa933",
+  "checkedAt": "2026-11-04T15:51:59.229Z",
+  "method": "Real Scene.update and production World; identical v7.6.0 restart DOM/Phaser adapter in isolated child processes over frozen production source; fixed Math.random, crypto.getRandomValues and Date; scenario activity assertions; exact SHA-256 of every frame state/all graphics commands plus shape summaries/audio/HUD; no source-string equivalence claims.",
+  "command": "node scripts/audit-v771-endless.mjs /tmp/v771-endless-baseline .",
+  "harnessSha256": "811aab24fa5e1cb89eace9de86f6cbec14ed13ef182faa2b6ea7fbdc65e356f9",
+  "coreModules": {
+    "physics.js": {
+      "baselineSha256": "c315e3b57633a5370e2371ead94cdd7058aacde1eeba86dcb9543a261f69dc1b",
+      "sha256": "c315e3b57633a5370e2371ead94cdd7058aacde1eeba86dcb9543a261f69dc1b",
+      "matchesBaseline": true
+    },
+    "aim.js": {
+      "baselineSha256": "dd40aeda7331117521fa2761292c6ef24c43763c6db7c5ab2435ef6c46ff12d1",
+      "sha256": "dd40aeda7331117521fa2761292c6ef24c43763c6db7c5ab2435ef6c46ff12d1",
+      "matchesBaseline": true
+    },
+    "aim-metrics.js": {
+      "baselineSha256": "90a4c4c3db0351c28c5651a7964d21bf735bfe255d4aa09fc066f27a3809d02e",
+      "sha256": "90a4c4c3db0351c28c5651a7964d21bf735bfe255d4aa09fc066f27a3809d02e",
+      "matchesBaseline": true
+    },
+    "feedback.js": {
+      "baselineSha256": "8aadd60c6e62da52c6e4ff285b7800c43ed6f229a1cfff59156da44ecf9472fb",
+      "sha256": "8aadd60c6e62da52c6e4ff285b7800c43ed6f229a1cfff59156da44ecf9472fb",
+      "matchesBaseline": true
+    },
+    "rhythm-feedback.js": {
+      "baselineSha256": "4bb5193d7afd7c78613dcd3a29f7d6adca5bfe73a2fad9aeee5f29cecaf4c783",
+      "sha256": "4bb5193d7afd7c78613dcd3a29f7d6adca5bfe73a2fad9aeee5f29cecaf4c783",
+      "matchesBaseline": true
+    },
+    "endless-progress.js": {
+      "baselineSha256": "fd28c7c6fd1a953c3b4c244b904f51628871b25bfd5f56c97eafcfd4734f04c7",
+      "sha256": "fd28c7c6fd1a953c3b4c244b904f51628871b25bfd5f56c97eafcfd4734f04c7",
+      "matchesBaseline": true
+    },
+    "enemies.js": {
+      "baselineSha256": "a13e5234709d390df83f2f70cb7a5b36b711229dd0b9d022d3964f80647a2e93",
+      "sha256": "a13e5234709d390df83f2f70cb7a5b36b711229dd0b9d022d3964f80647a2e93",
+      "matchesBaseline": true
+    },
+    "enemy-render.js": {
+      "baselineSha256": "001e873ca85c4c74331729048b7f485667b3d62a6db51ff4e7d4cff9af68c317",
+      "sha256": "001e873ca85c4c74331729048b7f485667b3d62a6db51ff4e7d4cff9af68c317",
+      "matchesBaseline": true
+    },
+    "upgrades.js": {
+      "baselineSha256": "a5117b9c630d247bb611478dc1c7df985011ac70db952d93cf0584711fa91075",
+      "sha256": "a5117b9c630d247bb611478dc1c7df985011ac70db952d93cf0584711fa91075",
+      "matchesBaseline": true
+    },
+    "upgrade-render.js": {
+      "baselineSha256": "d565441e48b3d6a096d8a1bf58bf3df34f3f3a0d1e9163e1c232b01fc4ff3c08",
+      "sha256": "d565441e48b3d6a096d8a1bf58bf3df34f3f3a0d1e9163e1c232b01fc4ff3c08",
+      "matchesBaseline": true
+    },
+    "boss-visuals.js": {
+      "baselineSha256": "5d2aaa406a905ad84a88df31eb6e53fc5b813e2ec28a25a626c9078e3ceb4029",
+      "sha256": "5d2aaa406a905ad84a88df31eb6e53fc5b813e2ec28a25a626c9078e3ceb4029",
+      "matchesBaseline": true
+    },
+    "audio.js": {
+      "baselineSha256": "bd1c518cb0a01b8ea18785ed9afbda4623b49052fe74bf71cfb884bd8c775c93",
+      "sha256": "bd1c518cb0a01b8ea18785ed9afbda4623b49052fe74bf71cfb884bd8c775c93",
+      "matchesBaseline": true
+    },
+    "home.js": {
+      "baselineSha256": "d360ee38dc17b2469d1e130ce9336c8a4717864778d522b4b83757aee0601a87",
+      "sha256": "d360ee38dc17b2469d1e130ce9336c8a4717864778d522b4b83757aee0601a87",
+      "matchesBaseline": true
+    },
+    "motion.js": {
+      "baselineSha256": "71aeee839e0089edee5207aa9a03b365ec851e3b1358a66b54d89c3601f0b11f",
+      "sha256": "71aeee839e0089edee5207aa9a03b365ec851e3b1358a66b54d89c3601f0b11f",
+      "matchesBaseline": true
+    },
+    "skins.js": {
+      "baselineSha256": "a13143b53ef44d3ef1a7c20c6a3bc4ecb945100d1223e3cb70ca71074aa94cd6",
+      "sha256": "a13143b53ef44d3ef1a7c20c6a3bc4ecb945100d1223e3cb70ca71074aa94cd6",
+      "matchesBaseline": true
+    },
+    "skin-render.js": {
+      "baselineSha256": "259d0f3237156b3ff2d9e8a22e548b64477c86c25b02e9e726e741fef910197b",
+      "sha256": "259d0f3237156b3ff2d9e8a22e548b64477c86c25b02e9e726e741fef910197b",
+      "matchesBaseline": true
+    },
+    "skin-unlock.js": {
+      "baselineSha256": "c064355730b97a04317c748716dd93739f7f7f58a02a1765365c26234ad12ab0",
+      "sha256": "c064355730b97a04317c748716dd93739f7f7f58a02a1765365c26234ad12ab0",
+      "matchesBaseline": true
+    },
+    "comet-trail.js": {
+      "baselineSha256": "3be4840c89729c72ed8a7c6d251a5bf8e35d3ead5f69b360d30467d70b1896b9",
+      "sha256": "3be4840c89729c72ed8a7c6d251a5bf8e35d3ead5f69b360d30467d70b1896b9",
+      "matchesBaseline": true
+    },
+    "display.js": {
+      "baselineSha256": "7e4d1ea316055e0c4c9da4a26a57ff6102c36a409b8b0104921780b96e00e31b",
+      "sha256": "7e4d1ea316055e0c4c9da4a26a57ff6102c36a409b8b0104921780b96e00e31b",
+      "matchesBaseline": true
+    },
+    "photo-renderer.js": {
+      "baselineSha256": "495b592bbfa5f6d09d3455420ac7af757d3091b3409bdecad2646a3697799d29",
+      "sha256": "495b592bbfa5f6d09d3455420ac7af757d3091b3409bdecad2646a3697799d29",
+      "matchesBaseline": true
+    },
+    "wardrobe.js": {
+      "baselineSha256": "5f172702184724fa76794a31b56d10b8c56a9b31b167bdefa81bf6e21b984c0c",
+      "sha256": "5f172702184724fa76794a31b56d10b8c56a9b31b167bdefa81bf6e21b984c0c",
+      "matchesBaseline": true
+    },
+    "icons.js": {
+      "baselineSha256": "9286953005ffc7d7c2110d2c6cb7b4aa6a1e6e650e51506fc57521485b4b5761",
+      "sha256": "9286953005ffc7d7c2110d2c6cb7b4aa6a1e6e650e51506fc57521485b4b5761",
+      "matchesBaseline": true
+    }
+  },
+  "sceneCases": 56,
+  "sceneFrames": 19920,
+  "migrationCases": 10,
+  "migrationFrames": 40,
+  "switchCases": 2,
+  "switchFrames": 240,
+  "totalCases": 68,
+  "totalFrames": 20200,
+  "sharedFileHashes": {
+    "game.js": "dee6948951123edd80b9f7517e0063c95c9d9f64e0e2c1f608c2328cc6f393ec",
+    "style.css": "950e83ce7014c07a22c5639dedd9c32db8dc3f1273f08bc22764fbf7740938f6",
+    "index.html": "24578964c03e4ffe3734ca3beb0dd9bef79ee817e4afe4b15f27da02edd5ab39",
+    "fonts/qiuqiule-ui.woff2": "778ded48840f95ea77daee053211e25c97bb80afe86ded624c1e07e8ac226929"
+  },
+  "cases": [
+    {
+      "id": "cold-home-390x844-normal",
+      "scenario": "cold-home",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [],
+        "mode": null,
+        "chosen": 0
+      },
+      "phases": [
+        "home"
+      ],
+      "audioCalls": 0,
+      "maxShapes": 51,
+      "baselineTraceSha256": "7d092d3c08e639e777c9a72872e78d190b3b3b87ef5e9cab8c8146fdf41de878",
+      "currentTraceSha256": "7d092d3c08e639e777c9a72872e78d190b3b3b87ef5e9cab8c8146fdf41de878"
+    },
+    {
+      "id": "home-drag-390x844-normal",
+      "scenario": "home-drag",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [],
+        "mode": null,
+        "chosen": 0
+      },
+      "phases": [
+        "home"
+      ],
+      "audioCalls": 45,
+      "maxShapes": 54,
+      "baselineTraceSha256": "58e0cfc5c761ae5c760e1123731adc095358a29c01231051b62bf92c255f50d4",
+      "currentTraceSha256": "58e0cfc5c761ae5c760e1123731adc095358a29c01231051b62bf92c255f50d4"
+    },
+    {
+      "id": "home-entry-390x844-normal",
+      "scenario": "home-entry",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "entering",
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 9,
+      "maxShapes": 51,
+      "baselineTraceSha256": "3ae3fec81e964ac3cb8602ac2fa69d1085d87160f86ee8a681bff6f500031f4a",
+      "currentTraceSha256": "3ae3fec81e964ac3cb8602ac2fa69d1085d87160f86ee8a681bff6f500031f4a"
+    },
+    {
+      "id": "opening-390x844-normal",
+      "scenario": "opening",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 480,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 13,
+      "baselineTraceSha256": "f45a39aa5c75e3a4c3fd381261c73d55386a3f26815c8485e3d58a2ff2556631",
+      "currentTraceSha256": "f45a39aa5c75e3a4c3fd381261c73d55386a3f26815c8485e3d58a2ff2556631"
+    },
+    {
+      "id": "shoot-390x844-normal",
+      "scenario": "shoot",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 2,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 18,
+      "maxShapes": 29,
+      "baselineTraceSha256": "3e4ff15584c43176ba8d770393199b307928026f1ccf6b94cba83cdeb41edce1",
+      "currentTraceSha256": "3e4ff15584c43176ba8d770393199b307928026f1ccf6b94cba83cdeb41edce1"
+    },
+    {
+      "id": "slow-aim-390x844-normal",
+      "scenario": "slow-aim",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 1,
+        "minTimeScale": 0.30000000000000004,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 368,
+      "maxShapes": 19,
+      "baselineTraceSha256": "41cf38d90a5ee6dd3bb797ca0ff580212cb9c79a9a60ef78ff71b824c90820e4",
+      "currentTraceSha256": "41cf38d90a5ee6dd3bb797ca0ff580212cb9c79a9a60ef78ff71b824c90820e4"
+    },
+    {
+      "id": "rewards-390x844-normal",
+      "scenario": "rewards",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 33,
+      "baselineTraceSha256": "3b8f8dc5bdfaa18fc08bc4e2c543041073dc6c6407467ceb4dccc4d6f2902f0b",
+      "currentTraceSha256": "3b8f8dc5bdfaa18fc08bc4e2c543041073dc6c6407467ceb4dccc4d6f2902f0b"
+    },
+    {
+      "id": "gambler-390x844-normal",
+      "scenario": "gambler",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 5,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 36,
+      "baselineTraceSha256": "071eac3cf3e2bfd05bd3e78ca6b660ec6279e41c205a8e525631a516015aa41b",
+      "currentTraceSha256": "071eac3cf3e2bfd05bd3e78ca6b660ec6279e41c205a8e525631a516015aa41b"
+    },
+    {
+      "id": "boss-390x844-normal",
+      "scenario": "boss",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 900,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 0.25,
+        "maxPressureAlpha": 0.40613131314510903,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 2
+      },
+      "phases": [
+        "clearing",
+        "boss-entry",
+        "boss",
+        "boss-celebrate",
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 68,
+      "maxShapes": 60,
+      "baselineTraceSha256": "d7935b72b60db4f594344e8a04782f24ba7c38f1eddcb9a0dae258ef45ebdb94",
+      "currentTraceSha256": "d7935b72b60db4f594344e8a04782f24ba7c38f1eddcb9a0dae258ef45ebdb94"
+    },
+    {
+      "id": "pressure-390x844-normal",
+      "scenario": "pressure",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0.44999915338490826,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle",
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 113,
+      "baselineTraceSha256": "62afb49cfca899358842b98e9035e9ad72141c60b7f340fcbfff298335e6b4d2",
+      "currentTraceSha256": "62afb49cfca899358842b98e9035e9ad72141c60b7f340fcbfff298335e6b4d2"
+    },
+    {
+      "id": "pause-390x844-normal",
+      "scenario": "pause",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 140,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 24,
+      "maxShapes": 9,
+      "baselineTraceSha256": "f015650d0d9ef5d3107808d81489691cc6d19363c47680e0dd0acb807e555788",
+      "currentTraceSha256": "f015650d0d9ef5d3107808d81489691cc6d19363c47680e0dd0acb807e555788"
+    },
+    {
+      "id": "resize-390x844-normal",
+      "scenario": "resize",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390,
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 4,
+      "maxShapes": 9,
+      "baselineTraceSha256": "e742ee1f5990757853fc3c30a23e9a47f599e75a65085989182cbc9fad91e7b3",
+      "currentTraceSha256": "e742ee1f5990757853fc3c30a23e9a47f599e75a65085989182cbc9fad91e7b3"
+    },
+    {
+      "id": "ending-390x844-normal",
+      "scenario": "ending",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 0.25,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 264,
+        "endingFrames": 36,
+        "resultFrames": 264,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "over"
+      ],
+      "audioCalls": 9,
+      "maxShapes": 1,
+      "baselineTraceSha256": "c38640fb5a02c4ee6b8895b7bb30f91a442297fcb997cb10b64687ec6614c4e8",
+      "currentTraceSha256": "c38640fb5a02c4ee6b8895b7bb30f91a442297fcb997cb10b64687ec6614c4e8"
+    },
+    {
+      "id": "record-390x844-normal",
+      "scenario": "record",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 280,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 7,
+      "maxShapes": 14,
+      "baselineTraceSha256": "4d7b22aa9e2ca817ebe0c83f06812254a5b003be8a021e951acfe69360ddd84d",
+      "currentTraceSha256": "4d7b22aa9e2ca817ebe0c83f06812254a5b003be8a021e951acfe69360ddd84d"
+    },
+    {
+      "id": "cold-home-390x844-reduced",
+      "scenario": "cold-home",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [],
+        "mode": null,
+        "chosen": 0
+      },
+      "phases": [
+        "home"
+      ],
+      "audioCalls": 0,
+      "maxShapes": 51,
+      "baselineTraceSha256": "1a0151e3b8ef2275e62d340ecbd8f34edfdd0fcec9c4c3a11d146b37bd159aea",
+      "currentTraceSha256": "1a0151e3b8ef2275e62d340ecbd8f34edfdd0fcec9c4c3a11d146b37bd159aea"
+    },
+    {
+      "id": "home-drag-390x844-reduced",
+      "scenario": "home-drag",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [],
+        "mode": null,
+        "chosen": 0
+      },
+      "phases": [
+        "home"
+      ],
+      "audioCalls": 45,
+      "maxShapes": 54,
+      "baselineTraceSha256": "8bbfced38b3113b4798cd45103e87fb2cddfdc50ac4dcd90a90e95e48da61159",
+      "currentTraceSha256": "8bbfced38b3113b4798cd45103e87fb2cddfdc50ac4dcd90a90e95e48da61159"
+    },
+    {
+      "id": "home-entry-390x844-reduced",
+      "scenario": "home-entry",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "entering",
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 9,
+      "maxShapes": 51,
+      "baselineTraceSha256": "3d4060f160ace5433f7086d7f4ec739dd84036bfc37b9903c6b386fba4088c11",
+      "currentTraceSha256": "3d4060f160ace5433f7086d7f4ec739dd84036bfc37b9903c6b386fba4088c11"
+    },
+    {
+      "id": "opening-390x844-reduced",
+      "scenario": "opening",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 480,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 13,
+      "baselineTraceSha256": "c578ed9634e9a9b7a3062dedd7b86dab0127aadecacce43abc74f177753f597b",
+      "currentTraceSha256": "c578ed9634e9a9b7a3062dedd7b86dab0127aadecacce43abc74f177753f597b"
+    },
+    {
+      "id": "shoot-390x844-reduced",
+      "scenario": "shoot",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 2,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 18,
+      "maxShapes": 18,
+      "baselineTraceSha256": "1912d2092fff05e255770c9295d12d31b17b4caff8ec53a6fdec5fccdaec2b35",
+      "currentTraceSha256": "1912d2092fff05e255770c9295d12d31b17b4caff8ec53a6fdec5fccdaec2b35"
+    },
+    {
+      "id": "slow-aim-390x844-reduced",
+      "scenario": "slow-aim",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 1,
+        "minTimeScale": 0.6,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 368,
+      "maxShapes": 19,
+      "baselineTraceSha256": "662b9fec9b650854866b3e2b44b8a40197b14d72559c561411bd276c05256df5",
+      "currentTraceSha256": "662b9fec9b650854866b3e2b44b8a40197b14d72559c561411bd276c05256df5"
+    },
+    {
+      "id": "rewards-390x844-reduced",
+      "scenario": "rewards",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 39,
+      "baselineTraceSha256": "d100e035a3ad4032719f07475aaa0991f49c3bfe1891c51447d7201c8c709ac3",
+      "currentTraceSha256": "d100e035a3ad4032719f07475aaa0991f49c3bfe1891c51447d7201c8c709ac3"
+    },
+    {
+      "id": "gambler-390x844-reduced",
+      "scenario": "gambler",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 5,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 42,
+      "baselineTraceSha256": "adcbd74beda61c6fa6d77205f4948e83a4ac02375e9f63a05c637077a9c25009",
+      "currentTraceSha256": "adcbd74beda61c6fa6d77205f4948e83a4ac02375e9f63a05c637077a9c25009"
+    },
+    {
+      "id": "boss-390x844-reduced",
+      "scenario": "boss",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 900,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0.49320804058996226,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 2
+      },
+      "phases": [
+        "clearing",
+        "boss-entry",
+        "boss",
+        "boss-celebrate",
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 68,
+      "maxShapes": 42,
+      "baselineTraceSha256": "14fc2eab0c75dbfac16a2390eaff7feaa7bc336668eec1d4b740cd18fbbf3b05",
+      "currentTraceSha256": "14fc2eab0c75dbfac16a2390eaff7feaa7bc336668eec1d4b740cd18fbbf3b05"
+    },
+    {
+      "id": "pressure-390x844-reduced",
+      "scenario": "pressure",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0.44999978889465686,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle",
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 129,
+      "baselineTraceSha256": "fadd097bbb8fefba0fa445bb2fe9376fca3fbe6a5d99d8d31fedd54e57df36d3",
+      "currentTraceSha256": "fadd097bbb8fefba0fa445bb2fe9376fca3fbe6a5d99d8d31fedd54e57df36d3"
+    },
+    {
+      "id": "pause-390x844-reduced",
+      "scenario": "pause",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 120,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 24,
+      "maxShapes": 9,
+      "baselineTraceSha256": "b5e95ba3ede015d871aa0f3755ea105223c0464af8ef763b199f8de3173560fd",
+      "currentTraceSha256": "b5e95ba3ede015d871aa0f3755ea105223c0464af8ef763b199f8de3173560fd"
+    },
+    {
+      "id": "resize-390x844-reduced",
+      "scenario": "resize",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390,
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 4,
+      "maxShapes": 9,
+      "baselineTraceSha256": "cd91ff10eff73bd41e4af0924f2825070e48360c8a2ee29b557917b78f73acca",
+      "currentTraceSha256": "cd91ff10eff73bd41e4af0924f2825070e48360c8a2ee29b557917b78f73acca"
+    },
+    {
+      "id": "ending-390x844-reduced",
+      "scenario": "ending",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 264,
+        "endingFrames": 36,
+        "resultFrames": 264,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "over"
+      ],
+      "audioCalls": 9,
+      "maxShapes": 1,
+      "baselineTraceSha256": "b774d7722bfe804afda47560eb3b9b96d12ac4efa419b5ff07611a1a07c5a8f0",
+      "currentTraceSha256": "b774d7722bfe804afda47560eb3b9b96d12ac4efa419b5ff07611a1a07c5a8f0"
+    },
+    {
+      "id": "record-390x844-reduced",
+      "scenario": "record",
+      "width": 390,
+      "height": 844,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 280,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 7,
+      "maxShapes": 13,
+      "baselineTraceSha256": "2a2e7b8ea88ce439bacd64ef4832667df0eaf005bf9e85695a1ccea30ea6468d",
+      "currentTraceSha256": "2a2e7b8ea88ce439bacd64ef4832667df0eaf005bf9e85695a1ccea30ea6468d"
+    },
+    {
+      "id": "cold-home-844x390-normal",
+      "scenario": "cold-home",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [],
+        "mode": null,
+        "chosen": 0
+      },
+      "phases": [
+        "home"
+      ],
+      "audioCalls": 0,
+      "maxShapes": 51,
+      "baselineTraceSha256": "38fff1d515fc940d5145b3c07dbc1464f53dbce2cb66f98be3d4821af1abbd03",
+      "currentTraceSha256": "38fff1d515fc940d5145b3c07dbc1464f53dbce2cb66f98be3d4821af1abbd03"
+    },
+    {
+      "id": "home-drag-844x390-normal",
+      "scenario": "home-drag",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [],
+        "mode": null,
+        "chosen": 0
+      },
+      "phases": [
+        "home"
+      ],
+      "audioCalls": 45,
+      "maxShapes": 54,
+      "baselineTraceSha256": "2f12f1cad0be3a29478219ceb7ee7904a6e88df973aa1388852d6ade1729cafb",
+      "currentTraceSha256": "2f12f1cad0be3a29478219ceb7ee7904a6e88df973aa1388852d6ade1729cafb"
+    },
+    {
+      "id": "home-entry-844x390-normal",
+      "scenario": "home-entry",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "entering",
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 9,
+      "maxShapes": 51,
+      "baselineTraceSha256": "aefebef6271fc2757c8b25691ff57335c67aee2e1e0ce19addcbeffce11de2a7",
+      "currentTraceSha256": "aefebef6271fc2757c8b25691ff57335c67aee2e1e0ce19addcbeffce11de2a7"
+    },
+    {
+      "id": "opening-844x390-normal",
+      "scenario": "opening",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 480,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 13,
+      "baselineTraceSha256": "c87fb9d73328954bea4e271fd7dcbc48c7e03fa1e23d63ba2be2352cecb87898",
+      "currentTraceSha256": "c87fb9d73328954bea4e271fd7dcbc48c7e03fa1e23d63ba2be2352cecb87898"
+    },
+    {
+      "id": "shoot-844x390-normal",
+      "scenario": "shoot",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 2,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 16,
+      "maxShapes": 25,
+      "baselineTraceSha256": "1d1ed3600bf6bcf5b094ccfe51b3ad38f50f769b0fba5b4b557ad73ac44a67d4",
+      "currentTraceSha256": "1d1ed3600bf6bcf5b094ccfe51b3ad38f50f769b0fba5b4b557ad73ac44a67d4"
+    },
+    {
+      "id": "slow-aim-844x390-normal",
+      "scenario": "slow-aim",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 1,
+        "minTimeScale": 0.30000000000000004,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 365,
+      "maxShapes": 19,
+      "baselineTraceSha256": "c8dc031ef3cef7c82f0b6a1c0db17cb6741732d75871ca1620ef831a27fbaad5",
+      "currentTraceSha256": "c8dc031ef3cef7c82f0b6a1c0db17cb6741732d75871ca1620ef831a27fbaad5"
+    },
+    {
+      "id": "rewards-844x390-normal",
+      "scenario": "rewards",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 33,
+      "baselineTraceSha256": "735d808308d88a1a8763eec2548372584862ec5e9412e0ab9079082ca9b7f9b3",
+      "currentTraceSha256": "735d808308d88a1a8763eec2548372584862ec5e9412e0ab9079082ca9b7f9b3"
+    },
+    {
+      "id": "gambler-844x390-normal",
+      "scenario": "gambler",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 5,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 36,
+      "baselineTraceSha256": "b98c5cc4c2f808ff8b26c10d94458f20bd8c058d3dded061eea3f6cc0e0281a6",
+      "currentTraceSha256": "b98c5cc4c2f808ff8b26c10d94458f20bd8c058d3dded061eea3f6cc0e0281a6"
+    },
+    {
+      "id": "boss-844x390-normal",
+      "scenario": "boss",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 900,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 0.25,
+        "maxPressureAlpha": 0.4924047573109989,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 2
+      },
+      "phases": [
+        "clearing",
+        "boss-entry",
+        "boss",
+        "boss-celebrate",
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 68,
+      "maxShapes": 60,
+      "baselineTraceSha256": "7477e1b02c6e5c408d1fd7465329ac4f57d337e76e5fe42a85b91888159b8856",
+      "currentTraceSha256": "7477e1b02c6e5c408d1fd7465329ac4f57d337e76e5fe42a85b91888159b8856"
+    },
+    {
+      "id": "pressure-844x390-normal",
+      "scenario": "pressure",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0.44999915338490826,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle",
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 113,
+      "baselineTraceSha256": "57cecdab7b0c002b5670bf13d4d9f2d3f1f5fb9ecf34dba55eb284a37dce9eca",
+      "currentTraceSha256": "57cecdab7b0c002b5670bf13d4d9f2d3f1f5fb9ecf34dba55eb284a37dce9eca"
+    },
+    {
+      "id": "pause-844x390-normal",
+      "scenario": "pause",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 140,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 24,
+      "maxShapes": 9,
+      "baselineTraceSha256": "73a360678ca1cc19e74f3728c45351dd5c6c8e92a34825ef64efa7a74c43b6ac",
+      "currentTraceSha256": "73a360678ca1cc19e74f3728c45351dd5c6c8e92a34825ef64efa7a74c43b6ac"
+    },
+    {
+      "id": "resize-844x390-normal",
+      "scenario": "resize",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844,
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 4,
+      "maxShapes": 9,
+      "baselineTraceSha256": "5f66754741ada9e4395d0c1e3a34300f51a6b405b0cbb665c2f05327ba33b2ff",
+      "currentTraceSha256": "5f66754741ada9e4395d0c1e3a34300f51a6b405b0cbb665c2f05327ba33b2ff"
+    },
+    {
+      "id": "ending-844x390-normal",
+      "scenario": "ending",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 0.25,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 264,
+        "endingFrames": 36,
+        "resultFrames": 264,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "over"
+      ],
+      "audioCalls": 9,
+      "maxShapes": 1,
+      "baselineTraceSha256": "47f04ffbd0cc08edb7a81613c22ae5df82e04b5c2c706157e9ca9182c5ee766b",
+      "currentTraceSha256": "47f04ffbd0cc08edb7a81613c22ae5df82e04b5c2c706157e9ca9182c5ee766b"
+    },
+    {
+      "id": "record-844x390-normal",
+      "scenario": "record",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 280,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 7,
+      "maxShapes": 14,
+      "baselineTraceSha256": "910e86671c46b10172676fa1255d50f1e368667f87cbe154c555a51d54f0a026",
+      "currentTraceSha256": "910e86671c46b10172676fa1255d50f1e368667f87cbe154c555a51d54f0a026"
+    },
+    {
+      "id": "cold-home-844x390-reduced",
+      "scenario": "cold-home",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [],
+        "mode": null,
+        "chosen": 0
+      },
+      "phases": [
+        "home"
+      ],
+      "audioCalls": 0,
+      "maxShapes": 51,
+      "baselineTraceSha256": "6d8f6dfb1dd87c40b23c62eb647e1553507c2a5217af0dbaa3400f73195946ab",
+      "currentTraceSha256": "6d8f6dfb1dd87c40b23c62eb647e1553507c2a5217af0dbaa3400f73195946ab"
+    },
+    {
+      "id": "home-drag-844x390-reduced",
+      "scenario": "home-drag",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [],
+        "mode": null,
+        "chosen": 0
+      },
+      "phases": [
+        "home"
+      ],
+      "audioCalls": 45,
+      "maxShapes": 54,
+      "baselineTraceSha256": "2839b041b65c7e03ce41bbacd08dce6755a1f03aa5e24bb8405f11c668d53740",
+      "currentTraceSha256": "2839b041b65c7e03ce41bbacd08dce6755a1f03aa5e24bb8405f11c668d53740"
+    },
+    {
+      "id": "home-entry-844x390-reduced",
+      "scenario": "home-entry",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "entering",
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 9,
+      "maxShapes": 51,
+      "baselineTraceSha256": "97f2e57b2bb44ec563280477eaafd8513fdb659fdfeb3b533a48109870128067",
+      "currentTraceSha256": "97f2e57b2bb44ec563280477eaafd8513fdb659fdfeb3b533a48109870128067"
+    },
+    {
+      "id": "opening-844x390-reduced",
+      "scenario": "opening",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 480,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 13,
+      "baselineTraceSha256": "3f8ea0e49f62fb814ccd3a90564eae7f406c8069d00823102f35c254a4cb8583",
+      "currentTraceSha256": "3f8ea0e49f62fb814ccd3a90564eae7f406c8069d00823102f35c254a4cb8583"
+    },
+    {
+      "id": "shoot-844x390-reduced",
+      "scenario": "shoot",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 2,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 16,
+      "maxShapes": 18,
+      "baselineTraceSha256": "bf7457af73bfe0f397675ab8e19c2694743d7a160a8c729abbf365315e345eaf",
+      "currentTraceSha256": "bf7457af73bfe0f397675ab8e19c2694743d7a160a8c729abbf365315e345eaf"
+    },
+    {
+      "id": "slow-aim-844x390-reduced",
+      "scenario": "slow-aim",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 1,
+        "minTimeScale": 0.6,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 365,
+      "maxShapes": 19,
+      "baselineTraceSha256": "3eccfc35341fe23cf84b88ab311ad96b7f7390595c1f00f2f949bf72cc262e1f",
+      "currentTraceSha256": "3eccfc35341fe23cf84b88ab311ad96b7f7390595c1f00f2f949bf72cc262e1f"
+    },
+    {
+      "id": "rewards-844x390-reduced",
+      "scenario": "rewards",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 39,
+      "baselineTraceSha256": "70750317238177c543116f8db10616b953554d565b0d77a2b19bdb351b9886b5",
+      "currentTraceSha256": "70750317238177c543116f8db10616b953554d565b0d77a2b19bdb351b9886b5"
+    },
+    {
+      "id": "gambler-844x390-reduced",
+      "scenario": "gambler",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 5,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 1
+      },
+      "phases": [
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 6,
+      "maxShapes": 42,
+      "baselineTraceSha256": "a2a79f27bc72eb60fbafaed3d73bf0a81b1fd76609c44ad1bdf6ff1c857a1a96",
+      "currentTraceSha256": "a2a79f27bc72eb60fbafaed3d73bf0a81b1fd76609c44ad1bdf6ff1c857a1a96"
+    },
+    {
+      "id": "boss-844x390-reduced",
+      "scenario": "boss",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 900,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0.4945926863770152,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 2
+      },
+      "phases": [
+        "clearing",
+        "boss-entry",
+        "boss",
+        "boss-celebrate",
+        "transition",
+        "choose",
+        "reward",
+        "battle"
+      ],
+      "audioCalls": 68,
+      "maxShapes": 42,
+      "baselineTraceSha256": "932ff0d41ec766c662dd2229e58b721a0b06f99ea20dafd027df908c1b3b596c",
+      "currentTraceSha256": "932ff0d41ec766c662dd2229e58b721a0b06f99ea20dafd027df908c1b3b596c"
+    },
+    {
+      "id": "pressure-844x390-reduced",
+      "scenario": "pressure",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0.44999978889465686,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle",
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 129,
+      "baselineTraceSha256": "e3b4d2bf2e512f8f1d33ea353628c7cf6fcab479eb11064e5c75d66d86cbe965",
+      "currentTraceSha256": "e3b4d2bf2e512f8f1d33ea353628c7cf6fcab479eb11064e5c75d66d86cbe965"
+    },
+    {
+      "id": "pause-844x390-reduced",
+      "scenario": "pause",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 120,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 24,
+      "maxShapes": 9,
+      "baselineTraceSha256": "4ec2686620b80f2aa7d6052b05e9f647251c7ce559c80f465175e2fbb1c59022",
+      "currentTraceSha256": "4ec2686620b80f2aa7d6052b05e9f647251c7ce559c80f465175e2fbb1c59022"
+    },
+    {
+      "id": "resize-844x390-reduced",
+      "scenario": "resize",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844,
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 4,
+      "maxShapes": 9,
+      "baselineTraceSha256": "9ab46a0b472716fab530bd0e8e2c8b3f15d88f5d42b6d92e0a4a1781aad1ed83",
+      "currentTraceSha256": "9ab46a0b472716fab530bd0e8e2c8b3f15d88f5d42b6d92e0a4a1781aad1ed83"
+    },
+    {
+      "id": "ending-844x390-reduced",
+      "scenario": "ending",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 264,
+        "endingFrames": 36,
+        "resultFrames": 264,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "over"
+      ],
+      "audioCalls": 9,
+      "maxShapes": 1,
+      "baselineTraceSha256": "f60a49f29b23899a65a652c3072b0818d259bcb3c300ecdb74e1f4c67c99b32c",
+      "currentTraceSha256": "f60a49f29b23899a65a652c3072b0818d259bcb3c300ecdb74e1f4c67c99b32c"
+    },
+    {
+      "id": "record-844x390-reduced",
+      "scenario": "record",
+      "width": 844,
+      "height": 390,
+      "reduced": true,
+      "frames": 300,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 0,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 280,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "battle"
+      ],
+      "audioCalls": 7,
+      "maxShapes": 13,
+      "baselineTraceSha256": "bb48bed77b096e8837890c13c7faaabea0095551a5ce692cb23d21bde2917246",
+      "currentTraceSha256": "bb48bed77b096e8837890c13c7faaabea0095551a5ce692cb23d21bde2917246"
+    },
+    {
+      "id": "migration-0",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 0,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "662bc843093382040f98a4973bce49966c34f216dbad6a6d6b671c46e8cb2d0c",
+      "currentTraceSha256": "662bc843093382040f98a4973bce49966c34f216dbad6a6d6b671c46e8cb2d0c"
+    },
+    {
+      "id": "migration-1",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 1,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "a4afed91b37f1953aa7a08ebe136b1cf416f0815b16f624c50af210be38d4e24",
+      "currentTraceSha256": "a4afed91b37f1953aa7a08ebe136b1cf416f0815b16f624c50af210be38d4e24"
+    },
+    {
+      "id": "migration-2",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 2,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "914aff9740adcf4b3241b7306be683905e19a4fd8578b93b3e2c2c831776fedf",
+      "currentTraceSha256": "914aff9740adcf4b3241b7306be683905e19a4fd8578b93b3e2c2c831776fedf"
+    },
+    {
+      "id": "migration-3",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 3,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "b84dfd047d0746b92e7227fdfbc66a40f4134e1472a955723fdb3292988e5c3f",
+      "currentTraceSha256": "b84dfd047d0746b92e7227fdfbc66a40f4134e1472a955723fdb3292988e5c3f"
+    },
+    {
+      "id": "migration-4",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 4,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "b5bf9373bf78e790bf66a939dd780b97e16a77830f14ed5769e18bea2c83d025",
+      "currentTraceSha256": "b5bf9373bf78e790bf66a939dd780b97e16a77830f14ed5769e18bea2c83d025"
+    },
+    {
+      "id": "migration-5",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 5,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "8be0cf264b6d101acf2b99394b783e6cf6e7f8984808527a43ded18b1b36e1d6",
+      "currentTraceSha256": "8be0cf264b6d101acf2b99394b783e6cf6e7f8984808527a43ded18b1b36e1d6"
+    },
+    {
+      "id": "migration-6",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 6,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "7889f8501dd979794ff2d9750387bd1d77ad5ac02051d2a7b235f31bf595c5a8",
+      "currentTraceSha256": "7889f8501dd979794ff2d9750387bd1d77ad5ac02051d2a7b235f31bf595c5a8"
+    },
+    {
+      "id": "migration-7",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 7,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "de504f60d0362903fb64c8f1d7fc633f8d8c0040c4597fd32c00a49c82dafb1f",
+      "currentTraceSha256": "de504f60d0362903fb64c8f1d7fc633f8d8c0040c4597fd32c00a49c82dafb1f"
+    },
+    {
+      "id": "migration-8",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 8,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "626c71ed4d2fb04acc6c3245e19576f82914062e6c886a2743aa1ab3bd39d6b9",
+      "currentTraceSha256": "626c71ed4d2fb04acc6c3245e19576f82914062e6c886a2743aa1ab3bd39d6b9"
+    },
+    {
+      "id": "migration-9",
+      "scenario": "migration",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 4,
+      "migration": 9,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 3,
+      "baselineTraceSha256": "6b7af614155e8d7f0b219715b85d0e1eea10e2e959fb4ac8b397ecdb080b5dd9",
+      "currentTraceSha256": "6b7af614155e8d7f0b219715b85d0e1eea10e2e959fb4ac8b397ecdb080b5dd9"
+    },
+    {
+      "id": "campaign-switch-390x844",
+      "scenario": "switch",
+      "width": 390,
+      "height": 844,
+      "reduced": false,
+      "frames": 120,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          390
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 6,
+      "baselineTraceSha256": "10bd6f753ef29c4628e69dbd4141acaca91a151215b0f9812b3622071e49044a",
+      "currentTraceSha256": "10bd6f753ef29c4628e69dbd4141acaca91a151215b0f9812b3622071e49044a"
+    },
+    {
+      "id": "campaign-switch-844x390",
+      "scenario": "switch",
+      "width": 844,
+      "height": 390,
+      "reduced": false,
+      "frames": 120,
+      "passed": true,
+      "coveragePassed": true,
+      "coverage": {
+        "launchCalls": 0,
+        "minTimeScale": 1,
+        "maxPressureAlpha": 0,
+        "maxChoices": 3,
+        "pausedFrames": 0,
+        "endingFrames": 0,
+        "resultFrames": 0,
+        "newRecordFrames": 0,
+        "widths": [
+          844
+        ],
+        "mode": "endless",
+        "chosen": 0
+      },
+      "phases": [
+        "transition",
+        "choose"
+      ],
+      "audioCalls": 5,
+      "maxShapes": 6,
+      "baselineTraceSha256": "f0ae90502bab3e6e016cd648846d8030eccb727f1b5a92c0e21e079a06e068da",
+      "currentTraceSha256": "f0ae90502bab3e6e016cd648846d8030eccb727f1b5a92c0e21e079a06e068da"
+    }
+  ],
+  "passed": true,
+  "sourceUnchangedDuringAudit": true,
+  "switchWarmupPerCase": {
+    "campaignFrames": 30,
+    "homeFrames": 90
+  }
+}

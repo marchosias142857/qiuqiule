@@ -186,7 +186,7 @@ test('variant kill scores use their base value, cap at combo eight and round hal
     const b = spawn(w, type); w.damage(b, 1e9);
     assert.equal(w.score, expected); assert.equal(w.events.find(e => e.type === 'kill').value, expected);
   }
-  const w = world(); w.shotKills = 20; w.damage(spawn(w, 'ring'), 1e9); assert.equal(w.score, 120);
+  const w = world(); w.shotKills = 20; w.damage(spawn(w, 'ring'), 1e9); assert.equal(w.score, 180);
 });
 
 test('first-type feedback occurs once per run for real kills and snapshots retain typed appearance', () => {

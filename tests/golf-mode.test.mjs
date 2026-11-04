@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {CampaignWorld, levelConfig} from '../dist/campaign.js';
-import {golfParams} from '../dist/classes/golf.js';
+import {golfParams, GOLF_LEVELS} from '../dist/classes/golf.js';
 import {staticContact} from '../dist/campaign-collision.js';
 
-const fresh = (k = 0, width = 390, height = 844, upgradeId = 'rubber') => new CampaignWorld(width, height, 8 + k * 10, () => .5, {upgradeId});
+const fresh = (k = 0, width = 390, height = 844, upgradeId = 'rubber', variant = 0) => new CampaignWorld(width, height, 7 + variant + k * 10, () => .5, {upgradeId});
 function step(world, seconds) {
   for (let i = 0; i < Math.ceil(seconds * 120); i++) {
     const scale = world.presentationTimeScale;
@@ -13,7 +13,7 @@ function step(world, seconds) {
 }
 function shot(world, angle, power) {
   assert.equal(world.shoot(-Math.cos(angle) * world.maxPull * power, -Math.sin(angle) * world.maxPull * power), true);
-  for (let frame = 0; frame < 510 && world.shotActive && world.phase === 'battle'; frame++) {
+  for (let frame = 0; frame < 900 && world.shotActive && world.phase === 'battle'; frame++) {
     const scale = world.presentationTimeScale;
     world.step(scale / 120, false, {timeScale: scale});
   }
@@ -26,25 +26,22 @@ function precisionShot(world, arrivalSpeed = 6) {
   shot(world, Math.atan2(dy, dx), power);
 }
 
-test('all ten golf configurations use the PDF counts, par, resource and moving-hole endpoints', () => {
-  for (let k = 0; k < 10; k++) {
-    const config = levelConfig(8 + 10 * k), expected = golfParams(k), world = fresh(k);
-    assert.equal(config.classId, 'golf'); assert.equal(config.k, k); assert.equal(config.implemented, true);
-    assert.equal(expected.staticCount, 1 + Math.floor(k / 2));
-    assert.equal(expected.walkers, 1 + Math.floor(k / 3));
-    assert.equal(expected.par, 2 + Math.floor(k / 3));
-    assert.equal(expected.budget, expected.par + 2);
-    assert.equal(world.statics.length, expected.staticCount); assert.equal(world.enemies.length, expected.walkers);
-    assert.equal(world.zones.length, 1); assert.equal(world.zones[0].r, world.unit * 1.3);
-    assert.equal(world.zones[0].moving, k >= 6); assert.equal(world.remaining, expected.budget);
-    assert.equal(expected.holeSpeed, k < 6 ? 0 : 1 + (k - 6) / 6);
-    assert.equal(world.rules.rating(), 0); assert.equal(world.percent, 0);
+test('all twenty golf configurations use independent courses, course par and the shared rating contract', () => {
+  for (let rank=0;rank<20;rank++) {
+    const k=rank>>1,variant=rank%2,config=levelConfig(7+variant+10*k),expected=golfParams(k,variant),world=fresh(k,390,844,'rubber',variant);
+    assert.equal(config.classId,'golf');assert.equal(config.rank20,rank);assert.equal(config.implemented,true);
+    assert.equal(expected.layoutId,GOLF_LEVELS[rank].id);assert.equal(expected.par,GOLF_LEVELS[rank].par);
+    assert.equal(world.statics.length,GOLF_LEVELS[rank].walls.length);assert.equal(world.enemies.length,0);
+    assert.equal(world.player.r,world.unit*.46);assert.equal(world.zones[0].r,world.unit*.78);
+    assert.equal(world.zones[0].moving,!!GOLF_LEVELS[rank].moving);
+    assert.equal(world.remaining,expected.par+(rank>=6?3:2));
+    assert.equal(world.rules.rating(),0);assert.equal(world.percent,0);
   }
 });
 
 test('golf layouts keep goals, starts and physical obstacles clear of HUD and each other', () => {
-  for (const [width, height] of [[390, 844], [844, 390], [320, 568], [568, 320], [1280, 720]]) for (let k = 0; k < 10; k++) {
-    const world = fresh(k, width, height), hole = world.zones[0], b = world.arenaBounds;
+  for (const [width, height] of [[390, 844], [844, 390], [320, 568], [568, 320], [1280, 720]]) for (let rank=0;rank<20;rank++) {
+    const k=rank>>1,world = fresh(k, width, height,'rubber',rank%2), hole = world.zones[0], b = world.arenaBounds;
     assert.ok(hole.y - hole.r >= (height > 520 ? 112 : 76));
     assert.ok(hole.x - hole.r >= b.left && hole.x + hole.r <= b.right);
     for (const obstacle of world.statics) {
@@ -57,7 +54,7 @@ test('golf layouts keep goals, starts and physical obstacles clear of HUD and ea
     }
     for (const [i, walker] of world.enemies.entries()) for (const other of [world.player, ...world.enemies.slice(0, i)])
       assert.ok(Math.hypot(walker.x - other.x, walker.y - other.y) >= walker.r + other.r);
-    if (k === 0) {
+    if (rank < 2) {
       const start = world.player;
       for (let t = 0; t <= 1; t += .02) for (const obstacle of world.statics)
         assert.equal(staticContact({...start, x: start.x + (hole.x - start.x) * t, y: start.y + (hole.y - start.y) * t}, obstacle), null);
@@ -66,7 +63,7 @@ test('golf layouts keep goals, starts and physical obstacles clear of HUD and ea
 });
 
 test('hole eligibility uses strict radius and strict speed boundaries, not ball-surface overlap', () => {
-  for (const [distance, speed, capture] of [[1.3, 11, false], [1.30001, 1, false], [1.29999, 12, false], [1.2, 12.0001, false], [1.2, 11.9999, true], [0, 0, true]]) {
+  for (const [distance, speed, capture] of [[.78, 11, false], [.78001, 1, false], [.77999, 12, false], [.6, 12.0001, false], [.6, 11.9999, true], [0, 0, true]]) {
     const world = fresh(), hole = world.zones[0], p = world.player;
     world.shoot(world.maxPull * .3, 0);
     Object.assign(p, {x: hole.x - distance * world.unit, y: hole.y, vx: speed * world.unit, vy: 0});
@@ -117,36 +114,32 @@ test('capture is once-only, sets the logical hole pose, and preserves rating thr
   }
 });
 
-test('invulnerable moving obstacles deflect the player and remain finite after contact', () => {
-  const world = fresh(), walker = world.enemies[0], p = world.player;
-  assert.equal(walker.hp, Infinity); assert.equal(walker.drag, 0);
-  step(world, .2);
-  assert.ok(Math.abs(Math.hypot(walker.vx, walker.vy) / world.unit - 1.5) < 1e-8);
-  world.shoot(-world.maxPull * .7, 0);
-  Object.assign(p, {x: walker.x - walker.r - p.r + .2, y: walker.y, vx: world.unit * 20, vy: 0});
-  const velocity = p.vx;
-  world.step(1 / 120);
-  assert.ok(p.vx < velocity);
-  assert.equal(walker.hp, Infinity); assert.equal(world.enemies.length, 1); assert.equal(world.score, 0);
-  for (const body of [p, walker]) for (const key of ['x', 'y', 'vx', 'vy']) assert.ok(Number.isFinite(body[key]));
+test('fixed course rails are invulnerable and deflect a real shot without scoring', () => {
+  const world=fresh(2), rail=world.statics[0], startY=world.player.y;
+  shot(world,-Math.PI/2,.65);
+  assert.equal(rail.hp,Infinity);assert.equal(world.enemies.length,0);assert.equal(world.score,0);
+  assert.ok(world.events.some(e=>e.type==='hit'));assert.ok(world.player.y>rail.y);
+  assert.notEqual(world.player.y,startY);
+  for(const key of ['x','y','vx','vy'])assert.ok(Number.isFinite(world.player[key]));
 });
 
-test('moving holes have bounded short tracks and the specified speed for each high tier', () => {
-  for (let k = 6; k < 10; k++) {
-    const world = fresh(k), hole = world.zones[0], x = hole.x;
+test('late moving holes follow bounded short tracks in both orientations', () => {
+  for(const rank of [16,17,19]) for(const [width,height] of [[390,844],[844,390],[320,568],[568,320]]) {
+    const world=fresh(rank>>1,width,height,'rubber',rank%2),hole=world.zones[0],axis=world.golfLayout.vertical?'x':'y',start=hole[axis];
     world.rules.onTick(.1);
-    assert.ok(Math.abs(hole.x - x - world.config.holeSpeed * world.unit * .1) < 1e-8);
-    for (let frame = 0; frame < 2500; frame++) {
-      world.rules.onTick(1 / 120);
-      assert.ok(Math.abs(hole.x - world.golfLayout.hole.x) <= world.golfLayout.excursion + 1e-8);
-      assert.ok(hole.x - hole.r > world.arenaBounds.left);
-      assert.ok(hole.x + hole.r < world.arenaBounds.right);
+    assert.ok(Math.abs(hole[axis]-start-world.config.holeSpeed*world.unit*.1)<1e-8);
+    for(let frame=0;frame<1000;frame++) {
+      world.rules.onTick(1/120);
+      assert.ok(Math.abs(hole[axis]-world.golfLayout.hole[axis])<=world.golfLayout.excursion+1e-8);
+      const b=world.arenaBounds;
+      assert.ok(hole.x-hole.r>b.left && hole.x+hole.r<b.right && hole.y-hole.r>b.top && hole.y+hole.r<b.bottom);
+      for(const obstacle of world.statics)assert.equal(staticContact(hole,obstacle),null);
     }
   }
 });
 
 test('a captured moving hole freezes through frenzy and resizing preserves capture age and final pose', () => {
-  const world = fresh(9), hole = world.zones[0], p = world.player;
+  const world = fresh(9,390,844,'rubber',1), hole = world.zones[0], p = world.player;
   world.shoot(-world.maxPull * .3, 0); step(world, .2);
   Object.assign(p, {x: hole.x, y: hole.y, vx: 0, vy: 0});
   world.rules.onZone(p, hole, {previous: {x: p.x, y: p.y}}); world.checkOutcome();
@@ -178,26 +171,6 @@ test('every offer permits the teaching precision putt and the full-pull steady a
   world.shoot(-Math.cos(aim) * world.maxPull, -Math.sin(aim) * world.maxPull);
   assert.ok(Math.abs(world.lastAimAdjustment + Math.PI / 180) < 1e-8);
   assert.ok(Math.abs(world.lastAimAdjustment) <= Math.PI / 90);
-});
-
-test('eighty real golf routes cover all tiers and phone layouts with zero and default feedback', () => {
-  // This is a repeatable shot policy, not a target/HP/position mutation. It
-  // selects a speed expected to arrive below the lip limit under .6/s drag.
-  for (const strength of [0, .6]) for (const [width, height] of [[390, 844], [844, 390], [320, 568], [568, 320]]) for (let k = 0; k < 10; k++) {
-    const world = fresh(k, width, height).setFeedbackOptions({strength, reducedMotion: false});
-    // Different legitimate pull strengths avoid the moving obstacle on three
-    // layouts. These are tested routes, not runtime auto-aim or difficulty.
-    const arrivalSpeed = strength > 0 && width === 844 && k === 7 ? 7 : width === 844 && k === 5 ? 8 : width === 320 && k === 2 ? 5 : width === 320 && k === 8 ? 3 : 6;
-    while (world.ready) precisionShot(world, arrivalSpeed);
-    assert.equal(world.completed, true, `${width}×${height} tier ${k}, feedback ${strength}`);
-    assert.equal(world.targetsRemaining, 0); assert.equal(world.score, 100);
-    assert.ok(world.shotsUsed <= world.budget);
-    const expected = world.shotsUsed <= world.config.par - 1 ? 3 : world.shotsUsed <= world.config.par ? 2 : 1;
-    assert.equal(world.resultRating, expected);
-    assert.equal(world.events.filter(e => e.type === 'campaignPeak').length, 1);
-    step(world, 2);
-    assert.equal(world.phase, 'over'); assert.equal(world.events.filter(e => e.type === 'over').length, 1);
-  }
 });
 
 test('ten real weak-shot routes exhaust their budget, and a last-budget putt still wins', () => {

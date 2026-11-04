@@ -14,9 +14,9 @@ test('slingshot launches opposite to the drag, caps deformation energy, and allo
   assert.equal(w.shoot(100,0),true);
   w.player.vx=w.player.vy=0;w.shoot(10000,0);near(length(w.player),w.baseSpeed);
 });
-test('energy and density obey v = sqrt(2E/m)',()=>{
+test('endless launch speed follows energy while density does not slow it',()=>{
   const a=world(),b=world();a.shoot(170,0);b.energy=1.3;b.density=1.35;b.shoot(170,0);
-  near(length(b.player)/length(a.player),Math.sqrt(1.3/1.35));
+  near(length(b.player)/length(a.player),Math.sqrt(1.3));
 });
 test('campaign circle collision preserves momentum and dissipates energy',()=>{
   const w=campaignWorld(),a=w.player;Object.assign(a,{x:300,y:300,vx:500,vy:0});const b=enemy(w,300+w.unit*1.9,300);
@@ -53,7 +53,7 @@ test('clear -> automated placement -> choice -> exactly one buff -> next stage',
   assert.ok(w.choices.every(c=>Math.hypot(c.x-w.player.x,c.y-w.player.y)>c.r+w.player.r),'placement cannot auto-select an overlapping reward');
   const choice=w.choices[0];Object.assign(w.player,{x:choice.x,y:choice.y,vx:100,vy:0});w.step(1/120);
   assert.equal(w.phase,'reward');assert.equal(w.buffs[choice.id],1);assert.equal(w.choices.length,0);assert.ok(w.player.vx>95);
-  advance(w,.9);assert.equal(w.phase,'reward');advance(w,.12);assert.equal(w.phase,'battle');assert.equal(w.stage,2);assert.equal(w.killTarget,18);assert.equal(w.stageKills,0);assert.equal(w.enemies.length,7);
+  advance(w,w.rewardTiming.rest-.1);assert.equal(w.phase,'reward');advance(w,.12);assert.equal(w.phase,'battle');assert.equal(w.stage,2);assert.equal(w.killTarget,18);assert.equal(w.stageKills,0);assert.equal(w.enemies.length,7);
 });
 test('capacity gives a real-time grace period before spending the one rescue',()=>{
   const w=world();for(let i=0;i<28;i++)enemy(w,80+i%7*110,150+Math.floor(i/7)*130);
@@ -78,7 +78,7 @@ test('rotation keeps all bodies inside the resized playable bounds',()=>{
 });
 test('later stages use exponential health and new density while ordinary radius stays in its fixed range',()=>{
   const w=world();w.spawnEnemy();const a=w.enemies[0];w.enemies=[];w.stage=8;w.time=180;w.spawnEnemy();const b=w.enemies[0];
-  near(b.hp,19*1.16**7+8);near(b.density,.65+.06*8+.0004*180);near(b.r/a.r,1);assert.equal(b.value,10);assert.ok(b.hp>a.hp);
+  near(b.hp,19*1.20**7+8);near(b.density,.65+.06*8+.0004*180);near(b.r/a.r,1);assert.equal(b.value,10);assert.ok(b.hp>a.hp);
 });
 
 test('player can re-aim while moving at speeds previously locked out',()=>{
@@ -121,7 +121,7 @@ test('fresh opening keeps full birth protection and starts its first four-ball w
 });
 const growth=BUFFS.find(b=>b.id==='growth');
 function gainGrowth(w){w.phase='choose';w.choose(growth);w.phase='battle';}
-test('growth changes only collision/display radius, with absolute 1.2 and 1.4 scales',()=>{
+test('growth uses absolute 1.2 and 1.4 radius scales while preserving mass and launch speed',()=>{
   const a=world(),b=world();gainGrowth(b);
   near(b.player.r,a.player.r*1.2);near(b.player.mass,a.player.mass);near(b.player.density,a.player.density);
   near(b.energy,a.energy);near(b.density,a.density);near(b.baseSpeed,a.baseSpeed);near(b.maxPull,a.maxPull);
@@ -130,12 +130,15 @@ test('growth changes only collision/display radius, with absolute 1.2 and 1.4 sc
   gainGrowth(b);near(b.player.r,a.player.r*1.4);assert.equal(b.buffs.growth,2);
   b.resize(390,844);near(b.player.r,b.unit*1.4);near(b.player.mass,a.player.mass);
 });
-test('growth increases reach without changing equal-normal-impact damage or velocity response',()=>{
-  const hits=[false,true].map(grown=>{
-    const w=world();if(grown)gainGrowth(w);const p=w.player;
+test('growth increases reach and damage ten percent per layer while preserving the velocity response',()=>{
+  const hits=[0,1,2].map(layers=>{
+    const w=world();for(let i=0;i<layers;i++)gainGrowth(w);const p=w.player;
     Object.assign(p,{x:300,y:300,vx:500,vy:0});const b=enemy(w,300+p.r+w.unit-1,300,{hp:999});
-    w.collide(p,b);return {damage:999-b.hp,pvx:p.vx,bvx:b.vx};
-  });assert.deepEqual(hits[0],hits[1]);
+    const reference=.5/(1/p.mass+1/b.mass)*(500/w.unit)**2*.31;
+    w.collide(p,b);assert.equal(999-b.hp,Math.round(reference*(1+.1*layers)));
+    return {damage:999-b.hp,pvx:p.vx,bvx:b.vx};
+  });
+  for(const hit of hits.slice(1)){assert.ok(hit.damage>hits[0].damage);near(hit.pvx,hits[0].pvx);near(hit.bvx,hits[0].bvx);}
   const w=world();gainGrowth(w);Object.assign(w.player,{x:300,y:300,vx:500,vy:0});const b=enemy(w,300+w.unit*2.1,300,{hp:999});
   w.collide(w.player,b);assert.ok(b.hp<999);
 });
@@ -169,7 +172,7 @@ test('the winning pulse batch takes priority over capacity and credits real exce
   Object.assign(w.player,{x:300,y:300,vx:900,vy:0});
   enemy(w,350,300,{hp:1});for(let i=0;i<27;i++)enemy(w,380+i*3,300,{hp:1});
   w.step(1/120);
-  assert.equal(w.stageKills,41);assert.equal(w.score,1960);assert.equal(w.events.filter(e=>e.type==='kill').length,28);
+  assert.equal(w.stageKills,41);assert.equal(w.score,2925);assert.equal(w.events.filter(e=>e.type==='kill').length,28);
   assert.equal(w.events.filter(e=>e.type==='over').length,0);assert.equal(w.events.filter(e=>e.type==='rescue').length,0);
   w.step(1/120);assert.equal(w.phase,'transition');assert.equal(w.enemies.length,0);
 });
@@ -177,17 +180,17 @@ test('only excess real kills carry into the next stage, independently of accumul
   const w=world();w.score=1e6;w.stageKills=w.killTarget-1;
   for(let i=0;i<3;i++)w.damage(enemy(w,600+i*50,300,{hp:1,value:20000}),2);
   w.step(1/120);advance(w,1.9);w.choose(w.choices[0]);advance(w,1.02);
-  assert.equal(w.stage,2);assert.equal(w.killTarget,18);assert.equal(w.phase,'battle');assert.equal(w.stageKills,2);assert.equal(w.score,1000060);
+  assert.equal(w.stage,2);assert.equal(w.killTarget,18);assert.equal(w.phase,'battle');assert.equal(w.stageKills,2);assert.equal(w.score,1000075);
 });
-test('breath makes wave starts 1.5 times farther apart and expires after 1.5 battle seconds',()=>{
+test('breath makes wave starts 1.5 times farther apart and expires after 2.5 battle seconds',()=>{
   const w=world();w.buffs.breath=1;const b=enemy(w,600,300,{hp:1});w.damage(b,2);w.spawnTimer=.3;
   advance(w,.3);near(w.spawnTimer,.1);assert.equal(w.enemies.length,0);
-  advance(w,.15);assert.equal(w.enemies.length,1);near(w.breathTime,1.05);
-  w.spawnTimer=100;advance(w,1.35);near(w.breathTime,0);near(w.spawnTimer,99,1e-5);
+  advance(w,.15);assert.equal(w.enemies.length,1);near(w.breathTime,2.05);
+  w.spawnTimer=100;advance(w,2.35);near(w.breathTime,0);near(w.spawnTimer,100-2.05*2/3-.3,1e-5);
 });
-test('consecutive kills refresh breath to 1.5 seconds without stacking the reduction',()=>{
+test('consecutive kills refresh breath to 2.5 seconds without stacking the reduction',()=>{
   const w=world();w.buffs.breath=1;w.damage(enemy(w,600,300,{hp:1}),2);advance(w,1);
-  w.damage(enemy(w,600,300,{hp:1}),2);near(w.breathTime,1.5);w.spawnTimer=100;advance(w,1);near(w.spawnTimer,100-2/3);
+  w.damage(enemy(w,600,300,{hp:1}),2);near(w.breathTime,2.5);w.spawnTimer=100;advance(w,1);near(w.spawnTimer,100-2/3);
   w.stageKills=w.killTarget-1;w.damage(enemy(w,600,300,{hp:1}),2);w.step(1/120);near(w.breathTime,0);
 });
 test('elapsed active time increases health and density without accelerating the stage wave schedule',()=>{
@@ -208,7 +211,7 @@ test('energy and density restore multiplicative stacks and physical impact damag
   const w=world();for(let i=0;i<3;i++){gain(w,'energy');gain(w,'density');}
   near(w.energy,1.3**3);near(w.density,1.35**3);near(w.player.mass,1.5*1.35**3);
   Object.assign(w.player,{x:300,y:300,vx:0,vy:0});w.shoot(-w.maxPull,0);
-  const speed=w.baseSpeed*Math.sqrt(w.energy/w.density);near(length(w.player),speed);
+  const speed=w.baseSpeed*Math.sqrt(w.energy);near(length(w.player),speed);
   const b=enemy(w,300+w.unit*1.9,300,{hp:10000});
   const reducedMass=1/(1/w.player.mass+1/b.mass);
   const expected=Math.max(1,Math.round(.5*reducedMass*(speed/w.unit)**2*.31));
@@ -241,7 +244,7 @@ test('reward-choice capture threshold retains its stage bands and resets with a 
     w.player.vx=w.readySpeed-.001;assert.equal(w.ready,true);
     w.player.vx=w.readySpeed;assert.equal(w.ready,false);
   }
-  w.stage=5;w.phase='reward';w.phaseTime=.99;w.player.vx=0;w.step(.02);
+  w.stage=5;w.phase='reward';w.phaseTime=w.rewardTiming.rest-.01;w.player.vx=0;w.step(.02);
   assert.equal(w.stage,6);near(w.readySpeed/w.unit,12);
   gainGrowth(w);near(w.readySpeed/w.unit,12);
   near(world().readySpeed/world().unit,8);
