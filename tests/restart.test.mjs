@@ -181,7 +181,8 @@ export function openUnlockedSelection(unlocked,current=1){
 }
 export function seedSkins(raw=null,completed=0){
   skins=normalizeSkins(raw,completed);playerContour=skinContour(skins.enabled?{sides:skins.sides,variant:skins.variant}:0);
-  skinTween=null;skinOverride=null;skinUnlock=null;lastUiPose=null;appearance=null;
+  skinTween=null;skinOverride=null;skinUnlock=null;lastUiPose=null;appearance=null;appearanceUrl=null;
+  appearanceState=normalizeAppearanceState(null);appearanceTween=null;appearanceOverride=null;
   campaignProgress=normalizeProgress({completed});
 }
 export function readSkins(){return {skins,playerContour,skinOverride,skinTween,skinUnlock,lastUiPose,active:activeContour()};}
@@ -190,17 +191,17 @@ export function changeSkinSides(sides){setSkinState(selectSkin(skins,sides));}
 export const advanceSkin=updateSkin;
 export function bindPhotoRenderer(renderer){photoRenderer=renderer;}
 export function recordPlayerPhoto(){
-  const previous={appearance,photoCanvas,photoRenderer},calls=[];
-  appearance={};photoCanvas={style:{}};
+  const previous={appearance,photoCanvas,photoRenderer,appearanceState,appearanceTween,appearanceOverride},calls=[];
+  appearance={};appearanceState=normalizeAppearanceState({selected:'custom'},{hasImage:true});appearanceTween=null;appearanceOverride=null;photoCanvas={style:{}};
   photoRenderer={hide(){},draw(contour,pose,options){calls.push({contour,pose:{...pose},options});}};
-  return {calls,restore(){({appearance,photoCanvas,photoRenderer}=previous);}};
+  return {calls,restore(){({appearance,photoCanvas,photoRenderer,appearanceState,appearanceTween,appearanceOverride}=previous);}};
 }
 export function recordCompositePhotos(success){
-  const previous={appearance,photoCanvas,photoRenderer,auxiliaryPhotos},main=[],aux=[],hidden=[],visible=new Set();
-  appearance={};photoCanvas={style:{}};
+  const previous={appearance,photoCanvas,photoRenderer,auxiliaryPhotos,appearanceState,appearanceTween,appearanceOverride},main=[],aux=[],hidden=[],visible=new Set();
+  appearance={};appearanceState=normalizeAppearanceState({selected:'custom'},{hasImage:true});appearanceTween=null;appearanceOverride=null;photoCanvas={style:{}};
   photoRenderer={hide(){visible.delete('main');},draw(contour,pose,options){main.push({contour,pose:{...pose},options});visible.add('main');return success;},setImage(){}};
   auxiliaryPhotos={hide(){hidden.push(true);for(const slot of visible)if(typeof slot==='number')visible.delete(slot);},draw(slot,contour,pose,options){aux.push({slot,contour,pose:{...pose},options});visible.add(slot);return success;},setImage(){},dispose(){for(const slot of visible)if(typeof slot==='number')visible.delete(slot);}};
-  return {main,aux,hidden,visible,restore(){({appearance,photoCanvas,photoRenderer,auxiliaryPhotos}=previous);}};
+  return {main,aux,hidden,visible,restore(){({appearance,photoCanvas,photoRenderer,auxiliaryPhotos,appearanceState,appearanceTween,appearanceOverride}=previous);}};
 }
 export function mountSceneBoundary(canvas,graphics){
   const originalSkins=initializeSkins,originalCreate=document.createElement;
@@ -220,6 +221,22 @@ export function mountInitialScene(canvas,graphics){
 export const applyAppearance=setAppearance;
 export const hidePhotoForFrame=clearPhoto;
 export function readAppearance(){return {appearance,appearanceUrl};}
+export function seedAppearanceState(raw=null,{hasImage}={}){
+  appearanceState=normalizeAppearanceState(raw,{hasImage});appearanceTween=null;appearanceOverride=null;
+  return appearanceState;
+}
+export function readAppearancePresentation(){return {state:appearanceState,tween:appearanceTween,override:appearanceOverride,layers:appearanceLayers(),wardrobeTime};}
+export const chooseAppearanceForTest=chooseAppearance;
+export const grantAppearanceForTest=grantEndlessAppearance;
+export const showResultForTest=openResult;
+export function seedWardrobePresentation(time=.75){
+  screen='home';modal='wardrobe';uiAnchor='wardrobe';transfer=null;skinUnlock=null;wardrobeTime=time;home.phase='external';
+  return currentPlayerPose();
+}
+export function bindWardrobeControls(controls){const previous=wardrobeUi;wardrobeUi=controls;return ()=>{wardrobeUi=previous;};}
+export const paintUiForTest=paintUiBall;
+export const drawPlayerForTest=drawBall;
+
 export const startWithFont=bootWithFont;
 export const renderLevelNumber=levelNumberMarkup;
 export function setNumberMeasureContext(context){numberMeasureContext=context;numberCenters.clear();}
@@ -2041,7 +2058,7 @@ test('the settings export action downloads the bounded local aim report without 
   document.body={append:node=>appended.push(node)};
   t.after(()=>{document.createElement=originalCreate;if(originalBody===undefined)delete document.body;else document.body=originalBody;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
   clickAction('export-aim');assert.equal(created.length,1);assert.deepEqual(appended,created);
-  const link=created[0];assert.equal(link.clicked,true);assert.equal(link.removed,true);assert.equal(link.download,'qiuqiule-aim-v7.8.1.json');
+  const link=created[0];assert.equal(link.clicked,true);assert.equal(link.removed,true);assert.equal(link.download,'qiuqiule-aim-v7.9.0.json');
   assert.match(link.href,/^data:application\/json;charset=utf-8,/);
   const report=JSON.parse(decodeURIComponent(link.href.slice(link.href.indexOf(',')+1)));
   assert.equal(report.sampleCount,30);assert.equal(report.medianSeconds,1.05);assert.equal(report.nextHoldSeconds,.9);assert.equal(report.currentRunHoldSeconds,1.2);
@@ -5001,4 +5018,139 @@ test('task11 a full aimed merge run creates its maximum balls through real scene
   const record=levelRecord(app.readRestart().campaignProgress,5);
   assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,world.resultRating);assert.equal(record.bestScore,world.score);
   assert.ok(record.firstClearTime>=world.mergeElapsed);assert.equal(app.readSkins().skinUnlock,null);assert.ok(element('#result-reason').textContent.startsWith(world.resultSummary));assert.match(element('#result-reason').textContent,/点/);
+});
+
+
+test('v7.9 endless appearance unlocks at 26767 without interrupting battle or Boss and ignores campaign/demo scores',t=>{
+  const prior=saved.get('qiuqiule-appearance-state');
+  t.after(()=>{app.seedSkins();if(prior===undefined)saved.delete('qiuqiule-appearance-state');else saved.set('qiuqiule-appearance-state',prior);});
+  for(const phase of ['battle','boss']){
+    const {world}=controlRun();app.seedEndless();app.seedSkins();app.seedAppearanceState();
+    if(phase==='boss'){world.stage=5;world.beginBoss();world.phase='boss';world.events=[];}
+    world.score=26766;app.updateScoreHud();assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false);
+    world.score=26767;app.updateScoreHud();
+    const state=app.readAppearancePresentation().state;
+    assert.equal(state.bigEyeUnlocked,true);assert.equal(state.pendingUnlock,true);assert.equal(state.selected,'original');
+    assert.equal(app.readRestart().paused,false);assert.equal(app.readRestart().modal,null);assert.equal(world.phase,phase);
+    assert.equal(app.readSkins().skinUnlock,null,'live scoring saves ownership but does not interrupt the current run');
+    assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).pendingUnlock,true);
+    app.updateScoreHud();assert.deepEqual(app.readAppearancePresentation().state,state,'repeated HUD frames cannot re-award or auto-equip');
+  }
+  app.seedCampaignRenderer(graphicsRecorder(),390,844,10);app.seedSkins();app.seedAppearanceState();
+  app.readRestart().world.score=99999;app.updateScoreHud();app.grantAppearanceForTest();
+  assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false,'campaign points cannot award the endless appearance');
+  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedAppearanceState();app.runFeedbackDemo('steer');
+  app.readRestart().world.score=99999;app.updateScoreHud();app.grantAppearanceForTest();
+  assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false,'trial scenes do not alter ownership');
+});
+
+test('v7.9 endless appearance reward uses the animated unlock route and returns to the equipped style only after dismissal',t=>{
+  const {world}=controlRun();app.seedEndless();app.seedSkins({enabled:true,sides:6,unlocked:6},10);
+  app.seedAppearanceState();
+  const original=app.readSkins().playerContour,ink=app.playerInk();
+  t.after(()=>{app.seedSkins();app.setPlayerInk('#252720');});
+  world.score=26767;app.updateScoreHud();world.phase='over';app.showResultForTest();
+  let state=app.readRestart(),reward=app.readSkins().skinUnlock;
+  assert.equal(state.modal,'skin-unlock');assert.equal(state.paused,true);assert.equal(state.result,null);
+  assert.equal(reward.appearance,'big-eye');assert.equal(reward.ready,false);
+  clickAction('close');assert.equal(app.readSkins().skinUnlock.phase,'enter');assert.equal(app.readAppearancePresentation().state.pendingUnlock,true);
+  app.advanceUi(.8);assert.equal(app.readSkins().skinUnlock.ready,false);
+  const middle=app.readAppearancePresentation().layers;
+  assert.ok(middle.some(layer=>layer.id==='big-eye'&&layer.weight>0&&layer.weight<1),'appearance fades into the shared reveal animation');
+  app.advanceUi(.86);assert.equal(app.readSkins().skinUnlock.ready,true);
+  assert.ok(app.readAppearancePresentation().layers.some(layer=>layer.id==='big-eye'&&layer.weight===1));
+  assert.equal(app.readAppearancePresentation().state.selected,'original','preview never silently equips the reward');
+  assert.equal(app.playerInk(),ink,'reward preview never overwrites the saved player color');
+  clickAction('close');
+  assert.equal(app.readSkins().skinUnlock.phase,'leave');assert.equal(app.readRestart().result.campaign,false);
+  assert.equal(app.readAppearancePresentation().state.pendingUnlock,false);
+  assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).pendingUnlock,false);
+  app.advanceUi(.62);
+  assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readAppearancePresentation().override,null);
+  assert.equal(app.readRestart().uiAnchor,'over');assertSameContour(app.readSkins().active,original);
+  assert.ok(app.readAppearancePresentation().layers.every(layer=>layer.id==='original'));
+  const earned={...app.readAppearancePresentation().state};
+  const next=controlRun().world;app.seedAppearanceState(earned);next.score=30000;next.phase='over';app.showResultForTest();
+  assert.equal(app.readSkins().skinUnlock,null,'later qualifying runs never replay an acknowledged unlock');
+  assert.ok(app.readRestart().result);
+});
+
+test('v7.9 appearance fades preserve the moving wardrobe preview and only selecting Big Eye resets player color',t=>{
+  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedAppearanceState({bigEyeUnlocked:true});
+  const oldSettings=app.readFeedbackSettings();app.setPlayerInk('#405060');
+  t.after(()=>{app.seedSkins();app.setPlayerInk(oldSettings.player);});
+  const before=app.seedWardrobePresentation(.73),homeBefore={...app.readHome().player};
+  assert.equal(app.chooseAppearanceForTest('big-eye'),true);
+  const presentation=app.readAppearancePresentation();
+  assert.equal(presentation.wardrobeTime,.73);assert.deepEqual(app.sourcePose(),before);
+  assert.deepEqual(app.readHome().player,homeBefore,'selecting an appearance never resets motion or velocity');
+  assert.equal(app.playerInk(),0xb8db8a);
+  const settings=app.readFeedbackSettings();assert.equal(settings.enemy,oldSettings.enemy);assert.equal(settings.bg,oldSettings.bg);
+  assert.equal(presentation.state.selected,'big-eye');assert.ok(presentation.tween);
+  app.advanceSkin(.14);const middle=app.readAppearancePresentation().layers;
+  assert.ok(middle.some(layer=>layer.id==='original'&&layer.weight>0));assert.ok(middle.some(layer=>layer.id==='big-eye'&&layer.weight>0));
+  near(middle.reduce((sum,layer)=>sum+layer.weight,0),1);
+  const halfway=app.sourcePose();assert.equal(app.chooseAppearanceForTest('original'),true);
+  assert.deepEqual(app.sourcePose(),halfway,'rapid replacement starts from the visible pose');
+  near(app.readAppearancePresentation().layers.reduce((sum,layer)=>sum+layer.weight,0),1);
+  app.advanceSkin(.28);assert.equal(app.readAppearancePresentation().tween,null);
+  assert.ok(app.readAppearancePresentation().layers.every(layer=>layer.id==='original'));
+  assert.equal(app.playerInk(),0xb8db8a,'ordinary appearance does not alter the chosen player color');
+  app.advanceUi(.05);near(app.readAppearancePresentation().wardrobeTime,.78);
+  assert.notDeepEqual(app.sourcePose(),before,'the existing bounce clock continues through the change');
+});
+
+test('v7.9 wardrobe back consumes the gallery navigation before any ball transfer',t=>{
+  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedWardrobePresentation(.4);
+  const calls=[],restore=app.bindWardrobeControls({update:dt=>calls.push(['update',dt]),back:()=>{calls.push(['back']);return true;},cancelInteraction:()=>calls.push(['cancel'])});
+  t.after(()=>{restore();app.seedSkins();});
+  const before=app.sourcePose();clickAction('close');
+  assert.equal(app.readRestart().modal,'wardrobe');assert.equal(app.readRestart().transfer,null);assert.deepEqual(app.sourcePose(),before);
+  assert.deepEqual(calls,[['back']]);app.advanceSkin(.05);app.advanceUi(.05);
+  assert.ok(calls.some(call=>call[0]==='update'&&call[1]===.05));near(app.readAppearancePresentation().wardrobeTime,.45);
+});
+
+
+test('v7.9 Big Eye renders one large circular pupil without expressions and never changes collision geometry',t=>{
+  t.after(()=>{app.seedSkins();app.setPlayerInk('#252720');app.setExpressionEnabled(false);});
+  for(const mode of ['home','levels','endless','campaign']){
+    const g=graphicsRecorder(),{scene,active,player,pointer}=pullScene(mode,g);
+    app.seedSkins({enabled:true,sides:6,unlocked:6});
+    app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});app.setPlayerInk('#b8db8a');app.setExpressionEnabled(true);
+    const physical={x:player.x,y:player.y,r:player.r,mass:player.mass,density:player.density,vx:player.vx,vy:player.vy};
+    scene.update(0,0);
+    let pupils=g.shapes.filter(shape=>shape.type==='circle'&&shape.color===0x000000&&Math.abs(shape.r-player.r/1.95)<1e-6);
+    assert.equal(pupils.length,1,mode+' has exactly one black round pupil');
+    assert.equal(eyeShapes(g).length,0,'normal expressive eyes must not be layered over the new appearance');
+    const start={x:player.x,y:player.y};
+    pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x+active.maxPull,start.y);scene.update(0,0);
+    pupils=g.shapes.filter(shape=>shape.type==='circle'&&shape.color===0x000000&&Math.abs(shape.r-player.r/1.95)<1e-6);
+    assert.equal(pupils.length,1,mode+' keeps the same round pupil while fully pulling');
+    assert.ok(pupils[0].x<player.x-player.r*.35,'full drag looks toward the launch side with increased displacement');
+    assert.equal(g.shapes.filter(shape=>shape.type==='ellipse'&&shape.color===0x252720).length,0,'pulling never creates normal paired eyes');
+    assert.deepEqual({x:player.x,y:player.y,r:player.r,mass:player.mass,density:player.density,vx:player.vx,vy:player.vy},physical);
+    pointer('pointercancel');
+  }
+});
+
+test('v7.9 transparent custom photos retain their captured base color throughout a Big Eye crossfade',t=>{
+  const g=graphicsRecorder(),{home}=app.seedRenderer(g);app.seedSkins();
+  const oldInk=app.setPlayerInk('#405060'),photos=app.recordCompositePhotos(true);
+  app.seedAppearanceState({selected:'custom',bigEyeUnlocked:true},{hasImage:true});
+  const image=app.readAppearance().appearance,pose={x:100,y:200,r:30,squash:0};
+  t.after(()=>{photos.restore();app.seedSkins();app.setPlayerInk(oldInk);});
+  app.paintUiForTest(pose);assert.equal(photos.main.at(-1).options.baseColor,0x405060);
+  assert.equal(app.chooseAppearanceForTest('big-eye'),true);assert.equal(app.playerInk(),0xb8db8a);
+  for(const step of [0,.14]){
+    app.advanceSkin(step);
+    app.paintUiForTest(pose);
+    assert.equal(photos.main.at(-1).options.baseColor,0x405060,'the old UI photo cannot immediately adopt the new green base');
+    app.drawPlayerForTest(g,home.player,app.playerInk());
+    assert.equal(photos.main.at(-1).options.baseColor,0x405060,'the canvas photo uses the same captured old base during a menu transfer');
+    assert.equal(app.readAppearance().appearance,image,'crossfading does not replace or decode the cached image');
+  }
+  near(photos.main.at(-1).options.alpha,.5);
+  app.advanceSkin(.14);const calls=photos.main.length;
+  app.paintUiForTest(pose);app.drawPlayerForTest(g,home.player,app.playerInk());
+  assert.equal(photos.main.length,calls,'the completed fade stops drawing the old photo');
 });

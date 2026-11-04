@@ -26,6 +26,8 @@ import {skinContour,skinPoint,morphSkinContour,normalizeSkins,unlockSkin,selectS
 import {projectSkinContour,paintRadiance,createRadianceCanvas,fitCrownToSkin} from './skin-render.js';
 import {PhotoRenderer,AuxiliaryPhotoPool} from './photo-renderer.js';
 import {initWardrobe,loadAppearance,saveAppearance} from './wardrobe.js';
+import {normalizeAppearanceState,unlockAppearance,selectAppearance,acknowledgeAppearanceUnlock,BIG_EYE_DEFAULT_COLOR} from './appearances.js';
+import {bigEyeGeometry,bigEyeColors,drawBigEye} from './big-eye.js';
 import {unlockPose,unlockLeavePose,createUnlockPanel} from './skin-unlock.js';
 
 const $ = s => document.querySelector(s);
@@ -67,6 +69,9 @@ if(savedSkins&&typeof savedSkins==='object'&&('variant' in savedSkins||'variants
 let playerContour=skinContour(skins.enabled?skins:0),skinTween=null,skinOverride=null;
 let wardrobeUi=null,wardrobeTime=0,skinUnlock=null,appearance=null,appearanceUrl=null;
 let photoCanvas=null,photoRenderer=null,auxiliaryPhotos=null,glowCanvas=null,glowContext=null,lastUiPose=null;
+const savedAppearanceState=storage.read('qiuqiule-appearance-state',null);
+let appearanceState=normalizeAppearanceState(savedAppearanceState,{best});
+let appearanceTween=null,appearanceOverride=null;
 let appearanceRevision=0;
 let selectedMode=storage.read('qiuqiule-mode','campaign')==='endless'?'endless':'campaign';
 let currentLevel=1;
@@ -187,9 +192,38 @@ function setSkinState(next){
   skinTween={from:playerContour,to:skinContour(skins.enabled?skins:0),elapsed:0};
   wardrobeUi?.refresh();
 }
+function appearanceLayers(){
+  if(appearanceOverride)return appearanceOverride;
+  if(!appearanceTween)return [{id:appearanceState.selected==='custom'&&!appearance?'original':appearanceState.selected,color:hex(settings.player),weight:1}];
+  const t=smooth(clamp(appearanceTween.elapsed/.28,0,1));
+  return [...appearanceTween.from.map(layer=>({...layer,weight:layer.weight*(1-t)})),{...appearanceTween.to,weight:t}].filter(layer=>layer.weight>1e-7);
+}
+function appearanceLayer(id,layers=appearanceLayers()){
+  let weight=0,color=hex(settings.player);
+  for(const layer of layers)if(layer.id===id&&layer.weight>0){color=weight?blendRgb(color,layer.color,layer.weight/(weight+layer.weight)):layer.color;weight+=layer.weight;}
+  return {weight,color};
+}
+function persistAppearanceState(){storage.write('qiuqiule-appearance-state',appearanceState);}
+function chooseAppearance(id){
+  const next=selectAppearance(appearanceState,id,{hasImage:!!appearance});
+  if(next.selected!==id||next.selected===appearanceState.selected)return false;
+  const from=appearanceLayers().map(layer=>({...layer}));
+  appearanceState=next;
+  if(id==='big-eye'){settings.player=BIG_EYE_DEFAULT_COLOR;applyTheme();}
+  appearanceTween=id==='custom'?null:{from,to:{id,color:hex(settings.player),weight:1},elapsed:0};
+  persistAppearanceState();wardrobeUi?.refresh();return true;
+}
+function grantEndlessAppearance(){
+  if(!world||world.mode==='campaign'||feedbackDemo)return false;
+  const unlocked=unlockAppearance(appearanceState,world.score);
+  if(!unlocked.newlyUnlocked)return false;
+  appearanceState=unlocked.state;persistAppearanceState();wardrobeUi?.refresh();return true;
+}
 function activeContour(){return skinOverride||playerContour;}
-function usesSkinContour(){return !!(appearance||skins.enabled||skinTween||skinOverride);}
+function usesSkinContour(){return !!(appearance||skins.enabled||skinTween||skinOverride||appearanceLayers().some(layer=>layer.id==='big-eye'));}
 function updateSkin(dt){
+  if(appearanceTween){appearanceTween.elapsed+=dt;if(appearanceTween.elapsed>=.28)appearanceTween=null;}
+  wardrobeUi?.update?.(dt);
   if(!skinTween)return;
   skinTween.elapsed+=dt;
   const t=clamp(skinTween.elapsed/(reducedMotion?.12:.3),0,1);
@@ -201,14 +235,14 @@ function clearPhoto(){
   auxiliaryPhotos?.hide();
   if(glowCanvas)glowCanvas.hidden=true;
 }
-function drawPlayerPhoto(contour,pose,ui=false,auxiliarySlot=null,alpha=1){
+function drawPlayerPhoto(contour,pose,ui=false,auxiliarySlot=null,alpha=1,baseColor=hex(settings.player)){
   if(!appearance||!photoRenderer||wardrobeUi?.isCropping?.())return false;
   if(auxiliarySlot===null)photoCanvas.style.zIndex=ui?'40':'3';
   const clip=ui&&uiAnchor==='wardrobe'&&!transfer
     ?$('#wardrobe-panel .wardrobe-body').getBoundingClientRect():null;
   const camera=!ui&&screen==='play'?scene?.feedbackCamera:null;
   if(camera&&camera.zoom!==1)pose={...pose,x:camera.x+(pose.x-camera.x)*camera.zoom,y:camera.y+(pose.y-camera.y)*camera.zoom,r:pose.r*camera.zoom};
-  const options={scale:Math.min(viewport.scale,3),clip,alpha,baseColor:hex(settings.player)};
+  const options={scale:Math.min(viewport.scale,3),clip,alpha,baseColor};
   if(auxiliarySlot!==null)return auxiliaryPhotos?.draw(auxiliarySlot,contour,pose,options)===true;
   return photoRenderer.draw(contour,pose,options)===true;
 }
@@ -219,6 +253,11 @@ async function setAppearance(url,persist=false,revision=++appearanceRevision){
   if(persist)await saveAppearance(url);
   if(revision!==appearanceRevision)return;
   appearance=image;appearanceUrl=url;photoRenderer?.setImage(image);auxiliaryPhotos?.setImage(image);
+  if(persist){
+    if(image){appearanceState=selectAppearance(appearanceState,'custom',{hasImage:true});appearanceTween=null;}
+    else if(appearanceState.selected==='custom'){appearanceState=selectAppearance(appearanceState,'original',{hasImage:false});appearanceTween=null;}
+    persistAppearanceState();
+  }
   if(!image)clearPhoto();
   wardrobeUi?.refresh();
 }
@@ -238,13 +277,16 @@ function initializeSkins(){
   glowCanvas.setAttribute('aria-hidden','true');
   Object.assign(glowCanvas.style,{position:'fixed',pointerEvents:'none',zIndex:'35'});
   document.body.append(glowCanvas);glowContext=glowCanvas.getContext('2d');
-  wardrobeUi=initWardrobe({getState:()=>({...skins,image:appearanceUrl}),
+  wardrobeUi=initWardrobe({getState:()=>({...skins,image:appearanceUrl,appearanceId:appearanceState.selected,appearanceUnlocked:appearanceState.bigEyeUnlocked,best}),
     onToggle:value=>setSkinState(toggleSkins(skins,value)),
-    onSides:value=>setSkinState(selectSkin(skins,value)),
+    onSides:value=>setSkinState(toggleSkins(selectSkin(skins,value),true)),
+    onAppearance:chooseAppearance,
     onImage:url=>setAppearance(url,true),onError:message=>toast(message)});
   storage.write('qiuqiule-skins',skins);
   const revision=appearanceRevision;
-  loadAppearance().then(url=>{if(revision===appearanceRevision)return setAppearance(url,false,revision);}).catch(()=>toast('图片暂时无法读取，请重新选取'));
+  loadAppearance().then(async url=>{if(revision!==appearanceRevision)return;await setAppearance(url,false,revision);if(revision!==appearanceRevision)return;
+    const latest=storage.read('qiuqiule-appearance-state',savedAppearanceState);
+    appearanceState=normalizeAppearanceState(latest,{best,hasImage:!!appearance});persistAppearanceState();wardrobeUi?.refresh();}).catch(()=>toast('图片暂时无法读取，请重新选取'));
 }
 function fitMenuHeight(){
   const panel=$('#settings-panel'),hidden=panel.hidden;
@@ -343,6 +385,7 @@ function detached(){return !!skinUnlock||!!transfer||!!uiAnchor||['pause','setti
 function paintUiBall(p){
   lastUiPose={...p};
   const el=$('#ui-ball'),sq=p.squash||0;
+  const layers=appearanceLayers(),original=appearanceLayer('original',layers),bigEye=appearanceLayer('big-eye',layers),custom=appearanceLayer('custom',layers);
   el.hidden=false;el.style.width=el.style.height=p.r*2+'px';
   el.style.clipPath='none';
   if(uiAnchor==='wardrobe'&&!transfer){
@@ -366,10 +409,10 @@ function paintUiBall(p){
     }
     contour.setAttribute('d',points.join(' ')+' Z');
   }
-  if(appearance){
+  if(appearance&&custom.weight>0){
     // The photo and outline share the same nonlinear pull; the photo is never
     // a rigid image hidden behind a separately stretching mask.
-    drawPlayerPhoto(activeContour(),{x:p.x,y:p.y,r:p.r,squash:sq,pullAmount:amount,deformAngle:angle,roll:p.roll||0},true);
+    drawPlayerPhoto(activeContour(),{x:p.x,y:p.y,r:p.r,squash:sq,pullAmount:amount,deformAngle:angle,roll:p.roll||0},true,null,custom.weight,custom.color);
   }
   const eyes=el.querySelector('.ui-eyes'),normal=el.querySelector('.ui-normal-eyes'),paths=el.querySelector('.ui-eye-paths');
   const mix=clamp(p.visualEyeMix||0,0,1),visual=p.visualEyeMix!==undefined;
@@ -387,7 +430,23 @@ function paintUiBall(p){
   // for captured selection eyes, then retain the existing gaze/roll transform.
   eyes.style.transform=`${visual&&!skinned?`scale(${1/(1-sq)},${1/(1+sq*.7)}) `:skinned&&!visual?`scale(${1-sq},${1+sq*.7}) `:''}rotate(${p.roll||0}rad) translate(${(p.lookX||0)*50}px,${(p.lookY||0)*50}px)`;
   eyes.style.opacity='.9';
-  eyes.style.display=appearance?'none':'';
+  eyes.style.display=original.weight>0?'':'none';
+  const ordinaryColor='#'+original.color.toString(16).padStart(6,'0');
+  body.style.fill=contour.style.fill=ordinaryColor;
+  eyes.style.fill=isDark(ordinaryColor)?'#f4f3eb':'#252720';
+  const bigGroup=el.querySelector('.ui-big-eye');
+  bigGroup.style.display=bigEye.weight>0?'':'none';
+  if(bigEye.weight>0){
+    if(!original.weight){body.style.display='none';contour.style.display='none';}
+    const geometry=bigEyeGeometry(activeContour(),{x:50,y:50,r:50,pullAmount:amount,deformAngle:angle,roll:p.roll||0,squash:sq},{lookX:p.lookX||0,lookY:p.lookY||0});
+    const colors=bigEyeColors(bigEye.color),toHex=color=>'#'+color.toString(16).padStart(6,'0');
+    el.querySelector('.ui-big-eye-center').setAttribute('stop-color',toHex(colors.center));
+    el.querySelector('.ui-big-eye-edge').setAttribute('stop-color',toHex(colors.edge));
+    const shape=el.querySelector('.ui-big-eye-body');shape.setAttribute('d',geometry.outline.map((point,i)=>`${i?'L':'M'}${point.x} ${point.y}`).join(' ')+' Z');
+    const pupil=el.querySelector('.ui-big-eye-pupil');pupil.setAttribute('cx',geometry.eye.x);pupil.setAttribute('cy',geometry.eye.y);pupil.setAttribute('r',geometry.eye.r);
+    bigGroup.style.opacity=String(bigEye.weight/(original.weight+bigEye.weight));
+  }
+
   const resultCrown=el.querySelector('.ui-result-crown');
   if(resultCrown){
     const settled=uiAnchor==='over'&&!transfer&&!skinUnlock;
@@ -525,6 +584,7 @@ function openResult(view=null){
   cancelDrag();world.phase='over';world.choices=[];updateChoices();
   const campaign=world.mode==='campaign';
   saveEndlessProgress();
+  if(!campaign&&!feedbackDemo&&appearanceState.pendingUnlock){beginSkinUnlock(from,sources,skins.enabled?skins.sides:0,'big-eye');return;}
   if(campaign&&world.completed&&!feedbackDemo){
     const unlocked=unlockSkin(skins,world.level);
     skins=unlocked.state;storage.write('qiuqiule-skins',skins);wardrobeUi?.refresh();
@@ -584,16 +644,17 @@ function unlockAnchor(){
   panel.style.transform='translate(-50%,-50%)';
   const pose=anchorPose('skin-unlock');panel.style.transform=previous;return pose;
 }
-function beginSkinUnlock(from,sources,sides){
+function beginSkinUnlock(from,sources,sides,rewardAppearance=null){
   cancelDrag();transfer=null;uiAnchor=null;paused=true;
-  skinUnlock={elapsed:0,phase:'enter',from:{...from},sources,sides,original:playerContour,ready:false};
+  skinUnlock={elapsed:0,phase:'enter',from:{...from},sources,sides,appearance:rewardAppearance,original:playerContour,originalAppearance:appearanceLayers().map(layer=>({...layer})),ready:false};
   $('#hud').hidden=true;showPanel('skin-unlock');
   $('#skin-unlock-continue').disabled=true;
   updateSkinUnlock(0);
 }
 function dismissSkinUnlock(){
   if(!skinUnlock?.ready||skinUnlock.phase==='leave')return;
-  const reward=skinUnlock;reward.phase='leave';reward.elapsed=0;reward.from={...lastUiPose};reward.ready=false;
+  const reward=skinUnlock;if(reward.appearance){appearanceState=acknowledgeAppearanceUnlock(appearanceState);persistAppearanceState();}
+  reward.phase='leave';reward.elapsed=0;reward.from={...lastUiPose};reward.ready=false;
   presentResult(reward.from,false,reward.sources,reducedMotion?.28:.62);
   transfer=null;uiAnchor=null;$('#skin-unlock-panel').hidden=false;
   $('#skin-unlock-continue').disabled=true;syncInputs();
@@ -604,6 +665,7 @@ function updateSkinUnlock(dt){
   const frame=(leaving?unlockLeavePose:unlockPose)({elapsed:reward.elapsed,from:reward.from,
     to:leaving?anchorPose('over'):unlockAnchor(),reducedMotion});
   skinOverride=morphSkinContour(reward.original,reward.sides,frame.morph);
+  appearanceOverride=reward.appearance?[...reward.originalAppearance.map(layer=>({...layer,weight:layer.weight*(1-frame.morph)})),{id:reward.appearance,color:hex(BIG_EYE_DEFAULT_COLOR),weight:frame.morph}].filter(layer=>layer.weight>1e-7):null;
   const panel=$('#skin-unlock-panel');
   panel.style.opacity=frame.panelAlpha;
   panel.style.transform=`translate(-50%,-50%) scale(${frame.panelScale})`;
@@ -623,7 +685,7 @@ function updateSkinUnlock(dt){
   if(leaving){
     updateControlFlight(dt);
     if(frame.done){
-      skinUnlock=null;skinOverride=null;uiAnchor='over';panel.hidden=true;
+      skinUnlock=null;skinOverride=null;appearanceOverride=null;uiAnchor='over';panel.hidden=true;
       if(glowCanvas)glowCanvas.hidden=true;paintUiBall(anchorPose('over'));syncInputs();
     }
   }
@@ -643,7 +705,7 @@ function openSettings(){
 function openWardrobe(){
   if(transfer||modal)return;
   const from=currentPlayerPose();home.phase='external';wardrobeTime=0;
-  wardrobeUi?.refresh();showPanel('wardrobe');movePlayer(from,'wardrobe',.5);
+  wardrobeUi?.resetNavigation?.();wardrobeUi?.refresh();showPanel('wardrobe');movePlayer(from,'wardrobe',.5);
 }
 function openHelp(){if(transfer||menuTransition)return;transitionMenu('help');}
 function finishArenaArrival(){
@@ -659,6 +721,7 @@ function closePanel(){
   if(transfer)return;
   if(skinUnlock){dismissSkinUnlock();return;}
   if(modal==='wardrobe'){
+    if(wardrobeUi?.back?.())return;
     const from=currentPlayerPose();from.visualSquash=from.squash||0;
     wardrobeUi?.cancelInteraction();hidePanel();home.reset();movePlayer(from,'home',.5);return;
   }
@@ -676,7 +739,7 @@ function prepareGame({demo=false}={}){
   // A new run clears gameplay feedback, input and clocks. The scene-owned red
   // warning independently finishes its breath out over the arriving screen.
   closeCampaignOffer(false);cancelDrag();feedbackDemo=demo;campaignRecorded=false;campaignAttemptId=null;runBest=best;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';result=null;transfer=null;controlFlight=null;uiAnchor=null;
-  skinUnlock=null;skinOverride=null;clearPhoto();
+  skinUnlock=null;skinOverride=null;appearanceOverride=null;clearPhoto();
   releaseOverlay=0;pauseOnArrival=false;
   $('#control-transfers').replaceChildren();$('#ui-ball').hidden=true;$('#result-shadow').hidden=true;
   $('.result-actions').classList.remove('arriving');
@@ -716,6 +779,7 @@ function saveCampaignResult(outcome){
 }
 function saveEndlessProgress(){
   if(!world||world.mode==='campaign'||feedbackDemo)return;
+  grantEndlessAppearance();
   const stage=Math.max(world.stage||1,world.maxStage||1),combo=Math.max(world.maxCombo||0,world.shotKills||0);
   const key=[world.score,stage,combo,runDay?.key].join(':');if(key===recordedStatsKey)return;recordedStatsKey=key;
   endlessProgress=recordEndlessRun(endlessProgress,{score:world.score,stage,maxCombo:combo,dateKey:runDay?.key});
@@ -951,6 +1015,7 @@ function updateHud(dt=0){
   if(world?.isCampaignOffer){$('#campaign-preflight').style.opacity=String(world.presentationAlpha);updateChoices();return;}
   if(!world)return;
   if(world.mode!=='campaign'){
+    grantEndlessAppearance();
     if(!feedbackDemo&&!runNewRecord&&world.score>runBest){runNewRecord=true;recordPulse=.2;recordCue=.1;tone(660,.09,'sine',.04,1.1);}
     const previousCue=recordCue;recordCue=Math.max(0,recordCue-dt);if(previousCue>0&&recordCue===0)tone(880,.12,'sine',.04,1.1);
     recordPulse=Math.max(0,recordPulse-dt);
@@ -1094,6 +1159,63 @@ function drawBoss(g,b,alpha=1){
   }
 }
 
+function updatePlayerGaze(b,pull){
+  const onScreen=levelPointer&&levelPointer.x>=0&&levelPointer.x<=viewport.width&&levelPointer.y>=0&&levelPointer.y<=viewport.height;
+  let target=screen==='levels'?pointerFaceTarget(b,onScreen?levelPointer:null)
+    :faceTarget(b,pull,screen==='home'?home.maxPull:(world?.maxPull||150));
+  if(screen==='play'&&world?.mode!=='campaign'&&world?.phase==='battle'&&settings.expressions&&!paused&&!modal&&!pull){
+    target=pressureLook(b,world.enemies,world.feedbackTime??world.time)||target;
+  }
+  if(screen==='play'&&world?.config?.implemented&&world.tutorialVisible&&world.tutorialLookTime<1&&!pull){target=pointerFaceTarget(b,world.teachingTarget||world.tutorialTarget)||target;}
+  const faceOffset=smoothFace({x:b.lookX||0,y:b.lookY||0},target,scene?.frameDt??1/60);
+  b.lookX=faceOffset.x;b.lookY=faceOffset.y;
+  return faceOffset;
+}
+
+function drawPlayerEyes(g,b,{r,visualX,visualY,roll,visual,alpha,pull,color,faceOffset}){
+    if(b.isAuxiliary)return;
+    const face=isDark('#'+color.toString(16).padStart(6,'0'))?0xf4f3eb:0x252720;
+    if(screen==='play'&&(scene?.ending||world?.config?.r===7&&settings.expressions&&world.glassMissUntil>world.feedbackTime)){
+      g.lineStyle(Math.max(1,r*.045),face,alpha*.9);
+      for(const side of [-1,1]){
+        const x=visualX+side*r*.17,y=visualY-r*.07,d=r*.065;
+        g.lineBetween(x-d,y-d,x+d,y+d);g.lineBetween(x-d,y+d,x+d,y-d);
+      }
+      return;
+    }
+    if(screen==='play'&&world?.mode==='campaign'&&[4,8].includes(world?.config?.r)&&settings.expressions&&(b.campaignSquintUntil||0)>world.feedbackTime){
+      g.lineStyle(Math.max(1,r*.055),face,alpha*.9);
+      for(const side of [-1,1]){
+        const x=visualX+side*r*.17,y=visualY-r*.07,d=r*.075;
+        g.lineBetween(x+side*d,y-d,x-side*d,y);
+        g.lineBetween(x-side*d,y,x+side*d,y+d);
+      }
+      return;
+    }
+    const lookX=faceOffset.x*r,lookY=faceOffset.y*r;
+    g.fillStyle(face,alpha*.9);
+    const rc=Math.cos(roll),rs=Math.sin(roll);
+    for(const [i,eye] of [-1,1].entries()){
+      const ex=eye*r*.17+lookX,ey=-r*.07+lookY;
+      if(visual.eyeMix>0){
+        g.beginPath();
+        strainedEyes[i].forEach((point,j)=>{
+          const normal=relaxedEyes[i][j],mix=visual.eyeMix;
+          const x=ex+(normal.x+(point.x-normal.x)*mix)*r;
+          const y=ey+(normal.y+(point.y-normal.y)*mix)*r;
+          const px=visualX+x*rc-y*rs,py=visualY+x*rs+y*rc;
+          j?g.lineTo(px,py):g.moveTo(px,py);
+        });
+        g.closePath();g.fillPath();
+      }else {
+        const surprised=screen==='play'&&settings.expressions&&Math.max(scene?.rescueUntil||0,scene?.firstTypeUntil||0)>(world?.feedbackTime??world?.time??Infinity);
+        const blink=!surprised&&screen==='play'&&scene?.blinkUntil>scene.clock&&!reducedMotion?.25:1;
+        const open=surprised?1.3:1;
+        g.fillEllipse(visualX+ex*rc-ey*rs,visualY+ex*rs+ey*rc,r*.105*open,r*.19*blink*open,64);
+      }
+    }
+}
+
 function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
   const born=birth?.scale??(b.isPlayer?1:ease(b.born));
   const rewardPose=rewardPlayerPose(b),visualX=rewardPose.x,visualY=rewardPose.y,r=rewardPose.r*born;
@@ -1155,63 +1277,21 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
     i?g.lineTo(x,y):g.moveTo(x,y);
   }
   g.closePath();
-  // The photo surface already composites the same opaque player base before
-  // applying alpha. Painting it here too would double that base while fading.
-  const photoDrawn=b.isPlayer&&appearance&&drawPlayerPhoto(activeContour(),skinPose,false,photoSlot,alpha*(birth?.alpha??born));
-  if(!photoDrawn)g.fillPath();
-  if(b.isPlayer){
-    if(appearance)return;
-    if(b.isAuxiliary)return;
-    const face=isDark(settings.player)?0xf4f3eb:0x252720;
-    if(screen==='play'&&(scene?.ending||world?.config?.r===7&&settings.expressions&&world.glassMissUntil>world.feedbackTime)){
-      g.lineStyle(Math.max(1,r*.045),face,alpha*.9);
-      for(const side of [-1,1]){
-        const x=visualX+side*r*.17,y=visualY-r*.07,d=r*.065;
-        g.lineBetween(x-d,y-d,x+d,y+d);g.lineBetween(x-d,y+d,x+d,y-d);
-      }
-      return;
-    }
-    if(screen==='play'&&world?.mode==='campaign'&&[4,8].includes(world?.config?.r)&&settings.expressions&&(b.campaignSquintUntil||0)>world.feedbackTime){
-      g.lineStyle(Math.max(1,r*.055),face,alpha*.9);
-      for(const side of [-1,1]){
-        const x=visualX+side*r*.17,y=visualY-r*.07,d=r*.075;
-        g.lineBetween(x+side*d,y-d,x-side*d,y);
-        g.lineBetween(x-side*d,y,x+side*d,y+d);
-      }
-      return;
-    }
-    const onScreen=levelPointer&&levelPointer.x>=0&&levelPointer.x<=viewport.width&&levelPointer.y>=0&&levelPointer.y<=viewport.height;
-    let target=screen==='levels'?pointerFaceTarget(b,onScreen?levelPointer:null)
-      :faceTarget(b,pull,screen==='home'?home.maxPull:(world?.maxPull||150));
-    if(screen==='play'&&world?.mode!=='campaign'&&world?.phase==='battle'&&settings.expressions&&!paused&&!modal&&!pull){
-      target=pressureLook(b,world.enemies,world.feedbackTime??world.time)||target;
-    }
-    if(screen==='play'&&world?.config?.implemented&&world.tutorialVisible&&world.tutorialLookTime<1&&!pull){target=pointerFaceTarget(b,world.teachingTarget||world.tutorialTarget)||target;}
-    const faceOffset=smoothFace({x:b.lookX||0,y:b.lookY||0},target,scene?.frameDt??1/60);
-    b.lookX=faceOffset.x;b.lookY=faceOffset.y;
-    const lookX=faceOffset.x*r,lookY=faceOffset.y*r;
-    g.fillStyle(face,alpha*.9);
-    const rc=Math.cos(roll),rs=Math.sin(roll);
-    for(const [i,eye] of [-1,1].entries()){
-      const ex=eye*r*.17+lookX,ey=-r*.07+lookY;
-      if(visual.eyeMix>0){
-        g.beginPath();
-        strainedEyes[i].forEach((point,j)=>{
-          const normal=relaxedEyes[i][j],mix=visual.eyeMix;
-          const x=ex+(normal.x+(point.x-normal.x)*mix)*r;
-          const y=ey+(normal.y+(point.y-normal.y)*mix)*r;
-          const px=visualX+x*rc-y*rs,py=visualY+x*rs+y*rc;
-          j?g.lineTo(px,py):g.moveTo(px,py);
-        });
-        g.closePath();g.fillPath();
-      }else {
-        const surprised=screen==='play'&&settings.expressions&&Math.max(scene?.rescueUntil||0,scene?.firstTypeUntil||0)>(world?.feedbackTime??world?.time??Infinity);
-        const blink=!surprised&&screen==='play'&&scene?.blinkUntil>scene.clock&&!reducedMotion?.25:1;
-        const open=surprised?1.3:1;
-        g.fillEllipse(visualX+ex*rc-ey*rs,visualY+ex*rs+ey*rc,r*.105*open,r*.19*blink*open,64);
-      }
-    }
+  if(!b.isPlayer){g.fillPath();return;}
+  const layers=appearanceLayers(),original=appearanceLayer('original',layers),bigEye=appearanceLayer('big-eye',layers),custom=appearanceLayer('custom',layers);
+  const faceOffset=b.isAuxiliary?{x:0,y:0}:updatePlayerGaze(b,pull);
+  const bodyAlpha=alpha*(birth?.alpha??born);
+  if(original.weight>0){
+    g.fillStyle(original.color,bodyAlpha);g.fillPath();
+    drawPlayerEyes(g,b,{r,visualX,visualY,roll,visual,alpha,pull,color:original.color,faceOffset});
   }
+  if(bigEye.weight>0){
+    const weight=bigEye.weight/(original.weight+bigEye.weight);
+    drawBigEye(g,activeContour(),skinPose,{color:bigEye.color,alpha:bodyAlpha*weight,lookX:faceOffset.x,lookY:faceOffset.y});
+  }
+  const photoDrawn=custom.weight>0&&appearance&&drawPlayerPhoto(activeContour(),skinPose,false,photoSlot,bodyAlpha*custom.weight,custom.color);
+  if(!original.weight&&!bigEye.weight&&!photoDrawn){g.fillStyle(color,bodyAlpha);g.fillPath();}
+
 }
 
 function bindInput(canvas){
@@ -2261,7 +2341,7 @@ function startUpgradeDemo(kind){
 function exportAimStatistics(){
   const link=document.createElement('a');
   link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(aimStatistics(),null,2));
-  link.download='qiuqiule-aim-v7.8.1.json';
+  link.download='qiuqiule-aim-v7.9.0.json';
   document.body.append(link);link.click();link.remove();
 }
 
@@ -2311,7 +2391,7 @@ document.addEventListener('click',e=>{
   if(action==='settings')openSettings();
   if(action==='help')openHelp();
   if(action==='export-aim')exportAimStatistics();
-  if(action==='export-campaign'){const link=document.createElement('a');link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(campaignProgress,null,2));link.download='qiuqiule-campaign-v7.8.1.json';document.body.append(link);link.click();link.remove();}
+  if(action==='export-campaign'){const link=document.createElement('a');link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(campaignProgress,null,2));link.download='qiuqiule-campaign-v7.9.0.json';document.body.append(link);link.click();link.remove();}
   if(action==='sound'){settings.sound=!settings.sound;applyTheme();}
   if(action==='haptic'){settings.haptic=!settings.haptic;applyTheme();vibrate(10);}
   if(action==='expressions'){settings.expressions=!settings.expressions;applyTheme();}
