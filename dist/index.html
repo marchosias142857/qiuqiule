@@ -89,7 +89,7 @@
       </div>
     </section>
     <section id="settings-panel" class="panel settings-panel menu-panel" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <div class="panel-heading settings-heading"><span id="settings-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="settings-title">你的球，你的颜色</h2><button class="close-button" data-action="close" aria-label="关闭设置">×</button></div>
+      <div class="panel-heading settings-heading"><span id="settings-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="settings-title">你的球，你的定义</h2><button class="close-button" data-action="close" aria-label="关闭设置">×</button></div>
       <div class="menu-body"><div class="menu-content">
       <div class="palette-list" aria-label="配色方案">
         <button class="palette active" data-palette="classic" aria-label="奶油汽水配色"><span><i style="background:#252720"></i><i style="background:#e88c72"></i><i style="background:#f4f3eb"></i></span><b>奶油汽水</b></button>
@@ -108,8 +108,7 @@
         <div class="volume-row"><div><label for="feedback-strength">反馈强度</label><output id="feedback-value" for="feedback-strength">60%</output></div><input id="feedback-strength" type="range" min="0" max="100" step="10" value="60" aria-label="反馈强度"></div>
       </div>
       <button class="secondary-button gameplay-button" data-action="help">玩法介绍</button>
-      <button class="secondary-button" data-action="export-aim">导出瞄准记录</button>
-      <button class="secondary-button" data-action="export-campaign">导出闯关记录</button>
+      <button class="secondary-button" data-action="restore-defaults">恢复默认</button>
       </div></div>
     </section>
     <section id="wardrobe-panel" class="panel wardrobe-panel" hidden role="dialog" aria-modal="true" aria-labelledby="wardrobe-title">
@@ -117,14 +116,15 @@
       <div class="wardrobe-body">
         <div id="wardrobe-content" class="wardrobe-content">
           <div id="wardrobe-main" class="wardrobe-main">
-            <div class="wardrobe-row"><span>多边形皮肤</span><div class="wardrobe-value"><span id="skin-lock" class="skin-lock" role="img" aria-label="通过第10关解锁多边形皮肤"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><button id="skin-toggle" class="toggle" role="switch" aria-checked="false" aria-label="多边形皮肤" hidden></button></div></div>
-            <div class="wardrobe-row"><span>你的形状</span><div class="wardrobe-value"><span id="skin-infinity" class="skin-infinity" aria-label="通过第10关解锁形状选择">∞</span><button id="shape-select" class="appearance-select" aria-label="选择你的形状" hidden>选择</button></div></div>
+            <div class="wardrobe-row"><span>你的形状</span><div class="wardrobe-value"><button id="shape-select" class="appearance-select" aria-label="选择你的形状">选择</button></div></div>
             <div class="wardrobe-row"><span>你的外观</span><div class="wardrobe-value"><span id="appearance-tools" class="appearance-tools" hidden><button id="appearance-clear" class="appearance-clear" aria-label="移除已保存的自定义图片">移除图片</button></span><button id="appearance-select" class="appearance-select" aria-label="选择你的外观">选择</button></div></div>
+            <div class="wardrobe-row"><span>你的伴星</span><div class="wardrobe-value"><button id="companion-select" class="appearance-select" aria-label="选择你的伴星">选择</button></div></div>
           </div>
           <section id="shape-gallery" class="wardrobe-gallery" hidden aria-label="你的形状"><div id="shape-grid" class="wardrobe-grid"></div></section>
           <section id="appearance-gallery" class="wardrobe-gallery" hidden aria-label="你的外观"><div id="appearance-grid" class="wardrobe-grid"></div></section>
+          <section id="companion-gallery" class="wardrobe-gallery" hidden aria-label="你的伴星"><div id="companion-grid" class="wardrobe-grid"></div></section>
         </div>
-        <div class="wardrobe-preview"><span id="wardrobe-ball" class="ball-anchor" aria-hidden="true"></span></div>
+        <div class="wardrobe-preview"><span id="wardrobe-preview-line" aria-hidden="true"></span><span id="wardrobe-ball" class="ball-anchor" aria-hidden="true"></span></div>
       </div>
       <input id="appearance-file" type="file" accept="image/*" hidden>
     </section>
@@ -135,7 +135,7 @@
       <div class="panel-heading settings-heading"><span id="help-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="help-title">弹出点名堂</h2><button class="close-button" data-action="close" aria-label="返回设置"><svg class="return-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v8H6m5-5-5 5 5 5"/></svg></button></div>
       <div class="menu-body">
       <p>首页向后拉、反向弹：撞播放球开始游戏；撞红色喇叭球切换静音并弹回；撞绿色齿轮球进入设置；撞衣架球进入换装。未瞄准功能球或力度不足时，会留在原地回弹。暂停菜单的四颗球依次为继续、设置、重开和主页，点击即可。点击主页球会先结算本局，再从结算页返回主界面。设置中可分别调节背景音乐和音效音量，拉到最左侧即可单独静音。还可开启拖拽表情：主页原地回弹结束后恢复常态，其余情况松手立即恢复。</p>
-      <ol class="help-steps"><li><b>01</b><div><strong>边飞边瞄，随时接手。</strong><p>无尽模式中，球高速飞行时也能按住屏幕任意位置拖动。拖拽不再额外刹车，球与敌球以 0.3 倍速继续运动；慢放最多维持 1.2 秒，再用 0.5 秒恢复正常。轻点不会发射。子弹时间独立于反馈强度；系统开启“减少动态效果”时为 0.6 倍速。瞄准记录只保存在本机，可在设置中导出；记录显示经常长时间瞄准时，后续新局的慢放窗口会缩至 0.9 秒，本局时限保持不变。</p></div></li><li><b>02</b><div><strong>向后拉，转向继续弹。</strong><p>无尽普通战斗中，松手沿拖动的反方向转向，不再额外降低当前速度；球慢时，拉伸能补充弹射能量。七个提示点与箭头始终一起显示松手后的发射方向。普通命中至少保留 70% 速度，击杀至少保留 85%；重量级提高质量，不降低无尽弹射速度。高速时，玩家球和分身会带有柔和的半透明拖尾，越快越长，减速后自然消退。</p></div></li><li><b>03</b><div><strong>连杀清场，再选强化。</strong><p>每种敌球有自己的基础分，普通球为 10 分。同一发的第 1、2、3 次击杀分别乘 1、2、3，最多乘 8，获得“狂潮”后最多乘 12；第 3 次击杀起再额外乘 1.5。这一发碰过墙或重球，之后的击杀也乘 1.5，可与连杀和“冒险”倍率叠加，最后将单次得分四舍五入为整数。下一发重新计算连击。本阶段击杀达标后，从最后一杀的位置向外连锁清场，剩余敌球每颗基础加 10 分；“冒险”的分数倍率同样生效。首阶段需击杀 14 颗，之后每阶段多 4 颗；分数只记成绩。清场完毕，小球自动就位，撞向三颗奖励球之一，0.6 秒后进入新阶段。长按奖励球可查看球内的小图示，松开后隐藏。</p></div></li></ol>
+      <ol class="help-steps"><li><b>01</b><div><strong>边飞边瞄，随时接手。</strong><p>无尽模式中，球高速飞行时也能按住屏幕任意位置拖动。拖拽不再额外刹车，球与敌球以 0.3 倍速继续运动；慢放最多维持 1.2 秒，再用 0.5 秒恢复正常。轻点不会发射。子弹时间独立于反馈强度；系统开启“减少动态效果”时为 0.6 倍速。瞄准记录只保存在本机；记录显示经常长时间瞄准时，后续新局的慢放窗口会缩至 0.9 秒，本局时限保持不变。</p></div></li><li><b>02</b><div><strong>向后拉，转向继续弹。</strong><p>无尽普通战斗中，松手沿拖动的反方向转向，不再额外降低当前速度；球慢时，拉伸能补充弹射能量。七个提示点与箭头始终一起显示松手后的发射方向。普通命中至少保留 70% 速度，击杀至少保留 85%；重量级提高质量，不降低无尽弹射速度。高速时，玩家球和分身会带有柔和的半透明拖尾，越快越长，减速后自然消退。</p></div></li><li><b>03</b><div><strong>连杀清场，再选强化。</strong><p>每种敌球有自己的基础分，普通球为 10 分。同一发的第 1、2、3 次击杀分别乘 1、2、3，最多乘 8，获得“狂潮”后最多乘 12；第 3 次击杀起再额外乘 1.5。这一发碰过墙或重球，之后的击杀也乘 1.5，可与连杀和“冒险”倍率叠加，最后将单次得分四舍五入为整数。下一发重新计算连击。本阶段击杀达标后，从最后一杀的位置向外连锁清场，剩余敌球每颗基础加 10 分；“冒险”的分数倍率同样生效。首阶段需击杀 14 颗，之后每阶段多 4 颗；分数只记成绩。清场完毕，小球自动就位，撞向三颗奖励球之一，0.6 秒后进入新阶段。长按奖励球可查看球内的小图示，松开后隐藏。</p></div></li></ol>
       <p class="help-rule"><strong>闯关模式</strong>：点击数字球进关，沿圆环滑动浏览。一百关保留五种玩法：尾号1、2为破墙，3、4为落袋，5、6为合成，7、8为推杆，9、0为钉板狂热，每类二十档。每关先选一种强化，只在本关生效。通常飞行四秒后准备收尾，高速时最多延长一秒，再平滑减速；低速保持0.4秒可提前结束。场上三个点评估当前评分条件，关前可查看具体要求。连续失败三次可跳关，不计评分。主动重开沿用本轮强化候选，不清空已累计失败；真正失败后才重抽。</p>
       <p class="help-rule"><strong>破墙</strong>：清空上方所有砖，游荡球只计分。高速正面撞击造成双倍基础伤害，受伤砖变淡；同发破四砖只庆祝一次。发射数不超过墙体总耐久的35%得三点，不超过50%得两点，预算内清空得一点。</p>
       <p class="help-rule"><strong>钉板狂热</strong>：清空实心目标钉，描边钉可借力；本发命中的钉结束后才消失。球心从上方进入底部移动桶可返还一球。剩余至少3球得三点、至少1球得两点，预算内清空得一点。最后目标触发狂热，剩余球每颗加10分；每十关仍可解锁基础皮肤。</p>
@@ -151,7 +151,7 @@
       <p class="help-rule">无尽普通战斗开场有 <strong>6 颗</strong>敌球，之后成簇刷新；场上数量不足时会补充，随阶段提高至至少 14 颗。敌球受伤会略微缩小，碰撞范围不变。达到 24 颗时，原边框上叠加红色呼吸提示，26 颗时增强；碰撞范围不变，转场时红色随呼吸消失。到达 <strong>28 颗</strong>后有 0.8 秒宽限，及时击杀降到 27 颗即可解围；每局还有一次保命，会在宽限结束时自动清掉最老的 3 颗，不计分。保命用完后再次超时，本局结束。血量与密度随阶段及局内时间提高；暂停时不计时。</p>
       <p class="help-rule"><strong>七种敌球</strong>随无尽阶段逐步加入：第 3 阶段的空心环轻且弹，第 6 阶段的重球更硬、可当墙借力，第 8 阶段的分裂球被击破后分成三颗小球，第 10 阶段的游走球会自行移动，第 12 阶段的簇长吸引同簇伙伴，第 13 阶段的磁球吸引附近玩家、破裂时推开邻球，第 16 阶段的护盾球先挡下一次有效攻击。首次出现时会先单独展示前三颗，同屏种类随阶段最多升至五种。空心环、重球、分裂球、游走球、簇长、磁球、护盾球的基础分依次为 15、30、20、20、30、25、20，分裂小球为 5；自动清场仍每颗固定 10 分。</p>
       <p class="help-rule"><strong>纪录与下一局</strong>：超过本机最佳时分数会弹一下并保持玩家色。分数下十个小点显示阶段进度。每局的敌球刷新与强化抽取都会重新随机。每局开局固定选择一个常规强化，与历史最高阶段无关。只要本局击败过Boss，结算球就会持续戴着小王冠；单发连击至少6次也可获得这一表现。结算显示最大连击、到达阶段、分数和纪录；点击空白处可快速重开，功能球仍可正常使用。</p>
-      <p class="game-version">球球了 · 7.9.0</p>
+      <p class="game-version">球球了 · 7.11.1</p>
       </div>
     </section>
     <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-label="本局结算">
@@ -166,6 +166,7 @@
       </div>
     </section>
   </div>
+  <div id="ui-companions" hidden aria-hidden="true"></div>
   <div id="ui-ball" hidden aria-hidden="true"><svg viewBox="0 0 100 100"><defs><radialGradient id="ui-big-eye-gradient" gradientUnits="userSpaceOnUse" cx="50" cy="50" r="50"><stop class="ui-big-eye-center" offset="0"/><stop class="ui-big-eye-edge" offset="1"/></radialGradient></defs><circle class="ui-body" cx="50" cy="50" r="50"/><path class="ui-pull-outline" style="display:none"/><g class="ui-eyes"><g class="ui-normal-eyes"><ellipse cx="41.5" cy="46.5" rx="2.625" ry="4.75"/><ellipse cx="58.5" cy="46.5" rx="2.625" ry="4.75"/></g><g class="ui-eye-paths" style="display:none"><path class="ui-eye-left"/><path class="ui-eye-right"/></g></g><g class="ui-big-eye" style="display:none"><path class="ui-big-eye-body" fill="url(#ui-big-eye-gradient)" style="fill:url(#ui-big-eye-gradient)"/><circle class="ui-big-eye-pupil" fill="#000" style="fill:#000"/></g><path class="ui-result-crown" style="display:none"/></svg></div>
   <div id="result-shadow" hidden aria-hidden="true"></div>
   <div id="control-transfers" aria-hidden="true"></div>

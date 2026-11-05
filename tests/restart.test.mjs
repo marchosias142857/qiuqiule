@@ -7,13 +7,15 @@ import {skinContour,contourArea} from '../dist/skins.js';
 import {UPGRADE_DEFINITIONS,UPGRADES} from '../dist/upgrades.js';
 import {impactShards} from '../dist/feedback.js';
 import {BOSS_TIMING} from '../dist/physics.js';
+import {companionGeometry,companionSvg} from '../dist/companions.js';
+import {crownOutline} from '../dist/boss-visuals.js';
 
 // Run the real entry module and scene with DOM/audio/Phaser boundaries stubbed.
 const elements=new Map(),listeners=new Map(),windowListeners=new Map(),saved=new Map();
 function element(selector){
   if(elements.has(selector))return elements.get(selector);
   const classes=new Set();
-  const e={hidden:false,inert:false,children:[],dataset:{},listeners:new Map(),style:{setProperty(){},removeProperty(){}},
+  const e={hidden:false,inert:false,children:[],dataset:{},listeners:new Map(),style:{setProperty(name,value){this[name]=value;},removeProperty(name){delete this[name];}},
     classList:{add:(...names)=>names.forEach(x=>classes.add(x)),remove:(...names)=>names.forEach(x=>classes.delete(x)),contains:x=>classes.has(x),toggle(x,on){on?classes.add(x):classes.delete(x);}},
     attributes:{},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},addEventListener(type,fn){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(fn);},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
     firstElementChild:{style:{}},lastElementChild:{style:{}},
@@ -74,6 +76,7 @@ export const advanceUi=updateUiBall;
 export const sourcePose=currentPlayerPose;
 export function readRestart(){return {world,scene,screen,modal,paused,result,transfer,controlFlight,uiAnchor,releaseOverlay,pauseOnArrival,drag,selectedMode,currentLevel,campaignProgress,selector,levelPointer,choicePress,campaignOffer,campaignAttemptId,campaignRecorded};}
 export function seedRenderer(graphics,width=390,height=844,arena=false){
+  companionState=normalizeCompanionState(null);companionTween=null;companionClock=0;resetCompanionTrails();
   campaignOffer=null;pendingCampaignUpgrade=null;campaignAttemptId=null;campaignRecorded=false;$('#campaign-preflight').hidden=true;
   clearChoicePress();aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
   $('#feedback-demo').testViewport={width,height};
@@ -139,6 +142,7 @@ export const readHome=()=>home;
 export const expressionEnabled=()=>settings.expressions;
 export const setExpressionEnabled=value=>{settings.expressions=value;};
 export const playerInk=()=>hex(settings.player);
+export const feedbackInk=()=>playerFeedbackColor();
 export function setPlayerInk(value){const previous=settings.player;settings.player=value;return previous;}
 export function recordTones(){
   const calls=[],original=sound.tone;sound.tone=(...args)=>calls.push(args);
@@ -183,6 +187,7 @@ export function seedSkins(raw=null,completed=0){
   skins=normalizeSkins(raw,completed);playerContour=skinContour(skins.enabled?{sides:skins.sides,variant:skins.variant}:0);
   skinTween=null;skinOverride=null;skinUnlock=null;lastUiPose=null;appearance=null;appearanceUrl=null;
   appearanceState=normalizeAppearanceState(null);appearanceTween=null;appearanceOverride=null;
+  companionState=normalizeCompanionState(null);companionTween=null;companionClock=0;resetCompanionTrails();
   campaignProgress=normalizeProgress({completed});
 }
 export function readSkins(){return {skins,playerContour,skinOverride,skinTween,skinUnlock,lastUiPose,active:activeContour()};}
@@ -236,6 +241,23 @@ export function seedWardrobePresentation(time=.75){
 export function bindWardrobeControls(controls){const previous=wardrobeUi;wardrobeUi=controls;return ()=>{wardrobeUi=previous;};}
 export const paintUiForTest=paintUiBall;
 export const drawPlayerForTest=drawBall;
+export function seedCompanions(raw=null,{best=0}={}){
+  companionState=normalizeCompanionState(raw,{best});companionTween=null;companionClock=0;resetCompanionTrails();return companionState;
+}
+export function readCompanions(){return {state:companionState,tween:companionTween,clock:companionClock,layers:companionLayers()};}
+export const readCompanionHistory=()=>structuredClone([...companionTrails.entries]);
+export const chooseCompanionForTest=chooseCompanion;
+export const advanceCompanions=updateCompanionVisual;
+export const grantCompanionsForTest=grantEndlessCompanions;
+export function recordCompanionDraws(){
+  const original=drawPlayerCompanions,calls=[];
+  drawPlayerCompanions=function(g,pose,alpha,contour){
+    const first=g.shapes?.length||0,result=original(g,pose,alpha,contour);
+    calls.push({pose:{...pose},alpha,contour:contour?.map(point=>({...point})),shapes:g.shapes?.slice(first)||[]});return result;
+  };
+  return {calls,restore(){drawPlayerCompanions=original;}};
+}
+
 
 export const startWithFont=bootWithFont;
 export const renderLevelNumber=levelNumberMarkup;
@@ -398,6 +420,7 @@ function graphicsRecorder(){
     lineBetween(x1,y1,x2,y2){this.lines.push({x1,y1,x2,y2,width:strokeWidth,color:strokeColor,alpha:strokeAlpha});},
     moveTo(x,y){points.push({x,y});},lineTo(x,y){points.push({x,y});},
     fillPath(){this.shapes.push({type:'path',color,alpha,points:[...points]});},
+    fillTriangle(x1,y1,x2,y2,x3,y3){this.shapes.push({type:'triangle',color,alpha,points:[{x:x1,y:y1},{x:x2,y:y2},{x:x3,y:y3}]});},
     fillEllipse(x,y,width,height){this.shapes.push({type:'ellipse',color,alpha,x,y,width,height});},
     fillCircle(x,y,r){this.shapes.push({type:'circle',color,alpha,x,y,r});}};
   return new Proxy(g,{get:(target,key)=>key in target?target[key]:()=>{}});
@@ -2048,21 +2071,43 @@ test('tap, cancel, interruption, campaign and acceptance-demo gestures do not co
   }
 });
 
-test('the settings export action downloads the bounded local aim report without changing a running window',t=>{
-  controlRun();app.seedAimStats({completedCount:30,samples:Array(30).fill(1.05)});
-  const originalCreate=document.createElement,originalBody=document.body,created=[],appended=[];
-  document.createElement=tag=>{
-    if(tag!=='a')return originalCreate(tag);
-    const anchor={click(){this.clicked=true;},remove(){this.removed=true;}};created.push(anchor);return anchor;
-  };
-  document.body={append:node=>appended.push(node)};
-  t.after(()=>{document.createElement=originalCreate;if(originalBody===undefined)delete document.body;else document.body=originalBody;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
-  clickAction('export-aim');assert.equal(created.length,1);assert.deepEqual(appended,created);
-  const link=created[0];assert.equal(link.clicked,true);assert.equal(link.removed,true);assert.equal(link.download,'qiuqiule-aim-v7.9.0.json');
-  assert.match(link.href,/^data:application\/json;charset=utf-8,/);
-  const report=JSON.parse(decodeURIComponent(link.href.slice(link.href.indexOf(',')+1)));
-  assert.equal(report.sampleCount,30);assert.equal(report.medianSeconds,1.05);assert.equal(report.nextHoldSeconds,.9);assert.equal(report.currentRunHoldSeconds,1.2);
-  assert.equal(app.readAimStats().currentRunHoldSeconds,1.2,'exporting statistics never applies calibration mid-run');
+test('v7.11 restore defaults synchronizes preferences and persistence while preserving records, unlocks, photos and equipped cosmetics',async()=>{
+  const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
+  assert.match(html,/data-action="restore-defaults"/);assert.doesNotMatch(html,/data-action="export(?:-aim)?"/);
+  const defaults={player:'#252720',enemy:'#e88c72',bg:'#f4f3eb',sound:true,haptic:true,expressions:true,bgmVolume:.55,sfxVolume:.75,juice:.6};
+  const prior=new Map(saved);
+  try{
+    for(const appearance of ['original','custom','big-eye'])await withReloadedEntry({player:'#8040a0',enemy:'#806040',bg:'#111111',sound:false,haptic:false,expressions:false,bgmVolume:.12,sfxVolume:.23,juice:.2},false,fresh=>{
+      fresh.seedRenderer(graphicsRecorder());fresh.seedSkins({enabled:true,sides:8,unlocked:11},50);
+      fresh.seedEndless({best:72000,maxStage:25,maxCombo:12});fresh.seedCompanions({selected:'moon-3',unlocked:9});
+      fresh.seedAimStats({completedCount:30,samples:Array(30).fill(1.05)});
+      const photos=fresh.recordCompositePhotos(true),image=fresh.readAppearance().appearance;
+      fresh.seedAppearanceState({selected:appearance==='big-eye'?'custom':appearance,bigEyeUnlocked:true},{hasImage:true});
+      if(appearance==='big-eye'){assert.equal(fresh.chooseAppearanceForTest('big-eye'),true);fresh.advanceSkin(.14);}
+      const progress=structuredClone(fresh.readRestart().campaignProgress),skins=structuredClone(fresh.readSkins().skins),companions=structuredClone(fresh.readCompanions().state),endless=structuredClone(fresh.readEndless().progress),aim=structuredClone(fresh.readAimStats());
+      saved.set('qiuqiule-appearance','data:image/png;base64,test-existing-photo');
+      const preserved=new Map([...saved].filter(([key])=>!['qiuqiule-settings','qiuqiule-appearance-state'].includes(key)));
+      let refreshed=0;const restoreWardrobe=fresh.bindWardrobeControls({refresh(){refreshed++;}});
+      try{
+        listeners.get('click').at(-1)({target:{closest:()=>({dataset:{action:'restore-defaults'}})},detail:1});
+        assert.deepEqual(fresh.readFeedbackSettings(),defaults);assert.deepEqual(JSON.parse(saved.get('qiuqiule-settings')),defaults);
+        for(const key of ['player','enemy','bg']){assert.equal(element('#'+key+'-color').value,defaults[key]);assert.equal(element('#'+key+'-hex').textContent,defaults[key].toUpperCase());}
+        for(const key of ['sound','haptic','expressions'])assert.equal(element('#'+key+'-toggle').attributes['aria-checked'],'true');
+        for(const [key,value]of [['bgm',55],['sfx',75]]){assert.equal(element('#'+key+'-volume').value,value);assert.equal(element('#'+key+'-value').value,value+'%');}
+        assert.equal(element('#feedback-strength').value,60);assert.equal(element('#feedback-value').value,'60%');
+        assert.equal(element('html').style['--ink'],'#252720');assert.equal(refreshed,1);
+        assert.equal(fresh.readAppearancePresentation().tween,null,'an old color fade cannot resurrect a pre-reset preference');
+        assert.equal(fresh.readAppearancePresentation().state.selected,appearance);assert.equal(fresh.readAppearance().appearance,image);
+        assert.deepEqual(fresh.readRestart().campaignProgress,progress);assert.deepEqual(fresh.readSkins().skins,skins);
+        assert.deepEqual(fresh.readCompanions().state,companions);assert.deepEqual(fresh.readEndless().progress,endless);assert.deepEqual(fresh.readAimStats(),aim);
+        assert.deepEqual(new Map([...saved].filter(([key])=>!['qiuqiule-settings','qiuqiule-appearance-state'].includes(key))),preserved);
+        if(appearance==='big-eye'){
+          assert.equal(fresh.readAppearancePresentation().state.previousPlayerColor,defaults.player);
+          assert.equal(fresh.chooseAppearanceForTest('original'),true);assert.equal(fresh.playerInk(),0x252720,'unloading Big Eye cannot undo a later settings reset');
+        }
+      }finally{restoreWardrobe();photos.restore();}
+    });
+  }finally{saved.clear();for(const [key,value]of prior)saved.set(key,value);}
 });
 
 test('slow aim preserves immediate pointer contours, normal HUD timing and a photo draw on every frame',t=>{
@@ -3616,7 +3661,7 @@ test('a new record compares against the starting best, celebrates once and persi
   assert.deepEqual(tones.calls.map(call=>call[0]),[660]);app.updateScoreHud(.1);
   near(Number(element('#score').style.transform.match(/scale\(([^)]+)/)[1]),1.3);assert.deepEqual(tones.calls.map(call=>call[0]),[660,880]);
   world.score=120;world.stage=4;world.maxStage=4;app.updateScoreHud(.2);
-  assert.deepEqual(tones.calls.map(call=>call[0]),[660,880]);assert.equal(element('#score').style.color,'var(--player)');
+  assert.deepEqual(tones.calls.map(call=>call[0]),[660,880]);assert.equal(element('#score').style.color,'');
   const stored=JSON.parse(saved.get('qiuqiule-endless'));
   assert.equal(stored.best,120);assert.equal(stored.maxStage,4);assert.equal(stored.maxCombo,6);
   assert.deepEqual(stored.daily.find(day=>day.key==='2030-01-01'),{key:'2030-01-01',best:120,maxStage:4,maxCombo:6});
@@ -3738,6 +3783,7 @@ test('real split balls inherit campaign polygons and migrated default circles wh
       for(const body of [world.player,...world.auxiliaries]){
         const shape=g.shapes.find(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points?.length===193&&Math.hypot(outlineBounds(shape).cx-body.x,outlineBounds(shape).cy-body.y)<body.r*.1&&Math.abs(outlineBounds(shape).width/body.r-(Math.max(...contour.map(p=>p.x))-Math.min(...contour.map(p=>p.x))))<1e-6);
         assert.ok(shape,'each physical player ball has its own visible skin');
+        near(shape.alpha,body.isAuxiliary?.8:1);
         const local=shape.points.slice(0,-1).map(point=>({x:(point.x-body.x)/body.r,y:(point.y-body.y)/body.r}));
         assertSameContour(local,contour);
         assert.equal(playerEyes(g,body).length,body.isAuxiliary?0:2);
@@ -3756,7 +3802,7 @@ test('real split photos use independent slots with the main photo retained and r
     for(const [index,body] of world.auxiliaries.entries()){
       const draw=photos.aux[index];near(draw.pose.x,body.x);near(draw.pose.y,body.y);near(draw.pose.r,body.r);
       assertSameContour(draw.contour,photos.main[0].contour);assert.equal(draw.options.baseColor,photos.main[0].options.baseColor);
-      assert.equal(draw.options.alpha,1);assert.equal(playerEyes(g,body).length,0);
+      assert.equal(draw.options.alpha,.8);assert.equal(playerEyes(g,body).length,0);
     }
     near(photos.main[0].pose.x,world.player.x);near(photos.main[0].pose.r,world.player.r);assert.equal(eyeShapes(g).length,0,'photo mode never adds canvas eyes');
     world.clearAuxiliaries();scene.update(0,0);
@@ -3831,12 +3877,12 @@ test('successful photo rendering paints each main or fading auxiliary body once,
     try{
       scene.update(0,0);assert.equal(photos.main.length,1);assert.equal(photos.aux.length,2);
       assert.equal(bodyFills().length,success===true?0:3,'only an explicit renderer success replaces the main and auxiliary graphics fills');
-      assert.equal(photos.main[0].options.alpha,1);assert.ok(photos.aux.every(call=>call.options.alpha===1));
+      assert.equal(photos.main[0].options.alpha,1);assert.ok(photos.aux.every(call=>call.options.alpha===.8));
       world.endRun('capacity');scene.update(0,0);scene.advanceEnding(.6);
       const result=app.readRestart().result;assert.equal(result.sceneBodies.auxiliaries.length,2);result.clock=.65*.5;
-      photos.aux.length=0;g.clear();scene.drawArena();assert.equal(photos.aux.length,2);assert.ok(photos.aux.every(call=>Math.abs(call.options.alpha-.5)<1e-9));
+      photos.aux.length=0;g.clear();scene.drawArena();assert.equal(photos.aux.length,2);assert.ok(photos.aux.every(call=>Math.abs(call.options.alpha-.4)<1e-9));
       const fills=bodyFills();assert.equal(fills.length,success===true?0:2,'half-transparent photo auxiliaries must not receive a second colored fill below the photo');
-      if(success!==true)assert.ok(fills.every(shape=>Math.abs(shape.alpha-.5)<1e-9));
+      if(success!==true)assert.ok(fills.every(shape=>Math.abs(shape.alpha-.4)<1e-9));
     }finally{photos.restore();app.seedSkins();}
   }
 });
@@ -5075,7 +5121,7 @@ test('v7.9 endless appearance reward uses the animated unlock route and returns 
   assert.ok(app.readRestart().result);
 });
 
-test('v7.9 appearance fades preserve the moving wardrobe preview and only selecting Big Eye resets player color',t=>{
+test('v7.10 appearance fades preserve preview motion and restore the pre-Big Eye player color',t=>{
   app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedAppearanceState({bigEyeUnlocked:true});
   const oldSettings=app.readFeedbackSettings();app.setPlayerInk('#405060');
   t.after(()=>{app.seedSkins();app.setPlayerInk(oldSettings.player);});
@@ -5095,7 +5141,7 @@ test('v7.9 appearance fades preserve the moving wardrobe preview and only select
   near(app.readAppearancePresentation().layers.reduce((sum,layer)=>sum+layer.weight,0),1);
   app.advanceSkin(.28);assert.equal(app.readAppearancePresentation().tween,null);
   assert.ok(app.readAppearancePresentation().layers.every(layer=>layer.id==='original'));
-  assert.equal(app.playerInk(),0xb8db8a,'ordinary appearance does not alter the chosen player color');
+  assert.equal(app.playerInk(),0x405060,'leaving Big Eye restores the exact color captured before equipping it');
   app.advanceUi(.05);near(app.readAppearancePresentation().wardrobeTime,.78);
   assert.notDeepEqual(app.sourcePose(),before,'the existing bounce clock continues through the change');
 });
@@ -5153,4 +5199,305 @@ test('v7.9 transparent custom photos retain their captured base color throughout
   app.advanceSkin(.14);const calls=photos.main.length;
   app.paintUiForTest(pose);app.drawPlayerForTest(g,home.player,app.playerInk());
   assert.equal(photos.main.length,calls,'the completed fade stops drawing the old photo');
+});
+
+
+test('v7.10 Big Eye keeps a visible same-hue comet and seven-point aim guide in the actual battle and Boss scene',t=>{
+  const previous=app.readFeedbackSettings();
+  t.after(()=>{app.seedSkins();app.setPlayerInk(previous.player);app.setFeedbackStrength(previous.juice);});
+  for(const phase of ['battle','boss']){
+    const {world,scene,g,pointer}=controlRun(),p=world.player;
+    app.seedSkins();app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});app.setPlayerInk('#b8db8a');
+    if(phase==='boss'){world.stage=5;world.beginBoss();world.phase='boss';world.events=[];}
+    const b=world.arenaBounds;
+    Object.assign(p,{x:b.left+40,y:b.bottom-p.r-20,vx:world.unit*35,vy:0,feedbackFreeze:0});
+    advanceScene(scene,.12);
+    const ink=app.feedbackInk(),trail=scene.cometTrails.entries.get(p);
+    assert.notEqual(ink,app.playerInk(),'the light green body must not make low-opacity feedback disappear against a light background');
+    assert.equal(trail.active,true);assert.ok(trail.points.length>4);
+    const ribbons=g.shapes.filter(shape=>shape.type==='path'&&shape.color===ink&&shape.alpha>0&&shape.alpha<1&&shape.points.length>=4);
+    assert.equal(ribbons.length,9,'the existing nine-band comet reaches the actual renderer for Big Eye');
+    const start={x:p.x,y:p.y},physical={vx:p.vx,vy:p.vy,r:p.r,mass:p.mass};
+    pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x,start.y+world.maxPull);scene.update(0,0);
+    const dots=g.shapes.filter(shape=>shape.type==='circle'&&shape.r===1.7);
+    assert.equal(dots.length,7);assert.ok(dots.every(dot=>dot.color===0x252720&&dot.alpha>0));
+    for(const [i,dot]of dots.entries()){near(dot.x,p.x);near(dot.y,p.y-p.r-12-(i+1)*16);}
+    const arrow=g.shapes.find(shape=>shape.type==='stroke'&&shape.width===1.4);
+    assert.ok(arrow);assert.equal(arrow.color,0x252720);near(arrow.points[1].x,dots[6].x);near(arrow.points[1].y,dots[6].y);
+    assert.deepEqual({vx:p.vx,vy:p.vy,r:p.r,mass:p.mass},physical,'contrast repair does not alter launch or collision properties');
+    pointer('pointercancel');
+  }
+});
+
+test('v7.10 leaving Big Eye through a new custom photo restores color without replacing unrelated settings',async t=>{
+  const originalImage=globalThis.Image,previous=app.readFeedbackSettings(),stored=new Map(['qiuqiule-settings','qiuqiule-appearance-state','qiuqiule-appearance'].map(key=>[key,saved.get(key)]));
+  globalThis.Image=class{async decode(){}};
+  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedAppearanceState({bigEyeUnlocked:true});
+  app.bindPhotoRenderer({hide(){},setImage(){}});app.setPlayerInk('#405060');
+  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedSkins();app.setPlayerInk(previous.player);for(const [key,value]of stored)value===undefined?saved.delete(key):saved.set(key,value);});
+  assert.equal(app.chooseAppearanceForTest('big-eye'),true);
+  assert.equal(app.chooseAppearanceForTest('big-eye'),false,'reselecting the active appearance cannot overwrite its saved prior color');
+  assert.equal(app.readAppearancePresentation().state.previousPlayerColor,'#405060');
+  app.setPlayerInk('#123456');
+  await app.applyAppearance('data:image/png;base64,bmV3',true);
+  assert.equal(app.readAppearancePresentation().state.selected,'custom');assert.equal(app.playerInk(),0x405060);
+  assert.equal(JSON.parse(saved.get('qiuqiule-settings')).player,'#405060');
+  assert.equal(app.readFeedbackSettings().enemy,previous.enemy);assert.equal(app.readFeedbackSettings().bg,previous.bg);
+  assert.equal(app.readAppearance().appearanceUrl,'data:image/png;base64,bmV3');
+  assert.equal(app.chooseAppearanceForTest('big-eye'),true);app.advanceSkin(.1);
+  assert.equal(app.chooseAppearanceForTest('original'),true);app.advanceSkin(.28);
+  assert.equal(app.playerInk(),0x405060,'a later rapid equip/unequip cycle captures the restored original color again');
+});
+
+
+test('v7.10 formal endless scoring unlocks all nine companion milestones permanently without awarding campaign or trial scores',t=>{
+  const key='qiuqiule-companions',prior=saved.get(key);
+  t.after(()=>{app.seedCompanions();prior===undefined?saved.delete(key):saved.set(key,prior);});
+  const {world}=controlRun();app.seedEndless();app.seedCompanions();
+  world.score=7999;app.updateScoreHud();assert.equal(app.readCompanions().state.unlocked,0);
+  for(let milestone=1;milestone<=9;milestone++){
+    world.score=milestone*8000;app.updateScoreHud();
+    assert.equal(app.readCompanions().state.unlocked,milestone);
+    assert.equal(app.readCompanions().state.selected,null,'earning an orbit decoration must not auto-equip it');
+    assert.equal(JSON.parse(saved.get(key)).unlocked,milestone);
+    assert.equal(app.readRestart().paused,false);assert.equal(app.readRestart().modal,null);
+  }
+  world.score=1;app.updateScoreHud();assert.equal(app.readCompanions().state.unlocked,9);
+  app.seedCompanions(JSON.parse(saved.get(key)));assert.equal(app.readCompanions().state.unlocked,9,'the persisted ownership restores independently of the current score');
+  app.seedCampaignRenderer(graphicsRecorder());app.seedCompanions();app.readRestart().world.score=999999;app.updateScoreHud();app.grantCompanionsForTest();
+  assert.equal(app.readCompanions().state.unlocked,0);
+  app.seedRenderer(graphicsRecorder());app.seedCompanions();app.runFeedbackDemo('steer');app.readRestart().world.score=999999;app.updateScoreHud();app.grantCompanionsForTest();
+  assert.equal(app.readCompanions().state.unlocked,0);
+});
+
+test('v7.10 companion equip, replacement and same-card removal fade from the current appearance without resetting the moving player',t=>{
+  const key='qiuqiule-companions',prior=saved.get(key);
+  t.after(()=>{app.seedCompanions();prior===undefined?saved.delete(key):saved.set(key,prior);});
+  app.seedRenderer(graphicsRecorder());app.seedCompanions({unlocked:9});
+  const player={...app.readHome().player},pose=app.seedWardrobePresentation(.73);
+  assert.equal(app.chooseCompanionForTest('star-3'),true);assert.deepEqual(app.readHome().player,player);assert.deepEqual(app.sourcePose(),pose);
+  assert.deepEqual(app.readCompanions().layers,[],'the newly selected companions begin at zero opacity');
+  app.advanceCompanions(.09);const middle=app.readCompanions();
+  assert.ok(middle.layers.some(layer=>layer.id==='star-3'&&layer.weight>0&&layer.weight<1));
+  assert.equal(app.chooseCompanionForTest('moon-2'),true);assert.equal(app.readCompanions().clock,.09);
+  assert.deepEqual(app.readCompanions().layers,middle.layers,'a fast replacement starts at the currently visible layer mix');
+  app.advanceCompanions(.18);assert.deepEqual(app.readCompanions().layers,[{id:'moon-2',weight:1}]);
+  assert.equal(app.chooseCompanionForTest('moon-2'),true);assert.equal(app.readCompanions().state.selected,null);
+  assert.equal(JSON.parse(saved.get(key)).selected,null,'same-card unequip persists immediately');
+  assert.ok(app.readCompanions().layers.length>0,'unequip leaves a short fade instead of abruptly disappearing');
+  app.advanceCompanions(.18);assert.deepEqual(app.readCompanions().layers,[]);assert.equal(app.readCompanions().tween,null);
+  assert.deepEqual(app.readHome().player,player);assert.deepEqual(app.sourcePose(),pose);
+  app.advanceUi(.05);near(app.readAppearancePresentation().wardrobeTime,.78);
+  app.seedCompanions({unlocked:1});assert.equal(app.chooseCompanionForTest('moon-1'),false);assert.equal(app.readCompanions().state.selected,null);
+});
+
+const physicalFields=body=>Object.fromEntries(['id','x','y','r','mass','density','vx','vy','hp','maxHp'].map(key=>[key,body[key]]));
+function distanceToOutline(point,outline){
+  return Math.min(...outline.map((a,i)=>{
+    const b=outline[(i+1)%outline.length],dx=b.x-a.x,dy=b.y-a.y;
+    const t=Math.max(0,Math.min(1,((point.x-a.x)*dx+(point.y-a.y)*dy)/(dx*dx+dy*dy||1)));
+    return Math.hypot(point.x-a.x-t*dx,point.y-a.y-t*dy);
+  }));
+}
+function assertOrbitMatchesBody(draw,g,id='star-3'){
+  const body=g.shapes.find(shape=>shape.type==='path'&&shape.alpha===1&&shape.color===app.playerInk()&&shape.points.length===193);
+  assert.ok(body,'the actual projected player body is present');
+  assert.equal(draw.contour?.length,192,'the live outline is supplied to the companion renderer');
+  draw.contour.forEach((point,i)=>{near(point.x,body.points[i].x);near(point.y,body.points[i].y);});
+  const geometry=companionGeometry(id,draw.pose,app.readCompanions().clock,{contour:draw.contour});
+  for(const satellite of geometry.satellites){
+    const gap=distanceToOutline(satellite.center,draw.contour);
+    assert.ok(Math.abs(gap-draw.pose.r*.5)<draw.pose.r*.025,`orbit gap ${gap} follows the current silhouette at radius ${draw.pose.r}`);
+  }
+}
+
+
+test('v7.10 the real player renderer carries companions across all scenes while leaving bodies and auxiliary balls unchanged',t=>{
+  const calls=app.recordCompanionDraws();t.after(()=>{calls.restore();app.seedSkins();app.seedCompanions();});
+  for(const mode of ['home','levels','endless','campaign']){
+    const g=graphicsRecorder(),{scene,active,player,pointer}=pullScene(mode,g);
+    app.seedSkins({enabled:true,sides:6,unlocked:6});app.seedCompanions({unlocked:9,selected:'star-3'});
+    const before=physicalFields(player),count=active.enemies?.length,aux=active.auxiliaries?.length;
+    calls.calls.length=0;scene.update(0,0);
+    assert.equal(calls.calls.length,1,mode+' renders the orbit once around its primary player');
+    const draw=calls.calls[0];near(draw.pose.x,player.x);near(draw.pose.y,player.y);near(draw.pose.r,player.r);
+    assert.ok(draw.shapes.length>0,mode+' paints companion shapes and tails');
+    assertOrbitMatchesBody(draw,g);
+    const points=draw.shapes.flatMap(shape=>shape.points||[]);
+    assert.ok(points.length>0);assert.ok(points.every(point=>Math.hypot(point.x-player.x,point.y-player.y)<player.r*1.9));
+    const start={x:player.x,y:player.y};pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x+active.maxPull,start.y);
+    calls.calls.length=0;scene.update(0,0);assert.equal(calls.calls.length,1);near(calls.calls[0].pose.r,player.r);
+    assertOrbitMatchesBody(calls.calls[0],g);assert.notDeepEqual(calls.calls[0].contour,draw.contour,'full pulling updates the orbit from the visible outline');
+    assert.deepEqual(physicalFields(player),before,'orbital decorations never stretch or mutate the collision body');
+    assert.equal(active.enemies?.length,count);assert.equal(active.auxiliaries?.length,aux);pointer('pointercancel');
+  }
+  const {world}=controlRun();app.seedCompanions({unlocked:9,selected:'sun-3'});
+  const auxiliary=world.makeBody(80,350,world.player.r*.7,world.player.density);
+  Object.assign(auxiliary,{isPlayer:true,isAuxiliary:true,born:1,solid:true});
+  const before=physicalFields(auxiliary);calls.calls.length=0;app.drawPlayerForTest(graphicsRecorder(),auxiliary,app.playerInk());
+  assert.equal(calls.calls.length,0,'clones never acquire a second set of purely decorative companions');assert.deepEqual(physicalFields(auxiliary),before);
+});
+
+test('v7.10 detached UI companion paths track the visible outline through squash, pull, rotation, and continuous shape changes',t=>{
+  app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:6,unlocked:15});app.seedCompanions({unlocked:9,selected:'moon-2'});
+  t.after(()=>{app.seedCompanions();app.seedSkins();});
+  const pose={x:100,y:200,r:30,squash:0,roll:0},original={...pose};
+  app.paintUiForTest(pose);const node=element('#ui-companions'),markup=node.innerHTML;
+  assert.equal(node.hidden,false);assert.match(markup,/<svg/);assert.match(markup,/<path/);
+  assert.equal(node.style.width,'120px');assert.equal(node.style.transform,'translate3d(40px,140px,0)');
+  app.paintUiForTest({...pose,x:111,y:193});
+  assert.equal(node.innerHTML,markup,'translation follows the center without changing the local outline');
+  assert.equal(node.style.transform,'translate3d(51px,133px,0)');
+  for(const changes of [{squash:.4},{roll:1.7},{visualPull:{amount:1,angle:.8}}]){
+    app.paintUiForTest({...pose,...changes});assert.notEqual(node.innerHTML,markup,'the orbit geometry follows '+Object.keys(changes)[0]);
+    assert.equal(node.style.transform,'translate3d(40px,140px,0)','the independent container must not scale or rotate the already projected path again');
+  }
+  assert.deepEqual(pose,original);
+  app.advanceCompanions(.1);app.paintUiForTest(pose);assert.notEqual(node.innerHTML,markup,'the shared orbit clock keeps the companions moving');
+  const beforeMorph=node.innerHTML,clock=app.readCompanions().clock;
+  app.changeSkinSides(9);app.advanceSkin(.15);app.paintUiForTest(pose);
+  assert.notEqual(node.innerHTML,beforeMorph,'a partially morphed polygon updates its companion orbit in the same frame');
+  assert.equal(app.readCompanions().clock,clock,'changing shapes does not restart or advance the orbit phase');
+  app.chooseCompanionForTest('moon-2');app.advanceCompanions(.18);app.paintUiForTest(pose);assert.equal(node.hidden,true);
+});
+
+test('v7.10 companion drawing stays below the crown in both Canvas celebration and detached DOM presentation',async t=>{
+  const recording=app.recordCompanionDraws();t.after(()=>{recording.restore();app.seedCompanions();app.seedSkins();});
+  const {g,world,scene}=bossScene();app.seedSkins({enabled:true,sides:6,unlocked:6});app.seedCompanions({unlocked:9,selected:'star-3'});
+  advanceToBoss(world,scene);defeatBoss(world,scene);advanceScene(scene,1.6);recording.calls.length=0;scene.update(0,0);
+  assert.equal(world.phase,'boss-celebrate');assert.equal(recording.calls.length,1);
+  const companionPaths=recording.calls[0].shapes;assert.ok(companionPaths.length>0);
+  const crown=g.shapes.find(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points.length===crownOutline().length&&outlineBounds(shape).cy<world.player.y-world.player.r*.7);
+  assert.ok(crown,'the real celebration crown is visible');
+  const crownIndex=g.shapes.indexOf(crown);
+  assert.ok(companionPaths.every(shape=>g.shapes.indexOf(shape)<crownIndex),'later crown fill occludes overlapping companion shapes and tails');
+  const css=await readFile(new URL('../dist/style.css',import.meta.url),'utf8'),html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
+  const zIndex=id=>Number(/z-index\s*:\s*(\d+)/.exec(new RegExp('#'+id+'\\s*\\{([^}]+)\\}').exec(css)[1])[1]);
+  assert.equal(zIndex('ui-companions'),39);assert.equal(zIndex('ui-ball'),40);
+  assert.match(html,/<div id="ui-companions"[^>]*><\/div>\s*<div id="ui-ball"/,'companions remain a separate sibling below the ball/crown instead of inheriting its transforms');
+});
+
+
+test('v7.10 an unskinned UI ball gives the orbit its actual post-rotation CSS-squashed outline',t=>{
+  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedCompanions({unlocked:9,selected:'moon-2'});
+  t.after(()=>{app.seedCompanions();app.seedSkins();});
+  const pose={x:100,y:200,r:30,squash:.2,roll:0,visualPull:{amount:.7,angle:.8}};
+  app.paintUiForTest(pose);
+  const transform=element('#ui-ball').style.transform,scale=/scale\(([^,]+),([^)]+)\)/.exec(transform);
+  assert.ok(scale,'this fixture exercises the ordinary SVG plus CSS squash route');
+  const [sx,sy]=scale.slice(1).map(Number),offset=pose.r*2;
+  const contour=svgPolyline(uiNode('.ui-pull-outline')).slice(0,192).map(point=>({
+    x:offset+(point.x-50)*pose.r/50*sx,y:offset+(point.y-50)*pose.r/50*sy,
+  }));
+  const expected=companionSvg('moon-2',{x:offset,y:offset,r:pose.r},app.readCompanions().clock,{color:app.playerInk(),alpha:1,contour});
+  const numbers=markup=>[...markup.matchAll(/ d="([^"]+)"/g)].flatMap(match=>match[1].match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi).map(Number));
+  const actualPoints=numbers(element('#ui-companions').innerHTML),expectedPoints=numbers(expected);
+  assert.ok(actualPoints.length>0);assert.equal(actualPoints.length,expectedPoints.length);
+  actualPoints.forEach((coordinate,index)=>assert.ok(Math.abs(coordinate-expectedPoints[index])<.03,'orbit SVG matches the actual screen-space body outline'));
+});
+
+
+test('v7.11 every appearance uses score ink for aim, stage dots and Boss awards on both background themes',async()=>{
+  const css=await readFile(new URL('../dist/style.css',import.meta.url),'utf8');
+  assert.match(css,/#stage-progress\{[^}]*color:var\(--ink\)/,'stage dots inherit the exact score-theme ink');
+  for(const [bg,ink]of [['#f4f3eb',0x252720],['#121415',0xf0f2e8]])for(const appearance of ['original','custom','big-eye']){
+    await withReloadedEntry({player:'#d98db7',bg,juice:1},false,fresh=>{
+      const {world,scene,g,pointer}=controlRun(fresh),p=world.player;
+      fresh.seedSkins();
+      const photos=appearance==='custom'?fresh.recordCompositePhotos(true):null;
+      fresh.seedAppearanceState({selected:appearance,bigEyeUnlocked:true},{hasImage:appearance==='custom'});
+      try{
+        Object.assign(p,{x:180,y:550,vx:world.unit*25,vy:0});
+        pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x,p.y+world.maxPull);scene.update(0,0);
+        const dots=g.shapes.filter(shape=>shape.type==='circle'&&shape.r===1.7);
+        assert.equal(dots.length,7);assert.ok(dots.every(dot=>dot.color===ink),appearance+' guide follows score ink, not the body palette');
+        assert.equal(g.shapes.find(shape=>shape.type==='stroke'&&shape.width===1.4)?.color,ink);
+        pointer('pointercancel');
+        fresh.seedEndless({best:1});world.score=100;fresh.updateScoreHud();
+        assert.equal(fresh.readEndless().runNewRecord,true);assert.equal(element('#score').style.color,'','new-record animation cannot recolor the score independently');
+        assert.equal(element('html').style['--ink'],'#'+ink.toString(16).padStart(6,'0'));
+        world.events.push({type:'bossScore',x:p.x,y:p.y,value:100,segment:1,r:world.unit*2},{type:'bossDefeated',x:p.x,y:p.y,value:500,r:world.unit*2});
+        scene.update(0,0);
+        const label=scene.testLabels.find(label=>label.text==='+100');
+        assert.ok(label);assert.equal(label.style.color,'#'+ink.toString(16).padStart(6,'0'));
+        assert.equal(scene.testLabels.find(label=>label.text==='+500')?.style.color,label.style.color);
+        if(photos)assert.ok(photos.main.length>0,'a successful photo draw coexists with the aim feedback');
+      }finally{photos?.restore();}
+    });
+  }
+});
+
+test('v7.11 custom photo skins retain contrast-safe comets and aim feedback even when their saved player color matches the background',async()=>{
+  for(const [bg,ink]of [['#f4f3eb',0x252720],['#121415',0xf0f2e8]])await withReloadedEntry({player:bg,bg,juice:1},false,fresh=>{
+    const {world,scene,g,pointer}=controlRun(fresh),p=world.player;
+    fresh.seedSkins();const photos=fresh.recordCompositePhotos(true);
+    try{
+      Object.assign(p,{x:80,y:600,vx:world.unit*35,vy:0});advanceScene(scene,.12);
+      const trailInk=fresh.feedbackInk(),history=scene.cometTrails.entries.get(p);
+      assert.notEqual(trailInk,fresh.playerInk(),'the photo inherits a readable trail instead of an invisible saved palette color');
+      assert.equal(history.active,true);assert.ok(history.points.length>4);
+      const ribbons=g.shapes.filter(shape=>shape.type==='path'&&shape.color===trailInk&&shape.alpha>0&&shape.alpha<1&&shape.points.length>=4);
+      assert.equal(ribbons.length,9);assert.ok(photos.main.length>0);
+      const physical={x:p.x,y:p.y,vx:p.vx,vy:p.vy,r:p.r,mass:p.mass};
+      pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x,p.y+world.maxPull);scene.update(0,0);
+      const dots=g.shapes.filter(shape=>shape.type==='circle'&&shape.r===1.7);
+      assert.equal(dots.length,7);assert.ok(dots.every(dot=>dot.color===ink));
+      assert.deepEqual({x:p.x,y:p.y,vx:p.vx,vy:p.vy,r:p.r,mass:p.mass},physical);
+      pointer('pointercancel');
+    }finally{photos.restore();}
+  });
+});
+
+
+test('v7.11 live companions keep their actual world displacement history rather than redrawing an orbit arc around the current player',t=>{
+  const recording=app.recordCompanionDraws();t.after(()=>{recording.restore();app.seedSkins();app.seedCompanions();});
+  const {world,scene,g}=controlRun(),p=world.player;
+  app.seedSkins({enabled:true,sides:8,unlocked:8});app.seedCompanions({selected:'sun-1',unlocked:9});
+  Object.assign(p,{x:180,y:600,vx:0,vy:-world.unit*35,feedbackFreeze:0});scene.update(0,0);
+  const first=app.readCompanionHistory()[0][1].points[0];
+  advanceScene(scene,.2);
+  const history=app.readCompanionHistory();assert.deepEqual(history.map(([key])=>key),['sun-1:0']);
+  const points=history[0][1].points,last=points.at(-1),draw=recording.calls.at(-1);
+  assert.ok(points.length>10);assert.deepEqual(points[0],first,'moving the player cannot translate its already recorded satellite positions');
+  assert.ok(first.y-last.y>50,'the sampled path includes the real center translation');
+  const orbit=companionGeometry('sun-1',draw.pose,app.readCompanions().clock,{contour:draw.contour}).satellites[0];
+  near(last.x,orbit.center.x);near(last.y,orbit.center.y);
+  const ribbons=draw.shapes.filter(shape=>shape.type==='path'&&shape.alpha>0&&shape.alpha<=.26);
+  assert.ok(ribbons.length>0);assert.ok(ribbons.flatMap(shape=>shape.points).every(point=>point.y>orbit.center.y),'an upward-moving player leaves the companion trail below the body, not on the old counterclockwise arc');
+  const before=physicalFields(p),bodyCount=world.auxiliaries.length;
+  g.clear();scene.drawArena();assert.deepEqual(physicalFields(p),before);assert.equal(world.auxiliaries.length,bodyCount);
+});
+
+test('v7.11 companion histories reset at pause, background, resizing, a new world and final unequip without connecting unrelated positions',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;app.seedSkins();app.seedCompanions();});
+  for(const reason of ['pause','background','resize','restart','unequip']){
+    const {world,scene,g,pointer}=controlRun(),p=world.player;let resize;
+    if(reason==='resize'){
+      window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+      app.mountSceneBoundary(pointer.canvas,g);
+    }
+    app.seedCompanions({selected:'moon-2',unlocked:9});Object.assign(p,{x:100,y:600,vx:world.unit*30,vy:0});
+    advanceScene(scene,.1);assert.equal(app.readCompanionHistory().length,2);assert.ok(app.readCompanionHistory().every(([,entry])=>entry.points.length>3));
+    if(reason==='pause')clickAction('pause');
+    else if(reason==='background')document.hidden=true;
+    else if(reason==='resize'){window.innerWidth=844;window.innerHeight=390;resize();}
+    else if(reason==='restart')app.prepareNormalGame();
+    else{app.chooseCompanionForTest('moon-2');app.advanceCompanions(.18);}
+    scene.update(0,0);
+    assert.ok(app.readCompanionHistory().every(([,entry])=>entry.points.length<=1),reason+' discards the previous path before painting again');
+    if(['pause','background','unequip'].includes(reason))assert.equal(app.readCompanionHistory().length,0);
+    document.hidden=false;window.innerWidth=previous.width;window.innerHeight=previous.height;window.addEventListener=previous.add;
+  }
+});
+
+test('v7.11 Big Eye clone opacity multiplies the body and pupil through ordinary and fading renders',t=>{
+  const g=graphicsRecorder(),{world}=controlRun();app.seedSkins();app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});
+  t.after(()=>app.seedSkins());
+  const clone={...world.player,isAuxiliary:true,born:1,squash:0,vx:0,vy:0};
+  for(const alpha of [1,.5,.25]){
+    g.clear();app.drawPlayerForTest(g,clone,app.playerInk(),alpha);
+    assert.ok(g.shapes.some(shape=>shape.type==='triangle'));assert.ok(g.shapes.some(shape=>shape.type==='circle'&&shape.color===0));
+    assert.ok(g.shapes.every(shape=>Math.abs(shape.alpha-alpha*.8)<1e-9));
+  }
 });

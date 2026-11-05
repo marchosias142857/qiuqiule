@@ -26,8 +26,9 @@ import {skinContour,skinPoint,morphSkinContour,normalizeSkins,unlockSkin,selectS
 import {projectSkinContour,paintRadiance,createRadianceCanvas,fitCrownToSkin} from './skin-render.js';
 import {PhotoRenderer,AuxiliaryPhotoPool} from './photo-renderer.js';
 import {initWardrobe,loadAppearance,saveAppearance} from './wardrobe.js';
-import {normalizeAppearanceState,unlockAppearance,selectAppearance,acknowledgeAppearanceUnlock,BIG_EYE_DEFAULT_COLOR} from './appearances.js';
+import {normalizeAppearanceState,unlockAppearance,selectAppearance,changeAppearance,appearanceFeedbackColor,acknowledgeAppearanceUnlock,BIG_EYE_DEFAULT_COLOR} from './appearances.js';
 import {bigEyeGeometry,bigEyeColors,drawBigEye} from './big-eye.js';
+import {normalizeCompanionState,unlockCompanions,selectCompanion,drawCompanions,companionSvg,CompanionTrails} from './companions.js';
 import {unlockPose,unlockLeavePose,createUnlockPanel} from './skin-unlock.js';
 
 const $ = s => document.querySelector(s);
@@ -73,6 +74,10 @@ const savedAppearanceState=storage.read('qiuqiule-appearance-state',null);
 let appearanceState=normalizeAppearanceState(savedAppearanceState,{best});
 let appearanceTween=null,appearanceOverride=null;
 let appearanceRevision=0;
+let companionState=normalizeCompanionState(storage.read('qiuqiule-companions',null),{best});
+let companionTween=null,companionClock=0;
+const companionTrails=new CompanionTrails();
+let companionTrailWorld=null;
 let selectedMode=storage.read('qiuqiule-mode','campaign')==='endless'?'endless':'campaign';
 let currentLevel=1;
 const strainedEyes=[-1,1].map(strainedEyeOutline);
@@ -92,6 +97,8 @@ let feedbackDemo=false;
 let runBest=best;
 
 function isDark(color) {const n=hex(color);return ((n>>16)*.299+((n>>8)&255)*.587+(n&255)*.114)<135;}
+// Gameplay information shares the score's ink, independent of body appearance.
+function themeInkColor(){return isDark(settings.bg)?0xf0f2e8:0x252720;}
 function applyTheme() {
   const dark = isDark(settings.bg);
   homeSoundColor=lightenColor(hex(settings.enemy),.18);
@@ -102,8 +109,9 @@ function applyTheme() {
   homePlayColor=lightenColor(candidates.find(color=>separation(color)>=70**2)??candidates.sort((a,b)=>separation(b)-separation(a))[0],.08);
   document.documentElement.style.setProperty('--play-ball','#'+homePlayColor.toString(16).padStart(6,'0'));
   document.documentElement.style.setProperty('--face',isDark(settings.player)?'#f4f3eb':'#252720');
-  const vars = {bg:settings.bg,player:settings.player,enemy:settings.enemy,ink:dark?'#f0f2e8':'#252720',muted:dark?'#a3ada4':'#818479',line:dark?'#454e49':'#dcded3',panel:dark?'#2c3335':'#fbfbf6','on-ink':dark?'#252720':'#fffef8'};
+  const vars = {bg:settings.bg,player:settings.player,enemy:settings.enemy,ink:'#'+themeInkColor().toString(16).padStart(6,'0'),muted:dark?'#a3ada4':'#818479',line:dark?'#454e49':'#dcded3',panel:dark?'#2c3335':'#fbfbf6','on-ink':dark?'#252720':'#fffef8'};
   for (const [key,value] of Object.entries(vars)) document.documentElement.style.setProperty('--'+key,value);
+  for(const effect of scene?.effects||[])if(effect.type==='label')effect.label.setColor?.(vars.ink);
   const accent=getComputedStyle(document.documentElement).getPropertyValue?.('--accent')?.trim();
   if(/^#[0-9a-f]{6}$/i.test(accent||''))rewardColor=hex(accent);
   $('meta[name=theme-color]').content = settings.bg;
@@ -116,6 +124,17 @@ function applyTheme() {
   syncFeedbackSettings();
   storage.write('qiuqiule-settings',settings);
   if (scene) scene.cameras.main.setBackgroundColor(settings.bg);
+}
+
+// Settings reset changes preferences only; ownership and run progress remain intact.
+function restoreDefaultSettings(){
+  Object.assign(settings,defaults);
+  appearanceTween=null;
+  if(appearanceState.selected==='big-eye'){
+    appearanceState={...appearanceState,previousPlayerColor:defaults.player};
+    persistAppearanceState();
+  }
+  applyTheme();wardrobeUi?.refresh();toast('已恢复默认设置');
 }
 
 function toast(message) {
@@ -187,6 +206,81 @@ function updateChargeFeedback(){
   if(crossed.pulses.length)vibrate(crossed.pulses.at(-1));
   sound.setCharge(amount);
 }
+// Companions are a presentation layer only. No companion enters a World body list.
+function companionLayers(){
+  if(!companionTween)return companionState.selected?[{id:companionState.selected,weight:1}]:[];
+  const t=smooth(clamp(companionTween.elapsed/.18,0,1));
+  const layers=companionTween.from.map(layer=>({...layer,weight:layer.weight*(1-t)}));
+  if(companionTween.to)layers.push({id:companionTween.to,weight:t});
+  const weights=new Map();
+  for(const layer of layers)weights.set(layer.id,(weights.get(layer.id)||0)+layer.weight);
+  return [...weights].filter(([,weight])=>weight>1e-7).map(([id,weight])=>({id,weight}));
+}
+function chooseCompanion(id){
+  const next=selectCompanion(companionState,id);
+  if(next.selected===companionState.selected)return false;
+  const from=companionLayers();
+  companionState=next;companionTween={from,to:next.selected,elapsed:0};
+  storage.write('qiuqiule-companions',companionState);wardrobeUi?.refresh();return true;
+}
+function resetCompanionTrails(){companionTrails.clear();companionTrailWorld=null;}
+function updateCompanionVisual(dt){
+  if(screen!=='play'||!world||detached()||document.hidden)resetCompanionTrails();
+  const elapsed=Math.max(0,Number.isFinite(dt)?dt:0);
+  companionClock+=elapsed;
+  if(companionTween){companionTween.elapsed+=elapsed;if(companionTween.elapsed>=.18)companionTween=null;}
+}
+function grantEndlessCompanions(){
+  if(!world||world.mode==='campaign'||feedbackDemo)return false;
+  const unlocked=unlockCompanions(companionState,world.score);
+  if(!unlocked.newlyUnlocked.length)return false;
+  companionState=unlocked.state;storage.write('qiuqiule-companions',companionState);wardrobeUi?.refresh();return true;
+}
+function companionInk(){
+  let color=hex(settings.player),weight=0;
+  for(const layer of appearanceLayers())if(layer.weight>0){color=weight?blendRgb(color,layer.color,layer.weight/(weight+layer.weight)):layer.color;weight+=layer.weight;}
+  return color;
+}
+function drawPlayerCompanions(g,pose,alpha=1,contour=null){
+  const color=companionInk(),layers=companionLayers();
+  // Record rendered world-space centers, including the player's translation
+  // and contour motion. Menus and catalog previews retain their orbit arcs.
+  const live=screen==='play'&&world&&!detached()&&!document.hidden;
+  if(!live||companionTrailWorld!==world){resetCompanionTrails();if(live)companionTrailWorld=world;}
+  if(live)companionTrails.retainIds(layers.map(layer=>layer.id));
+  for(const layer of layers)drawCompanions(g,layer.id,pose,companionClock,{color,alpha:alpha*layer.weight,reducedMotion,contour,
+    ...(live?{trails:companionTrails}:{})});
+}
+function paintUiCompanions(p){
+  const el=$('#ui-companions'),layers=companionLayers();
+  if(!el)return;
+  el.hidden=!layers.length||wardrobeUi?.isCropping?.()===true||!(p.r>0);
+  if(el.hidden)return;
+  // Keep a separate SVG below the player/crown, while projecting the same
+  // contour deformation into its orbit. The satellite shapes stay undistorted.
+  const size=p.r*4,offset=p.r*2;
+  el.style.width=el.style.height=size+'px';
+  el.style.transform=`translate3d(${p.x-offset}px,${p.y-offset}px,0)`;
+  el.style.clipPath='none';
+  if(uiAnchor==='wardrobe'&&!transfer){
+    const box=$('#wardrobe-panel .wardrobe-preview').getBoundingClientRect();
+    el.style.clipPath=`inset(${box.top-p.y+offset}px ${p.x+offset-box.right}px ${p.y+offset-box.bottom}px ${box.left-p.x+offset}px)`;
+  }
+  const color=companionInk(),pose={x:offset,y:offset,r:p.r};
+  const sq=p.squash||0,amount=p.visualPull?.amount||0,angle=p.visualPull?.angle||0;
+  let contour;
+  if(usesSkinContour())contour=projectSkinContour(activeContour(),{...pose,squash:sq,roll:p.roll||0,pullAmount:amount,deformAngle:angle});
+  else{
+    // The unskinned DOM ball applies its CSS squash in screen axes after
+    // rotating the pull outline; mirror that order during menu transfers.
+    const c=Math.cos(angle),sn=Math.sin(angle);
+    contour=Array.from({length:192},(_,i)=>{
+      const t=i/192*Math.PI*2,q=pullBallPoint(Math.cos(t),Math.sin(t),amount);
+      return {x:offset+p.r*(q.x*c-q.y*sn)*(1-sq),y:offset+p.r*(q.x*sn+q.y*c)*(1+sq*.7)};
+    });
+  }
+  el.innerHTML=`<svg viewBox="0 0 ${size} ${size}" aria-hidden="true">${layers.map(layer=>companionSvg(layer.id,pose,companionClock,{color,alpha:layer.weight,reducedMotion,contour})).join('')}</svg>`;
+}
 function setSkinState(next){
   skins=next;storage.write('qiuqiule-skins',skins);
   skinTween={from:playerContour,to:skinContour(skins.enabled?skins:0),elapsed:0};
@@ -204,12 +298,21 @@ function appearanceLayer(id,layers=appearanceLayers()){
   return {weight,color};
 }
 function persistAppearanceState(){storage.write('qiuqiule-appearance-state',appearanceState);}
+function playerFeedbackColor(){
+  let color=hex(settings.player),weight=0;
+  for(const layer of appearanceLayers()){
+    const ink=appearanceFeedbackColor(layer.color,settings.bg,layer.id);
+    color=weight?blendRgb(color,ink,layer.weight/(weight+layer.weight)):ink;
+    weight+=layer.weight;
+  }
+  return color;
+}
 function chooseAppearance(id){
-  const next=selectAppearance(appearanceState,id,{hasImage:!!appearance});
-  if(next.selected!==id||next.selected===appearanceState.selected)return false;
+  const next=changeAppearance(appearanceState,id,{hasImage:!!appearance,playerColor:settings.player});
+  if(!next.changed)return false;
   const from=appearanceLayers().map(layer=>({...layer}));
-  appearanceState=next;
-  if(id==='big-eye'){settings.player=BIG_EYE_DEFAULT_COLOR;applyTheme();}
+  appearanceState=next.state;
+  if(settings.player!==next.playerColor){settings.player=next.playerColor;applyTheme();}
   appearanceTween=id==='custom'?null:{from,to:{id,color:hex(settings.player),weight:1},elapsed:0};
   persistAppearanceState();wardrobeUi?.refresh();return true;
 }
@@ -234,6 +337,7 @@ function clearPhoto(){
   photoRenderer?.hide();
   auxiliaryPhotos?.hide();
   if(glowCanvas)glowCanvas.hidden=true;
+  const companions=$('#ui-companions');if(companions)companions.hidden=true;
 }
 function drawPlayerPhoto(contour,pose,ui=false,auxiliarySlot=null,alpha=1,baseColor=hex(settings.player)){
   if(!appearance||!photoRenderer||wardrobeUi?.isCropping?.())return false;
@@ -254,7 +358,7 @@ async function setAppearance(url,persist=false,revision=++appearanceRevision){
   if(revision!==appearanceRevision)return;
   appearance=image;appearanceUrl=url;photoRenderer?.setImage(image);auxiliaryPhotos?.setImage(image);
   if(persist){
-    if(image){appearanceState=selectAppearance(appearanceState,'custom',{hasImage:true});appearanceTween=null;}
+    if(image){chooseAppearance('custom');appearanceTween=null;}
     else if(appearanceState.selected==='custom'){appearanceState=selectAppearance(appearanceState,'original',{hasImage:false});appearanceTween=null;}
     persistAppearanceState();
   }
@@ -277,12 +381,12 @@ function initializeSkins(){
   glowCanvas.setAttribute('aria-hidden','true');
   Object.assign(glowCanvas.style,{position:'fixed',pointerEvents:'none',zIndex:'35'});
   document.body.append(glowCanvas);glowContext=glowCanvas.getContext('2d');
-  wardrobeUi=initWardrobe({getState:()=>({...skins,image:appearanceUrl,appearanceId:appearanceState.selected,appearanceUnlocked:appearanceState.bigEyeUnlocked,best}),
+  wardrobeUi=initWardrobe({getState:()=>({...skins,image:appearanceUrl,appearanceId:appearanceState.selected,appearanceUnlocked:appearanceState.bigEyeUnlocked,companionId:companionState.selected,companionUnlocked:companionState.unlocked,playerColor:settings.player,best}),
     onToggle:value=>setSkinState(toggleSkins(skins,value)),
     onSides:value=>setSkinState(toggleSkins(selectSkin(skins,value),true)),
-    onAppearance:chooseAppearance,
+    onAppearance:chooseAppearance,onCompanion:chooseCompanion,
     onImage:url=>setAppearance(url,true),onError:message=>toast(message)});
-  storage.write('qiuqiule-skins',skins);
+  storage.write('qiuqiule-skins',skins);storage.write('qiuqiule-companions',companionState);
   const revision=appearanceRevision;
   loadAppearance().then(async url=>{if(revision!==appearanceRevision)return;await setAppearance(url,false,revision);if(revision!==appearanceRevision)return;
     const latest=storage.read('qiuqiule-appearance-state',savedAppearanceState);
@@ -460,6 +564,7 @@ function paintUiBall(p){
     }
   }
   if(wardrobeUi?.isCropping?.())el.hidden=true;
+  paintUiCompanions(p);
 }
 function movePlayer(from,target,duration,done){
   cancelDrag();transfer={from:{...from},target,duration:reducedMotion?Math.min(duration,.25):duration,elapsed:0,done,revealHome:screen==='home'&&homeReveal<1&&target==='home'};
@@ -527,6 +632,7 @@ function updateUiBall(dt){
     else $('#ui-ball').hidden=true;
   }
   updateControlFlight(dt);
+  if($('#ui-ball').hidden){const companions=$('#ui-companions');if(companions)companions.hidden=true;}
 }
 
 function controlPose(id){
@@ -603,7 +709,7 @@ function presentResult(from,fromPause,sources,duration=.82,view=null){
   $('#final-score').textContent=campaign&&!modernCampaign?'0%':pad(world.score);
   const rating=$('#campaign-rating');
   if(rating){rating.hidden=!modernCampaign;rating.innerHTML=Array.from({length:3},(_,i)=>`<i class="rating-dot${i<(world.resultRating||0)?' filled':''}"></i>`).join('');rating.setAttribute('aria-label',`本关评分 ${world.resultRating||0} 点，共三点`);}
-  $('#final-score').style.color=!campaign&&!feedbackDemo&&world.score>runBest?'var(--player)':'';
+  $('#final-score').style.color='';
   const combo=Math.max(world.maxCombo||0,world.shotKills||0),stage=Math.max(world.maxStage||0,world.stage||1);
   const peak=$('#result-peak'),records=$('#result-records');
   if(peak){peak.hidden=campaign;peak.innerHTML=campaign?'':`<span>最大连击 <b>${combo}</b></span><span>到达阶段 <b>${stage}</b></span>`;}
@@ -741,7 +847,7 @@ function prepareGame({demo=false}={}){
   closeCampaignOffer(false);cancelDrag();feedbackDemo=demo;campaignRecorded=false;campaignAttemptId=null;runBest=best;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';result=null;transfer=null;controlFlight=null;uiAnchor=null;
   skinUnlock=null;skinOverride=null;appearanceOverride=null;clearPhoto();
   releaseOverlay=0;pauseOnArrival=false;
-  $('#control-transfers').replaceChildren();$('#ui-ball').hidden=true;$('#result-shadow').hidden=true;
+  $('#control-transfers').replaceChildren();$('#ui-ball').hidden=true;$('#ui-companions').hidden=true;$('#result-shadow').hidden=true;
   $('.result-actions').classList.remove('arriving');
   scene.g.clear();clearEffects();scene.accumulator=0;scene.timeSlices=[];scene.clock=0;scene.hitSoundAt=0;
   runDay=selectedMode==='endless'?createEndlessRun():null;
@@ -779,7 +885,7 @@ function saveCampaignResult(outcome){
 }
 function saveEndlessProgress(){
   if(!world||world.mode==='campaign'||feedbackDemo)return;
-  grantEndlessAppearance();
+  grantEndlessAppearance();grantEndlessCompanions();
   const stage=Math.max(world.stage||1,world.maxStage||1),combo=Math.max(world.maxCombo||0,world.shotKills||0);
   const key=[world.score,stage,combo,runDay?.key].join(':');if(key===recordedStatsKey)return;recordedStatsKey=key;
   endlessProgress=recordEndlessRun(endlessProgress,{score:world.score,stage,maxCombo:combo,dateKey:runDay?.key});
@@ -1015,7 +1121,7 @@ function updateHud(dt=0){
   if(world?.isCampaignOffer){$('#campaign-preflight').style.opacity=String(world.presentationAlpha);updateChoices();return;}
   if(!world)return;
   if(world.mode!=='campaign'){
-    grantEndlessAppearance();
+    grantEndlessAppearance();grantEndlessCompanions();
     if(!feedbackDemo&&!runNewRecord&&world.score>runBest){runNewRecord=true;recordPulse=.2;recordCue=.1;tone(660,.09,'sine',.04,1.1);}
     const previousCue=recordCue;recordCue=Math.max(0,recordCue-dt);if(previousCue>0&&recordCue===0)tone(880,.12,'sine',.04,1.1);
     recordPulse=Math.max(0,recordPulse-dt);
@@ -1026,7 +1132,7 @@ function updateHud(dt=0){
     const display=scoreFeedback.step(dt,animate);
     const recordScale=recordPulse>0&&animate?1+.3*Math.sin((1-recordPulse/.2)*Math.PI):1;
     $('#score').textContent=pad(display.value);$('#score').style.transform=`scale(${Math.max(display.scale,recordScale)})`;
-    $('#score').style.color=runNewRecord?'var(--player)':'';saveEndlessProgress();
+    $('#score').style.color='';saveEndlessProgress();
   }
   if(world.mode==='campaign'&&world.config?.implemented){
     $('#hud').style.opacity=scene?.campaignArrival?.world===world?smooth(scene.campaignArrival.elapsed/scene.campaignArrival.duration):1;
@@ -1096,7 +1202,7 @@ function drawDragGuide(g,p){
   if(!drag||drag.pending)return;
   const distance=Math.hypot(drag.dx,drag.dy);
   if(distance<=3)return;
-  const color=hex(settings.player);
+  const color=themeInkColor();
   if(screen==='play'&&world.mode==='campaign'&&world.config?.implemented&&!world.isCampaignOffer){
     drawCampaignAim(g,world,drag,{player:p,color});
   }else if(screen==='play'&&world.continuousControl){
@@ -1217,6 +1323,8 @@ function drawPlayerEyes(g,b,{r,visualX,visualY,roll,visual,alpha,pull,color,face
 }
 
 function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
+  // Apply once at the common visual entry point, including photo/capture fades.
+  if(b.isAuxiliary)alpha*=.8;
   const born=birth?.scale??(b.isPlayer?1:ease(b.born));
   const rewardPose=rewardPlayerPose(b),visualX=rewardPose.x,visualY=rewardPose.y,r=rewardPose.r*born;
   if(r<.3)return;
@@ -1248,7 +1356,6 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
     visual.renderedSquash=squash;
     visual.renderedPull=pull?{amount,angle}:null;
   }
-  g.fillStyle(color,alpha*(birth?.alpha??born));g.beginPath();
   const segments=192;
   // Keep eyes, custom contours and photos on the same eased turn as reward
   // placement; the ready-state pose is the identical completed full turn.
@@ -1263,8 +1370,11 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
   const flightAngle=flight?Math.atan2(b.vy,b.vx):0;
   Object.assign(skinPose,{flightStretch,flightAngle});
   const fc=Math.cos(flightAngle),fs=Math.sin(flightAngle),fx=1+flightStretch;
+  const playerPoints=b.isPlayer&&(usesSkinContour()||companionLayers().length)?projectSkinContour(activeContour(),skinPose):null;
+  if(b.isPlayer&&!b.isAuxiliary)drawPlayerCompanions(g,{x:visualX,y:visualY,r},alpha*(birth?.alpha??born),playerPoints);
+  g.fillStyle(color,alpha*(birth?.alpha??born));g.beginPath();
   if(b.isPlayer&&usesSkinContour()){
-    const points=projectSkinContour(activeContour(),skinPose);
+    const points=playerPoints;
     [...points,points[0]].forEach((point,i)=>i?g.lineTo(point.x,point.y):g.moveTo(point.x,point.y));
   }else for(let i=0;i<=segments;i++){
     const t=i/segments*Math.PI*2,ct=Math.cos(t),st=Math.sin(t);
@@ -1476,6 +1586,7 @@ function boot(){
       for(const [id,node] of this.campaignLabels)if(!live.has(id)){node.destroy();this.campaignLabels.delete(id);}
     }
     resetFeedback(){
+      resetCompanionTrails();
       clearChoicePress();this.clearCampaignLabels();
       this.ending=null;this.campaignNotes=[];
       this.cometTrails.clear();this.trailWorld=null;this.trailPhase='';
@@ -1653,7 +1764,7 @@ function boot(){
         }
         if(e.type==='bossStunned'&&!reducedMotion&&settings.juice)this.wallFlashes.push({...e,boss:true,life:0});
         if(e.type==='bossScore'||e.type==='bossDefeated'){
-          const label=this.add.text(e.x,e.y,'+'+e.value,{fontFamily:'GameSans, sans-serif',fontSize:e.type==='bossDefeated'?'22px':'18px',color:settings.player,fontStyle:'normal'}).setOrigin(.5).setScale(viewport.scale);
+          const label=this.add.text(e.x,e.y,'+'+e.value,{fontFamily:'GameSans, sans-serif',fontSize:e.type==='bossDefeated'?'22px':'18px',color:'#'+themeInkColor().toString(16).padStart(6,'0'),fontStyle:'normal'}).setOrigin(.5).setScale(viewport.scale);
           const labelY=e.type==='bossDefeated'?e.y+(e.r||world.player.r)+24:e.y-(e.r||world.player.r)-12;
           this.effects.push({type:'label',label,life:0,total:.6,x:e.x,y:labelY});
           if(e.type==='bossScore'){tone(600+(e.segment||0)*90,.13,'sine',.045,1.25);vibrate(10);}
@@ -1915,7 +2026,7 @@ function boot(){
       if(world.config?.implemented)drawCampaign(g,world,campaignTheme);
       this.drawCampaignLabels(campaignTheme);
       const trailBodies=[world.player,...(world.auxiliaries||[])].filter(body=>!body.captured&&body.active!==false&&body.hp>0);
-      if(this.trailsEnabled()&&trailBodies.length)this.cometTrails.draw(g,trailBodies,hex(settings.player),{unit:world.unit,strength:settings.juice,bounds:world.arenaBounds});
+      if(this.trailsEnabled()&&trailBodies.length)this.cometTrails.draw(g,trailBodies,playerFeedbackColor(),{unit:world.unit,strength:settings.juice,bounds:world.arenaBounds});
       else this.cometTrails.clear();
       if(boss&&!boss.defeated){
         const b=boss,alpha=result?1-smooth(result.clock/.65):1;
@@ -2018,7 +2129,7 @@ function boot(){
       const campaignTarget=screen==='play'&&!result&&world?.mode==='campaign'?(world.mergeWarning||0)*settings.juice:0;
       this.campaignPressure=(this.campaignPressure||0)+(campaignTarget-(this.campaignPressure||0))*(1-Math.exp(-dt/.18));
       if(this.campaignFailure){this.campaignFailure.life+=dt;if(this.campaignFailure.life>=this.campaignFailure.duration)this.campaignFailure=null;}
-      clearPhoto();updateSkin(dt);this.radiance?.setVisible(false);
+      clearPhoto();updateSkin(dt);updateCompanionVisual(dt);this.radiance?.setVisible(false);
       if(screen!=='play'&&this.campaignLabels.size)this.clearCampaignLabels();
       this.updateTrails();
       if(screen==='home'||screen==='entering'){this.updateHome(dt);updateUiBall(dt);return;}
@@ -2338,13 +2449,6 @@ function startUpgradeDemo(kind){
   updateHud();
 }
 
-function exportAimStatistics(){
-  const link=document.createElement('a');
-  link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(aimStatistics(),null,2));
-  link.download='qiuqiule-aim-v7.9.0.json';
-  document.body.append(link);link.click();link.remove();
-}
-
 // Programmatic menu focus must not leave a touch/mouse halo on round buttons.
 document.addEventListener('pointerdown',event=>{
   document.documentElement.dataset.inputMode='pointer';
@@ -2390,8 +2494,7 @@ document.addEventListener('click',e=>{
   if(action==='close')closePanel();
   if(action==='settings')openSettings();
   if(action==='help')openHelp();
-  if(action==='export-aim')exportAimStatistics();
-  if(action==='export-campaign'){const link=document.createElement('a');link.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(campaignProgress,null,2));link.download='qiuqiule-campaign-v7.9.0.json';document.body.append(link);link.click();link.remove();}
+  if(action==='restore-defaults')restoreDefaultSettings();
   if(action==='sound'){settings.sound=!settings.sound;applyTheme();}
   if(action==='haptic'){settings.haptic=!settings.haptic;applyTheme();vibrate(10);}
   if(action==='expressions'){settings.expressions=!settings.expressions;applyTheme();}

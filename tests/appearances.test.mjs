@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   APPEARANCE_STATE_VERSION, APPEARANCE_IDS, BIG_EYE_UNLOCK_SCORE, BIG_EYE_DEFAULT_COLOR,
-  normalizeAppearanceState, unlockAppearance, selectAppearance, acknowledgeAppearanceUnlock,
+  normalizeAppearanceState, unlockAppearance, selectAppearance, changeAppearance, appearanceFeedbackColor, acknowledgeAppearanceUnlock,
 } from '../dist/appearances.js';
 
 const original = {version: 1, selected: 'original', bigEyeUnlocked: false, pendingUnlock: false};
@@ -95,4 +95,91 @@ test('appearance operations never mutate caller state or game settings', () => {
   selectAppearance(raw, 'original', {hasImage: true});
   acknowledgeAppearanceUnlock(raw);
   assert.equal(JSON.stringify(raw), before);
+});
+
+
+test('temporary Big Eye color preserves the exact preceding palette and restores it on either exit', () => {
+  for (const previous of ['#405060', '#Aa22fF', '#b8db8a']) {
+    const owned = {...original, bigEyeUnlocked: true};
+    const entering = changeAppearance(owned, 'big-eye', {playerColor: previous, hasImage: true});
+    assert.equal(entering.changed, true);
+    assert.equal(entering.playerColor, '#b8db8a');
+    assert.equal(entering.state.previousPlayerColor, previous);
+    for (const id of ['original', 'custom']) {
+      const leaving = changeAppearance(entering.state, id, {playerColor: '#123456', hasImage: true});
+      assert.equal(leaving.changed, true);
+      assert.equal(leaving.playerColor, previous, 'settings changes made while wearing Big Eye do not replace the old palette');
+      assert.equal(leaving.state.selected, id);
+      assert.equal('previousPlayerColor' in leaving.state, false);
+    }
+    assert.equal('previousPlayerColor' in owned, false);
+  }
+});
+
+test('color predecessor survives storage, acknowledgements and repeated selection without being overwritten', () => {
+  const entering = changeAppearance({...original, bigEyeUnlocked: true, pendingUnlock: true}, 'big-eye', {playerColor: '#6a5c47'});
+  const loaded = normalizeAppearanceState(JSON.stringify(entering.state), {best: 30000});
+  assert.equal(loaded.previousPlayerColor, '#6a5c47');
+  const repeated = changeAppearance(acknowledgeAppearanceUnlock(loaded), 'big-eye', {playerColor: '#12ab34'});
+  assert.equal(repeated.changed, false);
+  assert.equal(repeated.state.previousPlayerColor, '#6a5c47');
+  assert.equal(repeated.playerColor, '#12ab34');
+  assert.equal(changeAppearance(repeated.state, 'original', {playerColor: repeated.playerColor}).playerColor, '#6a5c47');
+});
+
+test('rapid Big Eye replacement and re-entry always capture the restored current base color', () => {
+  let state = {...original, bigEyeUnlocked: true}, playerColor = '#4682b4';
+  for (let i = 0; i < 6; i++) {
+    let selected = changeAppearance(state, 'big-eye', {playerColor});
+    ({state, playerColor} = selected);
+    assert.equal(state.previousPlayerColor, '#4682b4');
+    assert.equal(playerColor, '#b8db8a');
+    ({state, playerColor} = changeAppearance(state, 'original', {playerColor}));
+    assert.equal(playerColor, '#4682b4');
+  }
+});
+
+test('old v7.9 Big Eye saves use the documented original default because the predecessor was never stored', () => {
+  const legacy = {selected: 'big-eye', bigEyeUnlocked: true};
+  for (const previousPlayerColor of [undefined, null, false, '#abc', '#zzzzzz', 'secret']) {
+    const loaded = normalizeAppearanceState({...legacy, previousPlayerColor});
+    assert.equal('previousPlayerColor' in loaded, false);
+    assert.equal(changeAppearance(loaded, 'original', {playerColor: '#b8db8a'}).playerColor, '#252720');
+  }
+});
+
+test('locked or unavailable appearance choices cannot save, restore or alter player color', () => {
+  assert.deepEqual(changeAppearance(original, 'big-eye', {playerColor: '#aabbcc'}), {
+    state: original, playerColor: '#aabbcc', changed: false,
+  });
+  const equipped = changeAppearance({...original, bigEyeUnlocked: true}, 'big-eye', {playerColor: '#aabbcc'});
+  const unavailable = changeAppearance(equipped.state, 'custom', {hasImage: false, playerColor: equipped.playerColor});
+  assert.equal(unavailable.changed, false);
+  assert.equal(unavailable.playerColor, '#b8db8a');
+  assert.equal(unavailable.state.previousPlayerColor, '#aabbcc');
+});
+
+const contrastRatio = (one, two) => {
+  const lightness = value => {
+    const rgb = [value >>> 16, value >>> 8 & 255, value & 255].map(x => x / 255)
+      .map(x => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4);
+    return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+  };
+  const values = [lightness(one), lightness(two)].sort((a, b) => b - a);
+  return (values[0] + .05) / (values[1] + .05);
+};
+
+test('Big Eye and custom-photo trails retain visible same-hue ink on light and dark backgrounds', () => {
+  const pale = 0xb8db8a, paper = 0xf4f3eb, night = 0x22272b;
+  assert.ok(contrastRatio(pale, paper) < 1.5, 'the old pale fill is nearly invisible at trail alpha');
+  for (const id of ['big-eye', 'custom']) {
+    const darkened = appearanceFeedbackColor(pale, paper, id);
+    assert.ok(contrastRatio(darkened, paper) >= 6);
+    assert.ok((darkened >>> 8 & 255) > (darkened >>> 16) && (darkened >>> 16) > (darkened & 255), 'shade retains the green channel order');
+    assert.equal(appearanceFeedbackColor(pale, night, id), pale, 'already legible green is unchanged on the night palette');
+    assert.ok(contrastRatio(appearanceFeedbackColor(0x252720, night, id), night) >= 6);
+    assert.ok(contrastRatio(appearanceFeedbackColor(paper, paper, id), paper) >= 6, 'photo must not hide an invisible same-background trail color');
+  }
+  assert.equal(appearanceFeedbackColor(pale, paper, 'original'), pale);
+  assert.equal(appearanceFeedbackColor('#405060', '#f4f3eb', 'original'), 0x405060);
 });

@@ -1,4 +1,5 @@
 import {skinOptions,skinContour,SKIN_MIN_SIDES,SKIN_MAX_SIDES} from './skins.js';
+import {COMPANION_DEFINITIONS,normalizeCompanionState,companionPreview} from './companions.js';
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const IMAGE_KEY='qiuqiule-appearance';
@@ -67,16 +68,20 @@ const ease=value=>{const t=clamp(value,0,1);return t*t*(3-2*t);};
 // a later polygon has already been earned.
 export function wardrobeShapeCards(state){
   const owned=new Set(skinOptions(state).map(option=>option.sides));
-  return Array.from({length:SKIN_MAX_SIDES-SKIN_MIN_SIDES+1},(_,index)=>{
+  return [{sides:0,label:'圆形',level:null,unlocked:true,selected:!state.enabled},...Array.from({length:SKIN_MAX_SIDES-SKIN_MIN_SIDES+1},(_,index)=>{
     const sides=SKIN_MIN_SIDES+index;
-    return {sides,level:(sides-5)*10,unlocked:owned.has(sides),selected:!!state.enabled&&state.sides===sides};
-  });
+    return {sides,label:`${sides}边形`,level:(sides-5)*10,unlocked:owned.has(sides),selected:!!state.enabled&&state.sides===sides};
+  })];
 }
 export function wardrobeAppearanceCards(state){
   const selected=state.appearanceId||(state.image?'custom':'original');
   const unlocked=state.appearanceUnlocked===true||Number(state.best)>=26767;
   return [{id:'original',label:'原汁原味',unlocked:true},{id:'custom',label:'自定义',unlocked:true},
     {id:'big-eye',label:'大眼萌',unlocked}].map(card=>({...card,selected:card.id===selected}));
+}
+export function wardrobeCompanionCards(state){
+  const companion=normalizeCompanionState({unlocked:state.companionUnlocked,selected:state.companionId},{best:state.best});
+  return COMPANION_DEFINITIONS.map((card,index)=>({...card,unlocked:index<companion.unlocked,selected:card.id===companion.selected}));
 }
 function shapePreview(sides){
   const path=skinContour(sides,96).map((point,index)=>`${index?'L':'M'}${(50+point.x*26).toFixed(2)} ${(59+point.y*26).toFixed(2)}`).join(' ')+' Z';
@@ -88,14 +93,14 @@ function appearancePreview(id){
   return '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="59" r="26" fill="#252720"/><ellipse cx="45.5" cy="57.2" rx="1.6" ry="3.9" fill="#f4f3eb"/><ellipse cx="54.5" cy="57.2" rx="1.6" ry="3.9" fill="#f4f3eb"/></svg>';
 }
 
-export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=>{},onError=()=>{}}){
+export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=>{},onCompanion=()=>{},onError=()=>{}}){
   const $=id=>document.getElementById(id);
   const panel=$('wardrobe-panel'),content=$('wardrobe-content'),backButton=$('wardrobe-back');
-  const toggle=$('skin-toggle'),file=$('appearance-file');
+  const separator=$('wardrobe-preview-line'),file=$('appearance-file');
   const layer=$('appearance-cropper'),canvas=$('crop-canvas'),zoomControl=$('crop-zoom'),apply=$('crop-apply');
-  const views={main:$('wardrobe-main'),shape:$('shape-gallery'),appearance:$('appearance-gallery')};
-  let page='main',transition=null,crop=null,sourceURL=null,loadGeneration=0,saving=false,restoreFocus=null;
-  const pointers=new Map(),shapeButtons=new Map(),appearanceButtons=new Map();
+  const views={main:$('wardrobe-main'),shape:$('shape-gallery'),appearance:$('appearance-gallery'),companion:$('companion-gallery')};
+  let page='main',transition=null,crop=null,sourceURL=null,loadGeneration=0,saving=false,restoreFocus=null,previewColor=null;
+  const pointers=new Map(),shapeButtons=new Map(),appearanceButtons=new Map(),companionButtons=new Map();
   const setPage=target=>{
     page=target;
     for(const [name,view] of Object.entries(views))view.hidden=name!==page;
@@ -105,12 +110,13 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
   };
   const navigate=target=>{
     if(transition||page===target)return;
-    transition={target,elapsed:0,swapped:false};content.inert=true;
+    transition={target,elapsed:0,swapped:false,lineFrom:page==='main'?0:1,lineTo:target==='main'?0:1};content.inert=true;
     panel.classList.add('wardrobe-switching');
   };
   const update=dt=>{
     if(!transition)return;
     const move=transition;move.elapsed+=Math.max(0,Number.isFinite(dt)?dt:0);
+    separator.style.opacity=String(move.lineFrom+(move.lineTo-move.lineFrom)*ease(move.elapsed/.24));
     if(move.elapsed>=.12&&!move.swapped){
       setPage(move.target);views[move.target].scrollTop=0;move.swapped=true;
     }
@@ -121,16 +127,13 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
     backButton.focus?.({preventScroll:true});
   };
   const refresh=()=>{
-    const state=getState(),options=skinOptions(state),unlocked=options.length>0,active=unlocked&&state.enabled;
-    $('skin-lock').hidden=unlocked;toggle.hidden=!unlocked;
-    toggle.setAttribute('aria-checked',String(active));
-    $('skin-infinity').hidden=unlocked;$('shape-select').hidden=!unlocked;
+    const state=getState();
     $('appearance-tools').hidden=!state.image;
     $('appearance-clear').hidden=!state.image;
     for(const card of wardrobeShapeCards(state)){
       const button=shapeButtons.get(card.sides);button.setAttribute('aria-pressed',String(card.selected));
       button.setAttribute('aria-disabled',String(!card.unlocked));
-      button.setAttribute('aria-label',`${card.sides}边形${card.unlocked?'':`，通过${card.level}关解锁`}`);
+      button.setAttribute('aria-label',card.label+(card.unlocked?'':`，通过${card.level}关解锁`));
       button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
     }
     for(const card of wardrobeAppearanceCards(state)){
@@ -139,6 +142,15 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
       button.setAttribute('aria-label',card.label+(card.unlocked?'':'，达26767分解锁'));
       button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
     }
+    const color=state.playerColor??'#252720';
+    for(const card of wardrobeCompanionCards(state)){
+      const button=companionButtons.get(card.id);button.setAttribute('aria-pressed',String(card.selected));
+      button.setAttribute('aria-disabled',String(!card.unlocked));
+      button.setAttribute('aria-label',card.label+(card.unlocked?'':`，达${card.score}分解锁`));
+      button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
+      if(color!==previewColor)button.querySelector('.companion-preview').innerHTML=companionPreview(card.id,color);
+    }
+    previewColor=color;
   };
   const makeCard=(title,preview,unlockText)=>{
     const button=document.createElement('button');button.type='button';button.className='wardrobe-card';
@@ -146,12 +158,13 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
     return button;
   };
   for(const card of wardrobeShapeCards(getState())){
-    const button=makeCard(`${card.sides}边形`,shapePreview(card.sides),`通过${card.level}关<br>解锁`);
+    const button=makeCard(card.label,shapePreview(card.sides),card.level?`通过${card.level}关<br>解锁`:'');
     button.id=`shape-option-${card.sides}`;button.setAttribute('data-shape',String(card.sides));
     button.addEventListener('click',()=>{
       if(transition)return;
       if(!wardrobeShapeCards(getState()).find(option=>option.sides===card.sides)?.unlocked){onError(`通过${card.level}关解锁`);return;}
-      onSides({sides:card.sides});refresh();
+      if(card.sides===0)onToggle(false);else onSides({sides:card.sides});
+      refresh();
     });
     shapeButtons.set(card.sides,button);$('shape-grid').append(button);
   }
@@ -166,11 +179,21 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
     });
     appearanceButtons.set(card.id,button);$('appearance-grid').append(button);
   }
+  for(const card of wardrobeCompanionCards(getState())){
+    const button=makeCard(card.label,`<span class="companion-preview">${companionPreview(card.id,getState().playerColor??'#252720')}</span>`,`达${card.score}分<br>解锁`);
+    button.id=`companion-option-${card.id}`;button.setAttribute('data-companion',card.id);
+    button.addEventListener('click',()=>{
+      if(transition)return;
+      if(!wardrobeCompanionCards(getState()).find(option=>option.id===card.id)?.unlocked){onError(`达${card.score}分解锁`);return;}
+      onCompanion(card.id);refresh();
+    });
+    companionButtons.set(card.id,button);$('companion-grid').append(button);
+  }
   window.addEventListener('blur',()=>pointers.clear());
   document.addEventListener('visibilitychange',()=>{if(document.hidden)pointers.clear();});
-  toggle.addEventListener('click',()=>{if(!skinOptions(getState()).length)return;onToggle(!getState().enabled);refresh();});
-  $('shape-select').addEventListener('click',()=>{if(skinOptions(getState()).length)navigate('shape');});
+  $('shape-select').addEventListener('click',()=>navigate('shape'));
   $('appearance-select').addEventListener('click',()=>navigate('appearance'));
+  $('companion-select').addEventListener('click',()=>navigate('companion'));
 
   const releaseImage=()=>{if(sourceURL){URL.revokeObjectURL(sourceURL);sourceURL=null;}};
   const closeCrop=()=>{
@@ -241,10 +264,10 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
       else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
     }
   },{capture:true});
-  setPage('main');refresh();
+  separator.style.opacity='0';setPage('main');refresh();
   return {refresh,update,
     back(){if(transition)return true;if(page==='main')return false;navigate('main');return true;},
-    resetNavigation(){transition=null;content.inert=false;content.style.opacity='1';panel.classList.remove('wardrobe-switching');setPage('main');},
+    resetNavigation(){transition=null;content.inert=false;content.style.opacity='1';separator.style.opacity='0';panel.classList.remove('wardrobe-switching');setPage('main');},
     isCropping:()=>!layer.hidden,
     cancelInteraction(){pointers.clear();if(!saving)closeCrop();}
   };
