@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ScoreFeedback, chargeFeedback, impactShards, mergeShards, impactZoom, feedbackStrength, hitFeedbackTier} from '../dist/feedback.js';
+import {ScoreFeedback, impactShards, mergeShards, impactZoom, feedbackStrength, hitFeedbackTier} from '../dist/feedback.js';
 
 const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-9, message || `${actual} ≈ ${expected}`);
 
@@ -76,16 +76,6 @@ test('reduced animation, disabled feedback and restart produce immediate exact s
   assert.deepEqual(score.step(0), {value: 0, scale: 1});
   score.set(10); score.step(.08); score.set(0);
   assert.deepEqual(score.step(.01), {value: 0, scale: 1});
-});
-
-test('charge thresholds each vibrate only once per gesture, even after pulling back', () => {
-  let mask = 0;
-  for (const [amount, expected] of [[.49, []], [.5, [6]], [.7, []], [.8, [8]], [.3, []], [.9, []], [1, [12]], [.6, []], [1, []]]) {
-    const result = chargeFeedback(mask, amount); mask = result.mask;
-    assert.deepEqual(result.pulses, expected);
-  }
-  assert.equal(mask, 7);
-  assert.deepEqual(chargeFeedback(0, 1), {mask: 7, pulses: [6, 8, 12]}, 'a new gesture can cross all thresholds in one pointermove');
 });
 
 const contact = {x: 50, y: 60, r: 24, contactX: 30, contactY: 60, nx: 1, ny: 0,

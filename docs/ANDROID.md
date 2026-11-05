@@ -6,6 +6,8 @@
 
 工作流 `.github/workflows/android.yml` 在 `main` 的游戏资源、依赖、测试或安卓构建脚本变化时运行，也可在 Actions 中手动执行 **Build Android APK**。
 
+只发布网页和源码时，可在推送的最新提交说明中加入 `[skip apk]`。该标记仅跳过本次推送的 Android 构建，手动构建仍可使用。
+
 构建使用 Node 22、JDK 21、Android SDK 35 和 Build Tools 35.0.0，依次完成锁定依赖安装、源码检查、游戏测试、原生工程生成、release 编译和 APK 对齐。
 
 `scripts/prepare-android.mjs` 从 `package.json` 读取版本，写入原生工程：
@@ -16,7 +18,7 @@
 
 原生 `android/` 工程由脚本生成，并继续作为忽略的构建目录。重复执行准备脚本会同步最新游戏资源与版本信息。
 
-从 v7.11.2 起，准备脚本还会将 `android.permission.VIBRATE` 写入应用清单。v7.11.2 开始使用新的独立发布证书。已安装旧签名 APK 的玩家需先卸载旧版，再安装新版；卸载会删除保存在应用内的本地进度。
+从 v7.11.3 源码构建时，准备脚本会从旧原生工程清理 `android.permission.VIBRATE`，构建流程还会检查最终 APK 的权限清单。v7.11.2 开始使用独立发布证书。使用更早签名的玩家需先卸载旧版，卸载会删除应用内的本地进度。
 
 工作流上传名为 **`qiuqiule-v7.7.1-android-unsigned`** 的 artifact，名称随版本变化，包含：
 

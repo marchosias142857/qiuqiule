@@ -22,6 +22,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip apk]')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -73,6 +74,10 @@ jobs:
             "artifacts/qiuqiule-v${APP_VERSION}-unsigned.apk"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging \
             "artifacts/qiuqiule-v${APP_VERSION}-unsigned.apk" > artifacts/APK-INFO.txt
+          if grep -Fq "name='android.permission.VIBRATE'" artifacts/APK-INFO.txt; then
+            echo "::error::The packaged game requests the retired vibration permission."
+            exit 1
+          fi
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" artifacts/apksigner.jar
           cd artifacts
           sha256sum *.apk apksigner.jar APK-INFO.txt > SHA256SUMS.txt

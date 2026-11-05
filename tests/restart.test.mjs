@@ -1859,20 +1859,17 @@ function gradedFeedbackContact(world,{maxHp=10000,hp=maxHp}={}){
   return {enemy:b,hit:world.events.find(e=>e.type==='hit'),kill:world.events.find(e=>e.type==='kill')};
 }
 
-test('v7.2 real ordinary hits dispatch their graded sound and haptic while light hits paint no flash',t=>{
-  const previousVibrate=navigator.vibrate,pulses=[];
-  navigator.vibrate=value=>pulses.push(value);
+test('real ordinary hits dispatch their graded sound while light hits paint no flash',t=>{
   const audio=app.recordFeedbackAudio();
-  t.after(()=>{audio.restore();if(previousVibrate===undefined)delete navigator.vibrate;else navigator.vibrate=previousVibrate;app.setFeedbackStrength(.6);});
+  t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
   for(const [maxHp,tier] of [[10000,'light'],[500,'medium'],[150,'heavy']]){
     const {world,scene,g}=feedbackRun(app,.6);scene.clock=1;scene.hitSoundAt=0;
-    audio.calls.length=0;pulses.length=0;
+    audio.calls.length=0;
     const {enemy,hit}=gradedFeedbackContact(world,{maxHp});
     assert.equal(hit.hitTier,tier);assert.equal(hit.lethal,false);
     scene.update(0,0);
     const sounds=audio.calls.filter(call=>call.name==='impact');
     assert.equal(sounds.length,tier==='light'?0:1);
-    assert.deepEqual(pulses,tier==='heavy'?[12]:[]);
     assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,0);
     assert.equal(scene.impactGhosts.length,0);
     if(tier==='light'){
@@ -2110,13 +2107,38 @@ test('tap, cancel, interruption, campaign and acceptance-demo gestures do not co
   }
 });
 
+test('legacy vibration settings migrate without losing preferences or vibrating during a shot and heavy hit',async t=>{
+  const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
+  assert.doesNotMatch(html,/haptic-toggle|data-action="haptic"|轻触[震振]动|手机[震振]动/);
+  const vibrationCalls=[],previous=Object.getOwnPropertyDescriptor(navigator,'vibrate');
+  Object.defineProperty(navigator,'vibrate',{configurable:true,value:pattern=>{vibrationCalls.push(pattern);return true;}});
+  t.after(()=>{if(previous)Object.defineProperty(navigator,'vibrate',previous);else delete navigator.vibrate;});
+  const preferences={player:'#8040a0',enemy:'#806040',bg:'#111111',sound:true,expressions:false,bgmVolume:.12,sfxVolume:.23,juice:.8};
+  for(const haptic of [true,false])await withReloadedEntry({...preferences,haptic},false,fresh=>{
+    assert.deepEqual(fresh.readFeedbackSettings(),preferences);
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-settings')),preferences);
+    const {world,scene,pointer}=controlRun(fresh,preferences.juice),p=world.player,audio=fresh.recordFeedbackAudio();
+    try{
+      pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+world.maxPull,p.y);pointer('pointerup',p.x+world.maxPull,p.y);
+      assert.ok(world.events.some(e=>e.type==='shoot'));scene.update(0,0);
+      assert.ok(audio.calls.some(c=>c.name==='setCharge'&&c.args[0]>.99));
+      assert.ok(audio.calls.some(c=>c.name==='launch'));
+      advanceScene(scene,.1);
+      const {hit}=gradedFeedbackContact(world,{maxHp:150});assert.equal(hit?.hitTier,'heavy');
+      scene.update(0,0);
+      assert.ok(audio.calls.some(c=>c.name==='impact'&&c.args[0].hitTier==='heavy'));
+      assert.deepEqual(vibrationCalls,[],`legacy haptic=${haptic}`);
+    }finally{audio.restore();}
+  });
+});
+
 test('v7.11 restore defaults synchronizes preferences and persistence while preserving records, unlocks, photos and equipped cosmetics',async()=>{
   const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
   assert.match(html,/data-action="restore-defaults"/);assert.doesNotMatch(html,/data-action="export(?:-aim)?"/);
-  const defaults={player:'#252720',enemy:'#e88c72',bg:'#f4f3eb',sound:true,haptic:true,expressions:true,bgmVolume:.55,sfxVolume:.75,juice:.6};
+  const defaults={player:'#252720',enemy:'#e88c72',bg:'#f4f3eb',sound:true,expressions:true,bgmVolume:.55,sfxVolume:.75,juice:.6};
   const prior=new Map(saved);
   try{
-    for(const appearance of ['original','custom','big-eye'])await withReloadedEntry({player:'#8040a0',enemy:'#806040',bg:'#111111',sound:false,haptic:false,expressions:false,bgmVolume:.12,sfxVolume:.23,juice:.2},false,fresh=>{
+    for(const appearance of ['original','custom','big-eye'])await withReloadedEntry({player:'#8040a0',enemy:'#806040',bg:'#111111',sound:false,expressions:false,bgmVolume:.12,sfxVolume:.23,juice:.2},false,fresh=>{
       fresh.seedRenderer(graphicsRecorder());fresh.seedSkins({enabled:true,sides:8,unlocked:11},50);
       fresh.seedEndless({best:72000,maxStage:25,maxCombo:12});fresh.seedCompanions({selected:'moon-3',unlocked:9});
       fresh.seedAimStats({completedCount:30,samples:Array(30).fill(1.05)});
@@ -2131,7 +2153,7 @@ test('v7.11 restore defaults synchronizes preferences and persistence while pres
         listeners.get('click').at(-1)({target:{closest:()=>({dataset:{action:'restore-defaults'}})},detail:1});
         assert.deepEqual(fresh.readFeedbackSettings(),defaults);assert.deepEqual(JSON.parse(saved.get('qiuqiule-settings')),defaults);
         for(const key of ['player','enemy','bg']){assert.equal(element('#'+key+'-color').value,defaults[key]);assert.equal(element('#'+key+'-hex').textContent,defaults[key].toUpperCase());}
-        for(const key of ['sound','haptic','expressions'])assert.equal(element('#'+key+'-toggle').attributes['aria-checked'],'true');
+        for(const key of ['sound','expressions'])assert.equal(element('#'+key+'-toggle').attributes['aria-checked'],'true');
         for(const [key,value]of [['bgm',55],['sfx',75]]){assert.equal(element('#'+key+'-volume').value,value);assert.equal(element('#'+key+'-value').value,value+'%');}
         assert.equal(element('#feedback-strength').value,60);assert.equal(element('#feedback-value').value,'60%');
         assert.equal(element('html').style['--ink'],'#252720');assert.equal(refreshed,1);
@@ -2377,28 +2399,28 @@ test('a real slow final kill passes through clearing and restores later steps in
   assert.ok(element('#choice-labels').children.length>0&&element('#choice-labels').children.every(node=>node.style.opacity==='1'));
 });
 
-test('charge thresholds vibrate once per drag and cancellation immediately stops the charge sound',t=>{
-  const {world}=feedbackRun(),pointer=inputCanvas(),audio=app.recordFeedbackAudio(),pulses=[];
-  const previousVibrate=navigator.vibrate;
-  navigator.vibrate=value=>pulses.push(value);
-  t.after(()=>{audio.restore();if(previousVibrate===undefined)delete navigator.vibrate;else navigator.vibrate=previousVibrate;app.setFeedbackStrength(.6);});
+test('charge sound follows the current pull and stops immediately on cancellation or release',t=>{
+  const {world}=feedbackRun(),pointer=inputCanvas(),audio=app.recordFeedbackAudio();
+  t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
   const p=world.player,move=amount=>pointer('pointermove',p.x+world.maxPull*amount,p.y);
   pointer('pointerdown',p.x,p.y);
-  for(const amount of [.49,.5,.65,.8,.9,1,.4,.8,1])move(amount);
-  assert.deepEqual(pulses,[6,8,12]);
-  assert.equal(audio.calls.filter(c=>c.name==='setCharge').length,9);
+  const amounts=[.49,.5,.65,.8,.9,1,.4,.8,1];
+  for(const amount of amounts)move(amount);
+  const chargeCalls=audio.calls.filter(c=>c.name==='setCharge');
+  assert.equal(chargeCalls.length,amounts.length);
+  chargeCalls.forEach((call,index)=>near(call.args[0],amounts[index]));
   pointer('pointercancel');assert.equal(app.readRestart().drag,null);assert.equal(audio.calls.at(-1).name,'stopCharge');
-  pointer('pointerdown',p.x,p.y);move(.5);assert.deepEqual(pulses,[6,8,12,6],'a fresh drag rearms the threshold');
+  pointer('pointerdown',p.x,p.y);move(.5);assert.equal(audio.calls.at(-1).name,'setCharge');near(audio.calls.at(-1).args[0],.5);
   pointer('lostpointercapture');assert.equal(audio.calls.at(-1).name,'stopCharge');
   pointer('pointerdown',p.x,p.y);move(.8);pointer('pointerup',p.x+world.maxPull*.8,p.y);
   assert.equal(audio.calls.at(-1).name,'stopCharge','release stops the sustained tone before the launch event is played');
   assert.equal(world.events.filter(e=>e.type==='shoot').length,1,'cancellation never launches a ball');
 });
 
-test('real dragging leaves the border, canvas and collision bounds fixed while haptic and charge audio remain active',t=>{
-  const {g,world,scene}=feedbackRun(),pointer=inputCanvas(),p=world.player,audio=app.recordFeedbackAudio(),pulses=[];
-  world.enemies=[];const previousVibrate=navigator.vibrate;navigator.vibrate=value=>pulses.push(value);
-  t.after(()=>{pointer('pointercancel');audio.restore();if(previousVibrate===undefined)delete navigator.vibrate;else navigator.vibrate=previousVibrate;app.setFeedbackStrength(.6);});
+test('real dragging leaves the border, canvas and collision bounds fixed while charge audio remains active',t=>{
+  const {g,world,scene}=feedbackRun(),pointer=inputCanvas(),p=world.player,audio=app.recordFeedbackAudio();
+  world.enemies=[];
+  t.after(()=>{pointer('pointercancel');audio.restore();app.setFeedbackStrength(.6);});
   scene.update(0,0);const resting={...g.borders[0]},bounds={...world.arenaBounds},canvasTransform=element('#game').style.transform;
   const physical={x:p.x,y:p.y,r:p.r,vx:p.vx,vy:p.vy};
   pointer('pointerdown',p.x,p.y);
@@ -2409,7 +2431,7 @@ test('real dragging leaves the border, canvas and collision bounds fixed while h
     assert.deepEqual({x:p.x,y:p.y,r:p.r,vx:p.vx,vy:p.vy},physical);
     assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);
   }
-  assert.deepEqual(pulses,[6,8,12]);assert.equal(audio.calls.filter(c=>c.name==='setCharge').length,8);
+  assert.equal(audio.calls.filter(c=>c.name==='setCharge').length,8);
   pointer('pointercancel');assert.equal(audio.calls.at(-1).name,'stopCharge');
   advanceScene(scene,.2);assert.deepEqual(g.borders[0],resting);
   p.x=bounds.left+p.r+.25;p.y=world.height*.5;p.vx=-world.unit*5;p.vy=0;world.step(1/120,false);

@@ -11,14 +11,6 @@ export function hitFeedbackTier({damage,maxHp}={}){
   return ratio<.1?'light':ratio<.3?'medium':'heavy';
 }
 
-export function chargeFeedback(mask,amount){
-  let next=mask||0;const pulses=[];
-  [.5,.8,1].forEach((threshold,i)=>{
-    if(amount+1e-8>=threshold&&!(next&(1<<i))){next|=1<<i;pulses.push([6,8,12][i]);}
-  });
-  return {mask:next,pulses};
-}
-
 export class ScoreFeedback {
   constructor(){this.reset(0);}
   reset(value){this.from=this.value=this.target=value;this.age=1;this.pop=.18;this.pendingCombo=0;}

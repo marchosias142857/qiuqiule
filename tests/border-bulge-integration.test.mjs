@@ -38,7 +38,7 @@ const app=await import('data:text/javascript;base64,'+Buffer.from(source+`
 export function seedBorder(graphics,mode='endless',strength=1){
   viewport=displayMetrics(390,844,1);screen='play';modal=null;paused=false;result=null;drag=null;choicePress=null;
   selectedMode=mode;world=mode==='campaign'?new CampaignWorld(390,844,1,()=>.5):new World(390,844,()=>.5,{spawnInitial:false});
-  world.setFeedbackOptions({strength,reducedMotion});settings.juice=strength;settings.sound=true;settings.haptic=false;
+  world.setFeedbackOptions({strength,reducedMotion});settings.juice=strength;settings.sound=true;
   world.events=[];world.spawnTimer=world.floorTimer=world.introTimer=Infinity;
   boot();scene=game.scene;scene.g=graphics;scene.clock=10;scene.hitSoundAt=0;
   const wallSounds=[];sound.wall=(...args)=>{wallSounds.push(args);return true;};

@@ -11,7 +11,7 @@ import {HomeWorld} from './home.js';
 import {drawFunctionalBall,iconMarkup} from './icons.js';
 import {smooth,pullBallPoint,faceTarget,pointerFaceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline,usesStrainedEyes,playerVisualState,relaxedEyeOutline} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
-import {feedbackStrength,hitFeedbackTier,chargeFeedback,ScoreFeedback,impactShards,mergeShards,impactZoom} from './feedback.js';
+import {feedbackStrength,hitFeedbackTier,ScoreFeedback,impactShards,mergeShards,impactZoom} from './feedback.js';
 import {CometTrails} from './comet-trail.js';
 import {wallBulgeSpec,wallBulgeHeight,buildBulgedBorder} from './border-bulge.js';
 import {AimGesture,aimGuide,aimMinimumScale} from './aim.js';
@@ -34,7 +34,7 @@ import {unlockPose,unlockLeavePose,createUnlockPanel} from './skin-unlock.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const defaults = {player:'#252720', enemy:'#e88c72', bg:'#f4f3eb', sound:true, haptic:true, expressions:true, bgmVolume:.55, sfxVolume:.75,juice:.6};
+const defaults = {player:'#252720', enemy:'#e88c72', bg:'#f4f3eb', sound:true, expressions:true, bgmVolume:.55, sfxVolume:.75,juice:.6};
 const palettes = {classic:{player:'#252720',enemy:'#e88c72',bg:'#f4f3eb'},night:{player:'#c9e88b',enemy:'#b2a2dc',bg:'#22272b'},pool:{player:'#205c67',enemy:'#eea752',bg:'#e7f2ee'}};
 const hex = v => parseInt(v.slice(1), 16);
 function lightenColor(color,amount){
@@ -46,7 +46,7 @@ const storage = {read(key, fallback){try{return JSON.parse(localStorage.getItem(
 const saved = storage.read('qiuqiule-settings',{});
 const settings = {...defaults};
 for (const key of ['player','enemy','bg']) if (/^#[0-9a-f]{6}$/i.test(saved[key])) settings[key] = saved[key];
-for (const key of ['sound','haptic','expressions']) if (typeof saved[key] === 'boolean') settings[key] = saved[key];
+for (const key of ['sound','expressions']) if (typeof saved[key] === 'boolean') settings[key] = saved[key];
 for (const key of ['bgmVolume','sfxVolume']) settings[key] = audioLevel(saved[key],defaults[key]);
 settings.juice=feedbackStrength(saved.juice);
 const sound = new GameAudio();
@@ -127,7 +127,6 @@ function applyTheme() {
   for (const key of ['player','enemy','bg']) {$('#'+key+'-color').value=settings[key];$('#'+key+'-hex').textContent=settings[key].toUpperCase();}
   $$('.palette').forEach(b=>b.classList.toggle('active',['player','enemy','bg'].every(k=>settings[k]===palettes[b.dataset.palette][k])));
   syncAudioSettings();
-  $('#haptic-toggle').setAttribute('aria-checked',String(settings.haptic));
   $('#expressions-toggle').setAttribute('aria-checked',String(settings.expressions));
   syncFeedbackSettings();
   storage.write('qiuqiule-settings',settings);
@@ -163,7 +162,6 @@ function syncAudioSettings(){
 }
 function unlockAudio(){sound.unlock();}
 function tone(...args){sound.tone(...args);}
-function vibrate(duration){if(settings.haptic&&navigator.vibrate)navigator.vibrate(duration);}
 function clearChoicePress(){const press=choicePress;choicePress=null;if(press?.canvas.hasPointerCapture(press.id))press.canvas.releasePointerCapture(press.id);}
 function updateChoicePress(now=scene?.inputClock||0){
   if(!choicePress)return;
@@ -209,9 +207,6 @@ function syncFeedbackSettings(){
 function updateChargeFeedback(){
   if(!drag||drag.pending||screen!=='play'||paused||modal||!world||!settings.juice){sound.stopCharge();return;}
   const amount=clamp(Math.hypot(drag.dx,drag.dy)/world.maxPull,0,1);
-  const crossed=chargeFeedback(drag.feedbackMask,amount);drag.feedbackMask=crossed.mask;
-  // One pointer move can cross several levels; play the strongest immediately.
-  if(crossed.pulses.length)vibrate(crossed.pulses.at(-1));
   sound.setCharge(amount);
 }
 // Companions are a presentation layer only. No companion enters a World body list.
@@ -617,7 +612,7 @@ function updateUiBall(dt){
       }
       const grow=result.completed?smooth(clamp((result.clock-1.13)/.23,0,1)):0;
       $('#final-score').style.transform=`scale(${1+grow*.24})`;
-      if(t===1&&result.completed&&!result.celebrated){result.celebrated=true;tone(880,.24,'sine',.05,1.5);vibrate([12,30,18]);}
+      if(t===1&&result.completed&&!result.celebrated){result.celebrated=true;tone(880,.24,'sine',.05,1.5);}
     }
   }
   if(transfer){
@@ -1548,7 +1543,7 @@ function bindInput(canvas){
       }
       if(!paused&&!modal&&!transfer&&!controlFlight){
         if(drag?.id===e.pointerId){
-          if(selector.shoot(p.x-drag.x,p.y-drag.y)){tone(330,.15,'sine',.045,.4);vibrate(9);}
+          if(selector.shoot(p.x-drag.x,p.y-drag.y)){tone(330,.15,'sine',.045,.4);}
         }else if(!gesture.moved&&gesture.targetId!==null&&selector.targetAt(p.x,p.y)?.id===gesture.targetId){
           selector.activateAt(p.x,p.y);
         }
@@ -1565,7 +1560,7 @@ function bindInput(canvas){
       releasedAim=drag.aim.release(p.x,p.y,now);shouldShoot=releasedAim.shouldShoot;
     }
     if(!paused&&!modal){
-      if(screen==='home'&&home.shoot(drag.dx,drag.dy)){tone(220+home.power*190,.15,'sine',.045,.4);vibrate(9);}
+      if(screen==='home'&&home.shoot(drag.dx,drag.dy)){tone(220+home.power*190,.15,'sine',.045,.4);}
       else if(screen==='play'&&world&&shouldShoot&&world.shoot(drag.dx,drag.dy))recordAimGesture(releasedAim);
     }
     cancelDrag();if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
@@ -1786,7 +1781,7 @@ function boot(){
       const finalKill=events.some(e=>e.type==='kill')&&events.some(e=>e.type==='upgrade');
       const bossDefeated=events.some(e=>e.type==='bossDefeated');
       for(const e of events){
-        if(e.type==='shoot'){sound.launch(e.power);vibrate(9);}
+        if(e.type==='shoot'){sound.launch(e.power);}
         if(e.type==='wall'){
           const audible=(e.surface==='arena'||endless)?audioLevel(e.power,.5)>=.25:true;
           if(audible&&this.clock-this.hitSoundAt>.07){sound.wall(e.power,{endless});this.hitSoundAt=this.clock;}
@@ -1798,20 +1793,18 @@ function boot(){
         if(e.type==='hit'&&!e.lethal){
           const hitTier=endless?hitFeedbackTier(e):'heavy';
           if(hitTier!=='light'&&this.clock-this.hitSoundAt>.05){sound.impact({kind:'hit',power:e.power,strength:settings.juice,endless,hitTier});this.hitSoundAt=this.clock;}
-          if(hitTier==='heavy'&&e.power>.35)vibrate(12);
         }
         if(e.type==='kill'){
           if(endless&&e.value>0)scoreFeedback.noteKill(e.combo,world.comboCap);
           if(e.bodySnapshot&&e.freezeDuration>0)this.impactGhosts.push({event:e,body:e.bodySnapshot,life:0,total:e.freezeDuration,startedAt:e.feedbackTime??world.feedbackTime??world.time});
           else this.particles(e,enemyBodyColor(e,hex(settings.enemy)));
-          sound.impact({kind:'kill',level:Math.max(0,(e.feedbackLevel||1)-1),power:e.power??e.impactSpeed/world.baseSpeed,strength:settings.juice,upgradeBoost:!!e.upgradeBoost,endless,frenzy:endless&&!!world.buffs.frenzy});vibrate(15);
+          sound.impact({kind:'kill',level:Math.max(0,(e.feedbackLevel||1)-1),power:e.power??e.impactSpeed/world.baseSpeed,strength:settings.juice,upgradeBoost:!!e.upgradeBoost,endless,frenzy:endless&&!!world.buffs.frenzy});
           this.hitSoundAt=this.clock;this.blinkUntil=this.clock+.075;this.pulseZoom(e);
         }
         if(e.type==='clearingStart'){
           cancelDrag();this.rescaleTimeSlices(clearingTimeScale(world.clearing?.elapsed||0,{juice:settings.juice,reducedMotion}));
           sound.clearStart({strength:settings.juice});
           if(!reducedMotion&&settings.juice)this.zoomPulse={kind:'clear',age:0,x:e.x,y:e.y,rewardTransition:true};
-          if(settings.juice)vibrate([12,30,18]);
         }
         if(e.type==='clearKill'){
           this.particles(e,enemyBodyColor(e,hex(settings.enemy)));
@@ -1824,7 +1817,7 @@ function boot(){
         }
         if(e.type==='rescue'){
           this.rescueUntil=(world.feedbackTime??world.time)+.4;
-          tone(440,.18,'sine',.035,1.4);vibrate([8,24,12]);
+          tone(440,.18,'sine',.035,1.4);
         }
         if(e.type==='shieldBreak'){
           this.particles(e,hex(settings.enemy),5);
@@ -1835,18 +1828,18 @@ function boot(){
         if(e.type==='bossEntry'){tone(260,.35,'sine',.045,1.5);}
         if(e.type==='bossReady')tone(520,.14,'triangle',.035,1.15);
         if(e.type==='bossHit'&&!bossDefeated){
-          sound.impact({kind:'boss',power:e.power,strength:settings.juice});vibrate(9);
+          sound.impact({kind:'boss',power:e.power,strength:settings.juice});
         }
         if(e.type==='bossStunned'&&!reducedMotion&&settings.juice)this.wallFlashes.push({...e,boss:true,life:0});
         if(e.type==='bossScore'||e.type==='bossDefeated'){
           const label=this.add.text(e.x,e.y,'+'+e.value,{fontFamily:'GameSans, sans-serif',fontSize:e.type==='bossDefeated'?'22px':'18px',color:'#'+themeInkColor().toString(16).padStart(6,'0'),fontStyle:'normal'}).setOrigin(.5).setScale(viewport.scale);
           const labelY=e.type==='bossDefeated'?e.y+(e.r||world.player.r)+24:e.y-(e.r||world.player.r)-12;
           this.effects.push({type:'label',label,life:0,total:.6,x:e.x,y:labelY});
-          if(e.type==='bossScore'){tone(600+(e.segment||0)*90,.13,'sine',.045,1.25);vibrate(10);}
+          if(e.type==='bossScore'){tone(600+(e.segment||0)*90,.13,'sine',.045,1.25);}
           else{
             cancelDrag();this.particles(e,hex(settings.enemy),7,e.r/(e.referenceRadius||world.unit*.8));sound.bossDefeat({strength:settings.juice});
             if(settings.juice)this.wallFlashes.push({bossDefeat:true,life:0,duration:.18});
-            if(world.bossVictorySlowTime>0)this.rescaleTimeSlices(reducedMotion||!settings.juice?1:.25);vibrate([12,25,18]);
+            if(world.bossVictorySlowTime>0)this.rescaleTimeSlices(reducedMotion||!settings.juice?1:.25);
           }
         }
         if(e.type==='bossCelebrate')sound.bossVictory();
@@ -1865,7 +1858,7 @@ function boot(){
           // Every collectible reward uses the same contact-directed shard
           // recipe as an enemy kill, without emitting a kill or changing score.
           this.particles(e,e.buff.color?hex(e.buff.color):rewardColor);
-          sound.rewardHit({strength:settings.juice,power:e.power??.5});vibrate([12,30,12]);
+          sound.rewardHit({strength:settings.juice,power:e.power??.5});
         }
         if(world.isCampaignOffer&&e.type==='campaignOfferComplete'){
           campaignOffer.action={type:'choose',upgradeId:e.upgradeId};paused=true;
@@ -1933,16 +1926,16 @@ function boot(){
         if(e.type==='campaignBuff'){
           const label=this.add.text(e.x??world.player.x,e.y??world.player.y,e.label,{fontFamily:'GameSans, sans-serif',fontSize:'15px',color:settings.player,fontStyle:'normal'}).setOrigin(.5).setScale(viewport.scale);
           this.effects.push({type:'label',label,life:0,total:1.15,x:e.x??world.player.x,y:(e.y??world.player.y)-world.player.r-10});
-          tone(700,.2,'sine',.045,1.4);vibrate(10);
+          tone(700,.2,'sine',.045,1.4);
         }
         if(world.mode==='campaign'&&e.type==='campaignLaunchEnd'&&e.reason==='timeout')tone(180,.09,'sine',.018,.8);
         if(world.mode==='campaign'&&e.type==='campaignFail'){
           const cue=campaignFailureFeedback(e.reason);this.campaignFailure={...cue,life:0};
-          tone(cue.frequency,.25,'sine',.045,.6);vibrate(cue.reason==='budget'?12:[12,30,12]);
+          tone(cue.frequency,.25,'sine',.045,.6);
         }
         if(e.type==='over'){
           if(world.mode==='campaign'){this.resetFeedback();openResult();}else this.beginEnding();
-          if(!world.completed&&world.mode!=='campaign'){tone(160,.4,'sine',.06,.4);vibrate([20,40,30]);}
+          if(!world.completed&&world.mode!=='campaign'){tone(160,.4,'sine',.06,.4);}
         }
       }
     }
@@ -2067,8 +2060,8 @@ function boot(){
       if(!modal&&!transfer)home.step(dt,!reducedMotion);
       if(home.action){
         const action=home.action;home.action=null;
-        if(action==='sound'){settings.sound=!settings.sound;applyTheme();tone(540,.09,'sine',.04,1.3);vibrate(10);}
-        if(action==='mode'){syncMode();tone(610,.12,'sine',.04,1.3);vibrate(10);}
+        if(action==='sound'){settings.sound=!settings.sound;applyTheme();tone(540,.09,'sine',.04,1.3);}
+        if(action==='mode'){syncMode();tone(610,.12,'sine',.04,1.3);}
         if(action==='settings')openSettings();
         if(action==='wardrobe')openWardrobe();
       }
@@ -2077,7 +2070,7 @@ function boot(){
         screen='entering';cancelDrag();syncInputs();
         $('#hud').hidden=home.mode==='campaign';$('#hud').classList.remove('campaign');$('#hud').style.opacity=0;$('#score').textContent='0000';
         clearChoiceLabels();$('.pause-button').disabled=true;
-        tone(420,.24,'sine',.055,1.7);vibrate(15);
+        tone(420,.24,'sine',.055,1.7);
       }
       if(screen==='entering'){
         $('#home').style.opacity=home.fade;$('#hud').style.opacity=home.hudOpacity;
@@ -2213,8 +2206,8 @@ function boot(){
         if(!transfer)selector.step(dt,!!drag);
         for(const e of selector.events.splice(0)){
           if(e.type==='tick'||e.type==='scroll'){tone(360+(Math.abs(selector.offset)%8)*35,.04,'sine',.018,1.1);}
-          if(e.type==='tap'){tone(680,.06,'sine',.04,1.15);vibrate(8);}
-          if(e.type==='locked'){tone(150,.10,'sine',.03,.8);vibrate(8);$('#level-announcement').textContent='先通过前一关，即可解锁。';}
+          if(e.type==='tap'){tone(680,.06,'sine',.04,1.15);}
+          if(e.type==='locked'){tone(150,.10,'sine',.03,.8);$('#level-announcement').textContent='先通过前一关，即可解锁。';}
         }
         // Capture the last visible breathing pose before painting an external
         // state, so a click never inserts a round-ball frame before the transfer.
@@ -2571,7 +2564,6 @@ document.addEventListener('click',e=>{
   if(action==='help')openHelp();
   if(action==='restore-defaults')restoreDefaultSettings();
   if(action==='sound'){settings.sound=!settings.sound;applyTheme();}
-  if(action==='haptic'){settings.haptic=!settings.haptic;applyTheme();vibrate(10);}
   if(action==='expressions'){settings.expressions=!settings.expressions;applyTheme();}
 });
 $$('[data-palette]').forEach(button=>button.addEventListener('click',()=>{Object.assign(settings,palettes[button.dataset.palette]);applyTheme();}));

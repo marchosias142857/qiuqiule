@@ -104,7 +104,6 @@
       <div class="color-row"><label for="enemy-color"><span class="color-dot enemy-dot"></span>敌方小球</label><div><code id="enemy-hex">#E88C72</code><input id="enemy-color" type="color" value="#e88c72" aria-label="敌方小球颜色"></div></div>
       <div class="color-row"><label for="bg-color"><span class="color-dot bg-dot"></span>屏幕背景</label><div><code id="bg-hex">#F4F3EB</code><input id="bg-color" type="color" value="#f4f3eb" aria-label="屏幕背景颜色"></div></div>
       <div class="toggle-row"><span>游戏声音</span><button id="sound-toggle" class="toggle" data-action="sound" role="switch" aria-checked="true" aria-label="游戏声音"></button></div>
-      <div class="toggle-row"><span>轻触震动 <small>设备支持时生效</small></span><button id="haptic-toggle" class="toggle" data-action="haptic" role="switch" aria-checked="true" aria-label="轻触震动"></button></div>
       <div class="toggle-row"><span>拖拽表情</span><button id="expressions-toggle" class="toggle" data-action="expressions" role="switch" aria-checked="true" aria-label="拖拽表情"></button></div>
       <div class="volume-controls">
         <div class="volume-row"><div><label for="bgm-volume">背景音乐</label><output id="bgm-value" for="bgm-volume">55%</output></div><input id="bgm-volume" type="range" min="0" max="100" step="1" value="55" aria-label="背景音乐音量"></div>
@@ -155,7 +154,7 @@
       <p class="help-rule">无尽普通战斗开场有 <strong>6 颗</strong>敌球，之后成簇刷新；场上数量不足时会补充，随阶段提高至至少 14 颗。敌球受伤会略微缩小，碰撞范围不变。达到 24 颗时，原边框上叠加红色呼吸提示，26 颗时增强；碰撞范围不变，转场时红色随呼吸消失。到达 <strong>28 颗</strong>后有 0.8 秒宽限，及时击杀降到 27 颗即可解围；每局还有一次保命，会在宽限结束时自动清掉最老的 3 颗，不计分。保命用完后再次超时，本局结束。血量与密度随阶段及局内时间提高；暂停时不计时。</p>
       <p class="help-rule"><strong>七种敌球</strong>随无尽阶段逐步加入：第 3 阶段的空心环轻且弹，第 6 阶段的重球更硬、可当墙借力，第 8 阶段的分裂球被击破后分成三颗小球，第 10 阶段的游走球会自行移动，第 12 阶段的簇长吸引同簇伙伴，第 13 阶段的磁球吸引附近玩家、破裂时推开邻球，第 16 阶段的护盾球先挡下一次有效攻击。首次出现时会先单独展示前三颗，同屏种类随阶段最多升至五种。空心环、重球、分裂球、游走球、簇长、磁球、护盾球的基础分依次为 15、30、20、20、30、25、20，分裂小球为 5；自动清场仍每颗固定 10 分。</p>
       <p class="help-rule"><strong>纪录与下一局</strong>：超过本机最佳时分数会弹一下并保持玩家色。分数下十个小点显示阶段进度。每局的敌球刷新与强化抽取都会重新随机。每局开局固定选择一个常规强化，与历史最高阶段无关。只要本局击败过Boss，结算球就会持续戴着小王冠；单发连击至少6次也可获得这一表现。结算显示最大连击、到达阶段、分数和纪录；点击空白处可快速重开，功能球仍可正常使用。</p>
-      <p class="game-version">球球了 · 7.11.2</p>
+      <p class="game-version">球球了 · 7.11.3</p>
       </div>
     </section>
     <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-label="本局结算">
