@@ -1,3 +1,4 @@
+import {createSvgNode,isSvgMount} from './fixtures/svg-dom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -14,10 +15,11 @@ import {levelConfig,campaignUpgradeChoices} from '../dist/campaign.js';
 const elements=new Map(),listeners=new Map(),windowListeners=new Map(),saved=new Map();
 function element(selector){
   if(elements.has(selector))return elements.get(selector);
+  if(isSvgMount(selector)){const mount=createSvgNode('http://www.w3.org/2000/svg','g');elements.set(selector,mount);return mount;}
   const classes=new Set();
   const e={hidden:false,inert:false,children:[],dataset:{},listeners:new Map(),style:{setProperty(){},removeProperty(){}},
     classList:{add:(...names)=>names.forEach(x=>classes.add(x)),remove:(...names)=>names.forEach(x=>classes.delete(x)),contains:x=>classes.has(x),toggle(x,on){on?classes.add(x):classes.delete(x);}},
-    attributes:{},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},addEventListener(type,fn){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(fn);},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
+    attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k]??null;},removeAttribute(k){delete this.attributes[k];},addEventListener(type,fn){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(fn);},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
     firstElementChild:{style:{}},lastElementChild:{style:{}},
     querySelector:child=>element(selector+' '+child),
     getBoundingClientRect(){
@@ -40,7 +42,7 @@ globalThis.matchMedia=()=>({matches:false});
 globalThis.getComputedStyle=()=>({paddingTop:'0',paddingBottom:'0',borderTopWidth:'0',borderBottomWidth:'0',marginBottom:'0'});
 globalThis.requestAnimationFrame=fn=>fn();
 let createdElementCount=0;
-globalThis.document={readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(`created-${tag}-${++createdElementCount}`),
+globalThis.document={createElementNS:createSvgNode,readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(`created-${tag}-${++createdElementCount}`),
   querySelector:element,
   querySelectorAll:selector=>selector==='.menu-panel'?['#settings-panel','#help-panel','#menu-transition-panel'].map(element):[],
   addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn);}};

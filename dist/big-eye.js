@@ -69,7 +69,12 @@ export function bigEyeGeometry(contour,pose={},options={}){
   if(!Array.isArray(contour)||contour.length<3||!bodyRadius)return {outline:[],center,eye:{...center,r:0},tangentDistance:0};
   const amount=clamp(finite(options.pullAmount,finite(pose.pullAmount)),0,1);
   const angle=finite(options.deformAngle,finite(pose.deformAngle,finite(pose.angle)));
-  const outline=projectSkinContour(contour,{...pose,x:center.x,y:center.y,r:bodyRadius,pullAmount:amount,deformAngle:angle});
+  // Callers may supply this contour's projection for the original pose.
+  // Overrides and sanitized coordinates can require a different projection.
+  const canReuse=options.projectedOutline && (pose.x||0)===center.x && (pose.y||0)===center.y
+    && (pose.r??1)===bodyRadius && clamp(pose.pullAmount||0,0,1)===amount
+    && (pose.deformAngle??pose.angle??0)===angle;
+  const outline=canReuse?options.projectedOutline:projectSkinContour(contour,{...pose,x:center.x,y:center.y,r:bodyRadius,pullAmount:amount,deformAngle:angle});
   const clearance=Math.min(...outline.map((point,i)=>segmentDistance(center,point,outline[(i+1)%outline.length])));
   const radius=Math.min(bodyRadius*BIG_EYE_RADIUS_RATIO,clearance*(1-1e-9));
   const roll=finite(pose.roll),c=Math.cos(roll),s=Math.sin(roll);

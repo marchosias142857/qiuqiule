@@ -1,4 +1,4 @@
-import {transformSkinPoint} from './skin-render.js';
+import {projectSkinContour} from './skin-render.js';
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const ease=value=>1-(1-clamp(value,0,1))**3;
@@ -37,13 +37,13 @@ export function drawEnemyBall(g,body,color,{alpha=1,unit=body.r,player=null,flas
     }
     g.closePath();if(width)g.strokePath();else g.fillPath();
   };
-  const path=(points,paint,opacity,width=0)=>paintPath(points.map(p=>transformSkinPoint(p,pose)),paint,opacity,width);
+  const path=(points,paint,opacity,width=0)=>paintPath(projectSkinContour(points,pose),paint,opacity,width);
   const disk=(radius,paint,opacity,width=0)=>path(radius===1?circle:circle.map(p=>({x:p.x*radius,y:p.y*radius})),paint,opacity,width);
   const type=body.enemyType,edge=darken(color,.22),hollow=type==='ring'||type==='magnet';
   if(hollow){
     let ring;
     if(type==='ring'){
-      const contour=circle.map(p=>transformSkinPoint(p,pose));
+      const contour=projectSkinContour(circle,pose);
       // Move the stroke centre inward by half the added thickness. Offsetting
       // in screen-space normals preserves the original outer edge even while
       // squashing; neither the collider nor the transparent centre is painted.

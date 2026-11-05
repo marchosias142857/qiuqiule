@@ -17,55 +17,65 @@ export function cometProfile(speed,radius,unit,strength=1){
     alpha:.24*gain*Math.sqrt(growth)};
 }
 
-const bounded=(point,bounds)=>bounds?{
-  x:clamp(point.x,bounds.left,bounds.right),y:clamp(point.y,bounds.top,bounds.bottom)
-}:point;
+function vertex(x=0,y=0){return {x,y};}
 
-// Trim by travelled distance, not sample count: a faster ball earns a longer
-// tapered tail without leaving an arbitrary number of detached ghost balls.
-export function cometRibbon(points,{length,width,bounds=null}={}){
-  if(!(length>0)||!(width>0)||points.length<2)return [];
-  // One corner-cutting pass stays inside the sampled path's convex hull. It
-  // rounds a bounce without spline overshoot through the wall, and does not
-  // depend on how often the presentation frame happens to be drawn.
-  const rounded=[points[0]],mixPoint=(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,age:a.age+(b.age-a.age)*t});
-  for(let i=1;i<points.length;i++)rounded.push(mixPoint(points[i-1],points[i],.25),mixPoint(points[i-1],points[i],.75));
-  rounded.push(points[points.length-1]);
-  const path=[{...rounded[rounded.length-1],distance:0}];
-  let distance=0;
-  for(let i=rounded.length-2;i>=0&&distance<length;i--){
-    const newer=path[path.length-1],older=rounded[i],span=Math.hypot(older.x-newer.x,older.y-newer.y);
+function setVertex(out,x,y,bounds){
+  out.x=bounds?clamp(x,bounds.left,bounds.right):x;
+  out.y=bounds?clamp(y,bounds.top,bounds.bottom):y;
+}
+
+// Walk the corner-cutting samples backwards, stopping at the requested length.
+// The original pass emitted the oldest point, .25/.75 of each span, then the head.
+function buildRibbon(points,{length,width,bounds=null},sections,segments){
+  if(!(length>0)||!(width>0)||points.length<2)return 0;
+  const head=points[points.length-1];
+  const first=sections[0]??={};
+  first.x=head.x;first.y=head.y;first.age=head.age;first.distance=0;
+  let count=1,distance=0;
+  for(let index=2*points.length-2;index>=0&&distance<length;index--){
+    let x=points[0].x,y=points[0].y,age=points[0].age;
+    if(index>0){
+      const edge=Math.floor((index-1)/2),t=index%2?.25:.75;
+      const a=points[edge],b=points[edge+1];
+      x=a.x+(b.x-a.x)*t;y=a.y+(b.y-a.y)*t;age=a.age+(b.age-a.age)*t;
+    }
+    const newer=sections[count-1],span=Math.hypot(x-newer.x,y-newer.y);
     if(span<1e-6)continue;
     const take=Math.min(span,length-distance),mix=take/span;
     distance+=take;
-    path.push({x:newer.x+(older.x-newer.x)*mix,y:newer.y+(older.y-newer.y)*mix,
-      age:newer.age+(older.age-newer.age)*mix,distance});
+    const section=sections[count++]??={};
+    section.x=newer.x+(x-newer.x)*mix;section.y=newer.y+(y-newer.y)*mix;
+    section.age=newer.age+(age-newer.age)*mix;section.distance=distance;
   }
-  if(path.length<2||distance<.5)return [];
-  // The requested comet has its narrow tip cut off: preserve an open-looking,
-  // flat nonzero-width end, with no outline and no round end cap.
+  if(count<2||distance<.5)return 0;
   const visibleLength=Math.min(length,distance);
-  const sections=path.map((point,i)=>{
-    const before=path[Math.max(0,i-1)],after=path[Math.min(path.length-1,i+1)];
+  const opacity=clamp(1-head.age/COMET_TRAIL.lifetime,0,1);
+  for(let i=0;i<count;i++){
+    const point=sections[i],before=sections[Math.max(0,i-1)],after=sections[Math.min(count-1,i+1)];
     let dx=after.x-before.x,dy=after.y-before.y;
     // At a complete reversal, use this segment rather than a zero tangent.
     if(Math.hypot(dx,dy)<1e-6){dx=point.x-before.x;dy=point.y-before.y;}
     if(Math.hypot(dx,dy)<1e-6){dx=after.x-point.x;dy=after.y-point.y;}
     const span=Math.max(1e-6,Math.hypot(dx,dy)),t=clamp(point.distance/visibleLength,0,1);
-    const half=width*(.2+.8*(1-t)**.75);
-    return {...point,t,nx:-dy/span,ny:dx/span,half};
-  });
-  return sections.slice(1).map((end,i)=>{
-    const start=sections[i];
-    const vertices=factor=>[
-      bounded({x:start.x+start.nx*start.half*factor,y:start.y+start.ny*start.half*factor},bounds),
-      bounded({x:end.x+end.nx*end.half*factor,y:end.y+end.ny*end.half*factor},bounds),
-      bounded({x:end.x-end.nx*end.half*factor,y:end.y-end.ny*end.half*factor},bounds),
-      bounded({x:start.x-start.nx*start.half*factor,y:start.y-start.ny*start.half*factor},bounds)
-    ];
-    return {outer:vertices(1),opacity:clamp(1-path[0].age/COMET_TRAIL.lifetime,0,1),
-      start:{x:start.x,y:start.y},end:{x:end.x,y:end.y},startWidth:start.half,endWidth:end.half};
-  });
+    point.nx=-dy/span;point.ny=dx/span;point.half=width*(.2+.8*(1-t)**.75);
+    if(i===0)continue;
+    const segment=segments[i-1]??={outer:[vertex(),vertex(),vertex(),vertex()],opacity,start:vertex(),end:vertex()};
+    const [a,b,c,d]=segment.outer;
+    setVertex(a,before.x+before.nx*before.half,before.y+before.ny*before.half,bounds);
+    setVertex(b,point.x+point.nx*point.half,point.y+point.ny*point.half,bounds);
+    setVertex(c,point.x-point.nx*point.half,point.y-point.ny*point.half,bounds);
+    setVertex(d,before.x-before.nx*before.half,before.y-before.ny*before.half,bounds);
+    setVertex(segment.start,before.x,before.y);setVertex(segment.end,point.x,point.y);
+    segment.opacity=opacity;segment.startWidth=before.half;segment.endWidth=point.half;
+  }
+  return count-1;
+}
+
+// Standalone callers own these results, even when they keep multiple frames.
+export function cometRibbon(points,options={}){
+  const ribbon=[];
+  buildRibbon(points,options,[],ribbon);
+  return ribbon;
 }
 
 // The sides carry the ink while the center remains almost clear. Feather the
@@ -76,17 +86,50 @@ export const COMET_CROSS_SECTION=Object.freeze([
   [.6,.74,.36],[.74,.88,1],[.88,.95,.4],[.95,1,.08]
 ].map(([from,to,alpha])=>Object.freeze({from,to,alpha})));
 
+function interpolateInto(out,left,right,t){
+  out.x=left.x+(right.x-left.x)*t;
+  out.y=left.y+(right.y-left.y)*t;
+}
+
+function buildBands(ribbon,count,bands,storage){
+  const vertexCount=2*(count+1);
+  for(let index=0;index<COMET_CROSS_SECTION.length;index++){
+    const band=COMET_CROSS_SECTION[index];
+    const output=bands[index]??={vertices:[],opacity:ribbon[0].opacity,crossAlpha:band.alpha,region:index};
+    output.opacity=ribbon[0].opacity;
+    const vertices=output.vertices;
+    // A shorter frame may shrink the public polygon. Keep the bounded scratch
+    // points separately so they can be reused when a longer frame follows.
+    const slots=storage?(storage[index]??=[]):vertices;
+    vertices.length=vertexCount;
+    for(let i=0;i<=count;i++){
+      const outer=ribbon[Math.max(0,i-1)].outer;
+      const left=outer[i?1:0],right=outer[i?2:3],back=vertexCount-1-i;
+      const from=slots[i]??=vertex(),to=slots[back]??=vertex();
+      interpolateInto(from,left,right,band.from);
+      interpolateInto(to,left,right,band.to);
+      vertices[i]=from;vertices[back]=to;
+    }
+  }
+  return bands;
+}
+
 export function cometBands(ribbon){
-  if(!ribbon.length)return [];
-  // Each transverse band is one continuous polygon along the whole curve.
-  // Width does the comet taper; no longitudinal alpha buckets can leave tiny
-  // crosswise seams, and the cost stays at nine fills per ball.
-  const interpolate=(left,right,t)=>({x:left.x+(right.x-left.x)*t,y:left.y+(right.y-left.y)*t});
-  return COMET_CROSS_SECTION.map((band,index)=>{
-    const start=ribbon[0].outer,edge=t=>[interpolate(start[0],start[3],t),...ribbon.map(({outer})=>interpolate(outer[1],outer[2],t))];
-    return {vertices:[...edge(band.from),...edge(band.to).reverse()],
-      opacity:ribbon[0].opacity,crossAlpha:band.alpha,region:index};
-  });
+  return ribbon.length?buildBands(ribbon,ribbon.length,[],null):[];
+}
+
+const NO_BANDS=Object.freeze([]);
+// Live histories are bounded (48 player samples or 96 companion samples).
+// Larger external inputs still render fully, without keeping a larger buffer.
+const MAX_WORKSPACE_SAMPLES=96;
+export class CometWorkspace {
+  constructor(){this.sections=[];this.segments=[];this.output=[];this.vertices=[];}
+  /** The returned bands are borrowed until the next call on this workspace. */
+  bands(points,options={}){
+    if(points.length>MAX_WORKSPACE_SAMPLES)return cometBands(cometRibbon(points,options));
+    const count=buildRibbon(points,options,this.sections,this.segments);
+    return count?buildBands(this.segments,count,this.output,this.vertices):NO_BANDS;
+  }
 }
 
 function fillRibbon(graphics,vertices,color,alpha){
@@ -97,24 +140,32 @@ function fillRibbon(graphics,vertices,color,alpha){
 }
 
 export class CometTrails {
-  constructor(){this.entries=new Map();}
-  clear(){this.entries.clear();}
+  constructor(){this.entries=new Map();this.workspace=null;}
+  clear(){this.entries.clear();this.workspace=null;}
   step(bodies,dt,{unit=1,enabled=true}={}){
     if(!enabled){this.clear();return;}
-    const elapsed=clamp(finite(dt)?dt:0,0,.05),living=new Set(bodies);
-    for(const body of this.entries.keys())if(!living.has(body))this.entries.delete(body);
+    const elapsed=clamp(finite(dt)?dt:0,0,.05);
+    // Ordinary play supplies one player and at most two clones.
+    const living=Array.isArray(bodies)&&bodies.length<=3?null:new Set(bodies);
+    for(const body of this.entries.keys()){
+      if(!(living?living.has(body):bodies.includes(body)))this.entries.delete(body);
+    }
     for(const body of bodies){
-      if(![body?.x,body?.y,body?.r,body?.vx,body?.vy].every(finite)||body.r<=0){this.entries.delete(body);continue;}
+      if(!body||!finite(body.x)||!finite(body.y)||!finite(body.r)||!finite(body.vx)||!finite(body.vy)||body.r<=0){this.entries.delete(body);continue;}
       const speed=Math.hypot(body.vx,body.vy),speedUnits=speed/Math.max(1e-6,unit);
       let trail=this.entries.get(body);
       if(!trail){trail={points:[],active:false,lastX:body.x,lastY:body.y,lastSpeed:speed,sampleAge:0,liveHead:null,lastDx:0,lastDy:0,hasSample:false};this.entries.set(body,trail);}
       const moved=Math.hypot(body.x-trail.lastX,body.y-trail.lastY);
       if(moved>Math.max(body.r*4,Math.max(speed,trail.lastSpeed)*elapsed*2.5+unit)){
-        trail.points=[];trail.liveHead=null;trail.sampleAge=0;trail.lastDx=trail.lastDy=0;trail.hasSample=false;
+        trail.points.length=0;trail.liveHead=null;trail.sampleAge=0;trail.lastDx=trail.lastDy=0;trail.hasSample=false;
       }
-      for(const point of trail.points)point.age+=elapsed;
-      trail.points=trail.points.filter(point=>point.age<=COMET_TRAIL.lifetime);
-      if(trail.liveHead&&!trail.points.includes(trail.liveHead))trail.liveHead=null;
+      let retained=0;
+      for(const point of trail.points){
+        point.age+=elapsed;
+        if(point.age<=COMET_TRAIL.lifetime)trail.points[retained++]=point;
+        else if(point===trail.liveHead)trail.liveHead=null;
+      }
+      trail.points.length=retained;
       trail.sampleAge=Math.min(SAMPLE_SECONDS,trail.sampleAge+elapsed);
       trail.active=trail.active?speedUnits>=COMET_TRAIL.endSpeed:speedUnits>=COMET_TRAIL.startSpeed;
       if(trail.active&&!(body.feedbackFreeze>0)){
@@ -128,14 +179,17 @@ export class CometTrails {
           // A change of direction pins the previous head before following the
           // new segment; corner rounding therefore stays inside the path.
           if(turning)trail.liveHead=null;
-          const point=trail.liveHead||{x:body.x,y:body.y,age:0};
+          const point=trail.liveHead||{};
           if(!trail.liveHead)trail.points.push(point);
-          Object.assign(point,{x:body.x,y:body.y,age:0});
+          point.x=body.x;point.y=body.y;point.age=0;
           trail.hasSample=true;
           if(!last||turning||trail.sampleAge>=SAMPLE_SECONDS-1e-10){
             trail.liveHead=null;trail.sampleAge=0;
           }else trail.liveHead=point;
-          if(trail.points.length>COMET_TRAIL.maxPoints)trail.points.splice(0,trail.points.length-COMET_TRAIL.maxPoints);
+          if(trail.points.length>COMET_TRAIL.maxPoints){
+            trail.points.copyWithin(0,trail.points.length-COMET_TRAIL.maxPoints);
+            trail.points.length=COMET_TRAIL.maxPoints;
+          }
           if(moved>1e-6){trail.lastDx=dx;trail.lastDy=dy;}
         }
       }
@@ -147,7 +201,8 @@ export class CometTrails {
     for(const body of bodies){
       const trail=this.entries.get(body);if(!trail?.active)continue;
       const profile=cometProfile(Math.hypot(body.vx,body.vy),body.r,unit,strength);
-      for(const band of cometBands(cometRibbon(trail.points,{...profile,bounds}))){
+      const workspace=this.workspace??=new CometWorkspace();
+      for(const band of workspace.bands(trail.points,{...profile,bounds})){
         fillRibbon(graphics,band.vertices,color,profile.alpha*band.opacity*band.crossAlpha);
       }
     }

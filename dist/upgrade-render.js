@@ -1,4 +1,4 @@
-import {transformSkinPoint} from './skin-render.js';
+import {projectSkinContour} from './skin-render.js';
 import {skinContour} from './skins.js';
 
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -63,5 +63,5 @@ export function drawAuxiliaryBall(g,body,color,alpha=1,{contour=skinContour(0),p
   const appear=ease(body.born??1),r=body.r*appear;
   if(r<.3||alpha<=0)return;
   const pose={x:body.x,y:body.y,r,roll:body.roll??0,deformAngle:body.angle||0,squash:body.squash||0,...override};
-  path(g,contour.map(p=>transformSkinPoint(p,pose)),color,alpha*appear);
+  path(g,projectSkinContour(contour,pose),color,alpha*appear);
 }

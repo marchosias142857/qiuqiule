@@ -5,7 +5,7 @@ import {initWardrobe,wardrobeShapeCards,wardrobeAppearanceCards,wardrobeCompanio
 import {normalizeSkins,selectSkin,toggleSkins,unlockSkin} from '../dist/skins.js';
 import {normalizeCompanionState,selectCompanion} from '../dist/companions.js';
 
-function wardrobe(t,initial){
+function wardrobe(t,initial,saveImage){
   const previous=Object.fromEntries(['document','window'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
   t.after(()=>{for(const [key,descriptor] of Object.entries(previous)){
     if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];
@@ -21,11 +21,11 @@ function wardrobe(t,initial){
       setAttribute(name,value){attributes.set(name,value);},getAttribute:name=>attributes.get(name),
       querySelector:selector=>node(identity+' '+selector),append(...children){this.children.push(...children);},
       focus(){document.activeElement=result;},click(){this.clickCount=(this.clickCount||0)+1;this.fire('click');},
-      fire(type,fields={}){for(const handler of listeners.get(type)||[])handler({detail:0,preventDefault(){},...fields});},
+      fire(type,fields={}){return Promise.all((listeners.get(type)||[]).map(handler=>handler({detail:0,preventDefault(){},...fields})));},
     };
     nodes.set(id,result);return result;
   };
-  Object.defineProperty(globalThis,'document',{configurable:true,value:{getElementById:node,createElement:tag=>node(`created-${tag}-${++created}`),addEventListener(){},hidden:false}});
+  Object.defineProperty(globalThis,'document',{configurable:true,value:{body:node('body'),getElementById:node,createElement:tag=>node(`created-${tag}-${++created}`),addEventListener(){},hidden:false}});
   Object.defineProperty(globalThis,'window',{configurable:true,value:{addEventListener(){}}});
   node('appearance-cropper').hidden=true;
   let state=initial;const errors=[],images=[];
@@ -34,7 +34,7 @@ function wardrobe(t,initial){
     onSides:selection=>{state={...state,...toggleSkins(selectSkin(state,selection),true)};},
     onAppearance:id=>{state={...state,appearanceId:id};},
     onCompanion:id=>{const next=selectCompanion(normalizeCompanionState({unlocked:state.companionUnlocked,selected:state.companionId},{best:state.best}),id);state={...state,companionId:next.selected,companionUnlocked:next.unlocked};},
-    onImage:image=>images.push(image),onError:error=>errors.push(error)});
+    onImage:image=>{images.push(image);return saveImage?.(image);},onError:error=>errors.push(error)});
   const open=kind=>{node(`${kind}-select`).fire('click');ui.update(.24);};
   return {node,ui,open,state:()=>state,setState:value=>{state=value;ui.refresh();},errors,images};
 }
@@ -115,6 +115,48 @@ test('custom appearance opens the existing picker and an equipped saved image is
   assert.equal(view.node('appearance-clear').hidden,false);assert.equal(view.node('appearance-tools').hidden,false);
   view.node('appearance-option-custom').fire('click');assert.equal(view.node('appearance-file').clickCount,1);
   assert.equal(view.images.length,0,'opening a picker never deletes or replaces the saved image');
+});
+
+test('temporary crop surface preserves the 768px edit through a failed save and releases on cancel or success',async t=>{
+  let resolveSave,rejectSave,finishDecode;
+  const view=wardrobe(t,normalizeSkins(null),()=>new Promise((resolve,reject)=>{resolveSave=resolve;rejectSave=reject;}));
+  const originalImage=Object.getOwnPropertyDescriptor(globalThis,'Image');
+  Object.defineProperty(globalThis,'Image',{configurable:true,value:class{
+    naturalWidth=1200;naturalHeight=800;
+    decode(){return new Promise(resolve=>{finishDecode=resolve;});}
+  }});
+  t.after(()=>{if(originalImage)Object.defineProperty(globalThis,'Image',originalImage);else delete globalThis.Image;});
+  const revocations=t.mock.method(URL,'revokeObjectURL');
+  const file=view.node('appearance-file'),canvas=view.node('crop-canvas'),apply=view.node('crop-apply');
+  const cancel=view.node('crop-cancel'),custom=view.node('appearance-option-custom'),draws=[];
+  const markup=readFileSync(new URL('../dist/index.html',import.meta.url),'utf8');
+  assert.match(markup,/<canvas id="crop-canvas" width="1" height="1"/);
+  canvas.width=canvas.height=1;custom.isConnected=true;
+  const size=()=>[canvas.width,canvas.height];
+  const context={clearRect(...args){assert.deepEqual(args,[0,0,768,768]);},drawImage(image,...args){
+    assert.deepEqual(size(),[768,768]);assert.equal(this.imageSmoothingQuality,'high');draws.push(args);
+  }};
+  canvas.getContext=()=>context;
+  canvas.toDataURL=mime=>{assert.equal(mime,'image/png');assert.deepEqual(size(),[768,768]);return 'data:image/png;base64,test';};
+  view.open('appearance');
+  const select=()=>{custom.click();file.files=[new Blob(['fixture'])];return file.fire('change');};
+
+  const abandoned=select();view.ui.cancelInteraction();finishDecode();await abandoned;
+  assert.deepEqual(size(),[1,1]);assert.equal(view.ui.isCropping(),false);assert.equal(draws.length,0);
+  const open=async()=>{const decoding=select();assert.deepEqual(size(),[1,1]);finishDecode();await decoding;
+    assert.equal(view.ui.isCropping(),true);assert.deepEqual(draws.at(-1),[200,0,800,800,0,0,768,768]);};
+  await open();await cancel.fire('click');assert.deepEqual(size(),[1,1]);assert.equal(document.activeElement,custom);
+  await open();const zoom=view.node('crop-zoom');zoom.value='2';await zoom.fire('input');
+  assert.deepEqual(draws.at(-1),[400,200,400,400,0,0,768,768]);
+
+  const failed=apply.fire('click');assert.equal(cancel.disabled,true);view.ui.cancelInteraction();
+  assert.deepEqual(size(),[768,768]);rejectSave(new Error('storage full'));await failed;
+  assert.equal(view.ui.isCropping(),true);assert.equal(apply.disabled,false);assert.equal(cancel.disabled,false);
+  assert.equal(view.errors.at(-1),'storage full');assert.deepEqual(size(),[768,768]);assert.equal(zoom.value,'2');
+  const retry=apply.fire('click');resolveSave();await retry;
+  assert.deepEqual(view.images,['data:image/png;base64,test','data:image/png;base64,test']);
+  assert.deepEqual(size(),[1,1]);assert.equal(view.ui.isCropping(),false);assert.equal(document.activeElement,custom);
+  await open();view.ui.cancelInteraction();assert.deepEqual(size(),[1,1]);assert.equal(revocations.mock.callCount(),4);
 });
 
 test('card models keep exact campaign thresholds and persistent appearance ownership',()=>{

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {COMPANION_DEFINITIONS,COMPANION_STATE_VERSION,COMPANION_UNLOCK_STEP,COMPANION_ORBIT,
   normalizeCompanionState,unlockCompanions,selectCompanion,companionColors,companionGeometry,
-  drawCompanions,companionSvg,companionPreview,CompanionTrails} from '../dist/companions.js';
-import {COMET_CROSS_SECTION} from '../dist/comet-trail.js';
+  drawCompanions,companionSvg,companionPreview,CompanionTrails,companionTrailLength} from '../dist/companions.js';
+import {COMET_CROSS_SECTION,COMET_TRAIL} from '../dist/comet-trail.js';
 import {skinContour,morphSkinContour} from '../dist/skins.js';
 import {projectSkinContour} from '../dist/skin-render.js';
 
@@ -167,6 +167,21 @@ test('tails share player comet cross-section and a tapered nonzero-width flat en
   assert.ok(Math.hypot(edge[0].x-edge.at(-1).x,edge[0].y-edge.at(-1).y)>0);
 });
 
+test('only in-play speed above the player trail threshold grows companion tails smoothly to a bound',()=>{
+  const r=20,unit=17,base=COMPANION_ORBIT.size*4.6*r;
+  const length=speed=>companionTrailLength(r,{speed:speed*unit,unit,inPlay:true});
+  for(const speed of [0,COMET_TRAIL.startSpeed-1,COMET_TRAIL.startSpeed])near(length(speed),base);
+  const speeds=[COMET_TRAIL.startSpeed,22,26,30,36,COMET_TRAIL.fullSpeed];
+  for(let i=1;i<speeds.length;i++)assert.ok(length(speeds[i])>length(speeds[i-1]));
+  near(length(COMET_TRAIL.fullSpeed),base*3);near(length(1000),base*3);
+  assert.ok(length(COMET_TRAIL.startSpeed+.001)-base<1e-6,'no jump at the shared onset speed');
+  near(length(30),base*2);
+  for(const speed of [0,20*unit,40*unit,1000*unit])near(companionTrailLength(r,{speed,unit}),base);
+  near(companionTrailLength(0,{speed:100,inPlay:true}),0);
+  near(companionTrailLength(r,{speed:NaN,unit,inPlay:true}),base);
+  near(companionTrailLength(r*2,{speed:30*unit*2,unit:unit*2,inPlay:true}),length(30)*2);
+});
+
 test('all gradient bands are translucent, use the selected hue and fade proportionally',()=>{
   for(const color of ['#b8db8a','#252720','#ffee55',0,0xffffff]){
     const colors=companionColors(color);
@@ -183,11 +198,11 @@ test('all gradient bands are translucent, use the selected hue and fade proporti
   }
 });
 
-test('continuous gradient endpoints meet without jumps and keep the initial 66 percent opacity',()=>{
-  assert.equal(COMPANION_ORBIT.opacity,.66);
+test('continuous gradient endpoints meet without jumps and keep the lighter 60 percent opacity',()=>{
+  assert.equal(COMPANION_ORBIT.opacity,.60);
   for(const shape of ['sun','moon','star']){
     const colors=companionColors('#b8db8a'),sat=companionGeometry(shape+'-1',{r:20},0,{color:'#b8db8a'}).satellites[0];
-    assert.ok(sat.bands.every(b=>b.alpha===.66));
+    assert.ok(sat.bands.every(b=>b.alpha===.60));
     for(let i=1;i<sat.bands.length;i++){
       assert.equal(shape==='moon'?sat.bands[i-1].innerColor:sat.bands[i-1].outerColor,
         shape==='moon'?sat.bands[i].outerColor:sat.bands[i].innerColor);
@@ -213,12 +228,12 @@ test('WebGL interpolates vertices while Canvas uses fine disjoint bands, both co
     const filledArea=triangles.reduce((sum,{coords})=>sum+polygonArea([{x:coords[0],y:coords[1]},{x:coords[2],y:coords[3]},{x:coords[4],y:coords[5]}]),0);
     near(filledArea,polygonArea(boundary),1e-6);
     assert.ok(triangles.length<=(type===2?128:768));assert.equal(polygons.length,9);
-    assert.ok(triangles.every(t=>t.alpha===.66));assert.ok(!style.vertexColors,'gradient state must not leak to the player/crown');
+    assert.ok(triangles.every(t=>t.alpha===.60));assert.ok(!style.vertexColors,'gradient state must not leak to the player/crown');
     if(type===2){
       assert.equal(gradients.length,8);assert.ok(triangles.every(t=>new Set(t.vertexColors).size===2));
       sat.bands.forEach((band,i)=>{
-        assert.deepEqual(gradients[i*2],{tl:band.outerColor,tr:band.outerColor,bl:band.innerColor,br:band.innerColor,alpha:.66});
-        assert.deepEqual(gradients[i*2+1],{tl:band.outerColor,tr:band.innerColor,bl:band.innerColor,br:band.innerColor,alpha:.66});
+        assert.deepEqual(gradients[i*2],{tl:band.outerColor,tr:band.outerColor,bl:band.innerColor,br:band.innerColor,alpha:.60});
+        assert.deepEqual(gradients[i*2+1],{tl:band.outerColor,tr:band.innerColor,bl:band.innerColor,br:band.innerColor,alpha:.60});
       });
     }else{
       assert.equal(gradients.length,0);assert.ok(new Set(triangles.map(t=>t.color)).size>=12,'fallback retains smooth interior shading');
@@ -226,13 +241,13 @@ test('WebGL interpolates vertices while Canvas uses fine disjoint bands, both co
   }
 });
 
-test('SVG composites fine opaque body layers under one original-opacity group without alpha buildup',()=>{
+test('SVG composites fine opaque body layers under one single-opacity group without alpha buildup',()=>{
   for(const definition of COMPANION_DEFINITIONS){
     const svg=companionSvg(definition.id,{x:50,y:50,r:20},.8,{color:'#e08855',alpha:.5});
     const groups=[...svg.matchAll(/<g opacity="([^"]+)">([\s\S]*?)<\/g>/g)];
     assert.equal(groups.length,definition.count);
     for(const [,opacity,body] of groups){
-      near(Number(opacity),.33);assert.equal((body.match(/<path /g)||[]).length,24);
+      near(Number(opacity),.30);assert.equal((body.match(/<path /g)||[]).length,24);
       assert.doesNotMatch(body,/opacity|fill-opacity/,'opaque children cannot compound the original alpha');
       assert.ok(new Set([...body.matchAll(/fill="(#[\da-f]+)"/g)].map(match=>match[1])).size>=20);
     }
@@ -307,13 +322,17 @@ test('gameplay tail stores actual world displacement; its first frame has no syn
   assertRearOnly(satellite);
 });
 
-test('history freezes at zero elapsed time and resets cleanly on discontinuity, resizing or unmount',()=>{
+test('history freezes at zero elapsed time, preserves same-frame handoffs and resets on discontinuity or unmount',()=>{
   const history=new CompanionTrails(),center={x:10,y:20};
   history.sample('moon-1:0',center,20,0);history.sample('moon-1:0',{x:12,y:21},20,.02);
   const snapshot=JSON.stringify([...history.entries]);
   const paused=history.sample('moon-1:0',{x:12,y:21},20,.02);
   assert.equal(JSON.stringify([...history.entries]),snapshot);assert.ok(paused.length>1);
-  assert.equal(history.sample('moon-1:0',{x:15,y:21},20,.02).length,1,'same-time pose change must not retain a stale head');
+  const beforeHandoff=paused.map(p=>({...p})),handoff=history.sample('moon-1:0',{x:15,y:21},20,.02);
+  assert.equal(handoff.length,beforeHandoff.length,'same-frame Canvas/SVG handoff retains travelled history');
+  assert.deepEqual(handoff.slice(0,-1),beforeHandoff.slice(0,-1));
+  assert.deepEqual(handoff.at(-1),{x:15,y:21,age:0});
+  assert.equal(history.entries.get('moon-1:0').time,.02,'handoff never invents elapsed time');
   assert.equal(history.sample('moon-1:0',{x:12,y:21},20,.5).length,1,'hidden tab gap starts fresh');
   assert.equal(history.sample('moon-1:0',{x:500,y:21},20,.52).length,1,'teleport starts fresh');
   assert.equal(history.sample('moon-1:0',{x:500,y:21},40,.54).length,1,'resize starts fresh');
@@ -336,9 +355,29 @@ test('actual movement trails remain rear-clipped through high speed, reversals, 
     for(let i=0;i<=36;i++){
       const time=i/60,pose={...movement(time),r};
       const contour=projectSkinContour(skinContour(6),{...pose,roll:time*3,pullAmount:.4+.4*Math.sin(time*20),deformAngle:time*4});
-      const geometry=companionGeometry(shape+'-3',pose,time,{trails,contour});
+      const geometry=companionGeometry(shape+'-3',pose,time,{trails,contour,inPlay:true,speed:r*40,unit:r});
       geometry.satellites.forEach(assertRearOnly);
     }
+  }
+});
+
+test('speed growth draws longer real displacement histories, with unchanged menu length and body clipping',()=>{
+  for(const shape of ['sun','moon','star']){
+    const trails=new CompanionTrails(),r=20,unit=20;
+    let pose;
+    for(let frame=0;frame<=60;frame++){
+      pose={x:80+800*frame/60,y:120+60*frame/60,r};
+      companionGeometry(shape+'-1',pose,frame/60,{trails});
+    }
+    const extent=options=>{
+      const satellite=companionGeometry(shape+'-1',pose,1,{trails,...options}).satellites[0];
+      assertRearOnly(satellite);
+      return Math.max(...satellite.tail.flatMap(band=>band.vertices.map(p=>-(p.x-satellite.center.x)*satellite.direction.x-(p.y-satellite.center.y)*satellite.direction.y)));
+    };
+    const base=extent({inPlay:true,speed:20*unit,unit}),medium=extent({inPlay:true,speed:30*unit,unit}),full=extent({inPlay:true,speed:40*unit,unit});
+    assert.ok(medium>base*1.9);assert.ok(full>medium*1.4);
+    near(extent({speed:100*unit,unit}),base);
+    near(extent({inPlay:true,speed:100*unit,unit}),full);
   }
 });
 

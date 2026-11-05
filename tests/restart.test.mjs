@@ -1,3 +1,4 @@
+import {createSvgNode,isSvgMount} from './fixtures/svg-dom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -14,10 +15,11 @@ import {crownOutline} from '../dist/boss-visuals.js';
 const elements=new Map(),listeners=new Map(),windowListeners=new Map(),saved=new Map();
 function element(selector){
   if(elements.has(selector))return elements.get(selector);
+  if(isSvgMount(selector)){const mount=createSvgNode('http://www.w3.org/2000/svg','g');elements.set(selector,mount);return mount;}
   const classes=new Set();
   const e={hidden:false,inert:false,children:[],dataset:{},listeners:new Map(),style:{setProperty(name,value){this[name]=value;},removeProperty(name){delete this[name];}},
     classList:{add:(...names)=>names.forEach(x=>classes.add(x)),remove:(...names)=>names.forEach(x=>classes.delete(x)),contains:x=>classes.has(x),toggle(x,on){on?classes.add(x):classes.delete(x);}},
-    attributes:{},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},addEventListener(type,fn){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(fn);},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
+    attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k]??null;},removeAttribute(k){delete this.attributes[k];},addEventListener(type,fn){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(fn);},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
     firstElementChild:{style:{}},lastElementChild:{style:{}},
     querySelector:child=>element(selector+' '+child),
     getBoundingClientRect(){
@@ -40,7 +42,7 @@ globalThis.matchMedia=()=>({matches:false});
 globalThis.getComputedStyle=()=>({paddingTop:'0',paddingBottom:'0',borderTopWidth:'0',borderBottomWidth:'0',marginBottom:'0'});
 globalThis.requestAnimationFrame=fn=>fn();
 let createdElementCount=0;
-globalThis.document={readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(`created-${tag}-${++createdElementCount}`),
+globalThis.document={createElementNS:createSvgNode,readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(`created-${tag}-${++createdElementCount}`),
   querySelector:element,
   querySelectorAll:selector=>selector==='.menu-panel'?['#settings-panel','#help-panel','#menu-transition-panel'].map(element):[],
   addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn);}};
@@ -251,8 +253,8 @@ export const advanceCompanions=updateCompanionVisual;
 export const grantCompanionsForTest=grantEndlessCompanions;
 export function recordCompanionDraws(){
   const original=drawPlayerCompanions,calls=[];
-  drawPlayerCompanions=function(g,pose,alpha,contour){
-    const first=g.shapes?.length||0,result=original(g,pose,alpha,contour);
+  drawPlayerCompanions=function(g,pose,alpha,contour,body){
+    const first=g.shapes?.length||0,result=original(g,pose,alpha,contour,body);
     calls.push({pose:{...pose},alpha,contour:contour?.map(point=>({...point})),shapes:g.shapes?.slice(first)||[]});return result;
   };
   return {calls,restore(){drawPlayerCompanions=original;}};
@@ -260,7 +262,7 @@ export function recordCompanionDraws(){
 
 
 export const startWithFont=bootWithFont;
-export const renderLevelNumber=levelNumberMarkup;
+export const renderLevelNumber=levelNumberPosition;
 export function setNumberMeasureContext(context){numberMeasureContext=context;numberCenters.clear();}
 `;
 const app=await import('data:text/javascript;base64,'+Buffer.from(source+adapter).toString('base64'));
@@ -331,8 +333,8 @@ test('level labels measure the normal UI face and remain centered by its actual 
     return {actualBoundingBoxLeft:7,actualBoundingBoxRight:1407,actualBoundingBoxAscent:710,actualBoundingBoxDescent:10};
   }};
   app.setNumberMeasureContext(context);t.after(()=>app.setNumberMeasureContext(null));
-  const markup=app.renderLevelNumber(100),position=/<text x="([^"]+)" y="([^"]+)"/.exec(markup);
-  near(Number(position[1]),-.7*.83);near(Number(position[2]),.35*.83);
+  const position=app.renderLevelNumber(100);
+  near(position.x,-.7*.83);near(position.y,.35*.83);
 });
 test('appearance replacement and removal invalidate cached images while ordinary frames only hide them',async t=>{
   const originalImage=globalThis.Image,calls=[];
@@ -738,10 +740,47 @@ function advanceScene(scene,seconds){
 }
 function assertStageProgress(world){
   const progress=element('#stage-progress');
-  assert.equal((progress.innerHTML.match(/class="stage-dot/g)||[]).length,10);
-  assert.equal((progress.innerHTML.match(/stage-dot filled/g)||[]).length,Math.floor(Math.min(1,world.stageKills/world.killTarget)*10+1e-9));
+  assert.equal(progress.children.filter(dot=>dot.className.startsWith('stage-dot')).length,10);
+  assert.equal(progress.children.filter(dot=>dot.className==='stage-dot filled').length,Math.floor(Math.min(1,world.stageKills/world.killTarget)*10+1e-9));
   assert.equal(progress.attributes['aria-label'],`本阶段击杀 ${world.stageKills}，目标 ${world.killTarget}`);
 }
+test('stable HUD frames make no DOM writes and progress updates on the same frame',t=>{
+  const {world}=app.seedRenderer(graphicsRecorder(),390,844,true);
+  world.phase='battle';world.score=73;world.stageKills=0;app.resetScoreHud();
+  const progress=element('#stage-progress'),score=element('#score'),goal=element('#campaign-goal'),rating=element('#campaign-rating-status');
+  const dots=[...progress.children],writes=[];
+  const watch=(node,property)=>{
+    let value=node[property];
+    Object.defineProperty(node,property,{configurable:true,get:()=>value,set(next){value=next;writes.push(property);}});
+    t.after(()=>{delete node[property];node[property]=value;});
+  };
+  for(const [node,props] of [[score,['textContent']],[score.style,['transform','color']],[goal,['textContent','hidden']],
+    [progress,['hidden','innerHTML']],[rating,['hidden','textContent']],[element('#hud').style,['opacity']]]){
+    for(const property of props)watch(node,property);
+  }
+  for(const dot of dots)watch(dot,'className');
+  const attribute=t.mock.method(progress,'setAttribute'),remove=t.mock.method(progress,'removeAttribute'),replace=t.mock.method(progress,'replaceChildren');
+  for(let frame=0;frame<60;frame++)app.updateScoreHud(1/60);
+  assert.deepEqual(writes,[]);assert.equal(attribute.mock.callCount()+remove.mock.callCount()+replace.mock.callCount(),0);
+  world.stageKills=1;app.updateScoreHud();
+  assert.deepEqual(writes,[]);assert.equal(attribute.mock.callCount(),1,'same fill count, new accessible label');assertStageProgress(world);
+  world.stageKills=2;app.updateScoreHud();
+  assert.deepEqual(writes,['className']);assert.equal(replace.mock.callCount(),0);assertStageProgress(world);
+  dots.forEach((dot,i)=>{assert.equal(dot,progress.children[i]);assert.equal(dot.attributes['aria-hidden'],'true');});
+  score.textContent='0000';score.style.color='red';score.style.transform='scale(2)';app.updateScoreHud();
+  assert.equal(score.textContent,'0073');assert.equal(score.style.color,'');assert.equal(score.style.transform,'scale(1)');
+  const campaign=app.seedCampaignRenderer(graphicsRecorder()).world;app.updateScoreHud();
+  const campaignDots=[...progress.children];assert.equal(campaignDots.length,3);assert.match(progress.attributes['aria-label'],/通关可得 3 点/);
+  for(const dot of campaignDots)watch(dot,'className');
+  const title=t.mock.method(rating,'setAttribute');
+  writes.length=0;attribute.mock.resetCalls();replace.mock.resetCalls();
+  for(let frame=0;frame<60;frame++)app.updateScoreHud(1/60);
+  assert.deepEqual(writes,[]);assert.equal(attribute.mock.callCount()+title.mock.callCount()+replace.mock.callCount(),0);
+  campaign.shotsUsed=campaign.config.threePointShots+1;app.updateScoreHud();
+  assert.deepEqual(progress.children,campaignDots);assert.equal(campaignDots[2].className,'stage-dot');assert.match(progress.attributes['aria-label'],/通关可得 2 点/);
+  const endless=app.seedRenderer(graphicsRecorder(),390,844,true).world;endless.phase='battle';app.updateScoreHud();
+  assertStageProgress(endless);assert.equal(progress.attributes.title,undefined);assert.equal(rating.hidden,true);
+});
 function outlineBounds(shape){
   if(shape.type==='ellipse')return {cx:shape.x,cy:shape.y,width:shape.width,height:shape.height};
   const xs=shape.points.map(p=>p.x),ys=shape.points.map(p=>p.y);
@@ -3783,7 +3822,7 @@ test('real split balls inherit campaign polygons and migrated default circles wh
       for(const body of [world.player,...world.auxiliaries]){
         const shape=g.shapes.find(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points?.length===193&&Math.hypot(outlineBounds(shape).cx-body.x,outlineBounds(shape).cy-body.y)<body.r*.1&&Math.abs(outlineBounds(shape).width/body.r-(Math.max(...contour.map(p=>p.x))-Math.min(...contour.map(p=>p.x))))<1e-6);
         assert.ok(shape,'each physical player ball has its own visible skin');
-        near(shape.alpha,body.isAuxiliary?.8:1);
+        near(shape.alpha,body.isAuxiliary?.6:1);
         const local=shape.points.slice(0,-1).map(point=>({x:(point.x-body.x)/body.r,y:(point.y-body.y)/body.r}));
         assertSameContour(local,contour);
         assert.equal(playerEyes(g,body).length,body.isAuxiliary?0:2);
@@ -3802,7 +3841,7 @@ test('real split photos use independent slots with the main photo retained and r
     for(const [index,body] of world.auxiliaries.entries()){
       const draw=photos.aux[index];near(draw.pose.x,body.x);near(draw.pose.y,body.y);near(draw.pose.r,body.r);
       assertSameContour(draw.contour,photos.main[0].contour);assert.equal(draw.options.baseColor,photos.main[0].options.baseColor);
-      assert.equal(draw.options.alpha,.8);assert.equal(playerEyes(g,body).length,0);
+      assert.equal(draw.options.alpha,.6);assert.equal(playerEyes(g,body).length,0);
     }
     near(photos.main[0].pose.x,world.player.x);near(photos.main[0].pose.r,world.player.r);assert.equal(eyeShapes(g).length,0,'photo mode never adds canvas eyes');
     world.clearAuxiliaries();scene.update(0,0);
@@ -3877,12 +3916,12 @@ test('successful photo rendering paints each main or fading auxiliary body once,
     try{
       scene.update(0,0);assert.equal(photos.main.length,1);assert.equal(photos.aux.length,2);
       assert.equal(bodyFills().length,success===true?0:3,'only an explicit renderer success replaces the main and auxiliary graphics fills');
-      assert.equal(photos.main[0].options.alpha,1);assert.ok(photos.aux.every(call=>call.options.alpha===.8));
+      assert.equal(photos.main[0].options.alpha,1);assert.ok(photos.aux.every(call=>call.options.alpha===.6));
       world.endRun('capacity');scene.update(0,0);scene.advanceEnding(.6);
       const result=app.readRestart().result;assert.equal(result.sceneBodies.auxiliaries.length,2);result.clock=.65*.5;
-      photos.aux.length=0;g.clear();scene.drawArena();assert.equal(photos.aux.length,2);assert.ok(photos.aux.every(call=>Math.abs(call.options.alpha-.4)<1e-9));
+      photos.aux.length=0;g.clear();scene.drawArena();assert.equal(photos.aux.length,2);assert.ok(photos.aux.every(call=>Math.abs(call.options.alpha-.3)<1e-9));
       const fills=bodyFills();assert.equal(fills.length,success===true?0:2,'half-transparent photo auxiliaries must not receive a second colored fill below the photo');
-      if(success!==true)assert.ok(fills.every(shape=>Math.abs(shape.alpha-.4)<1e-9));
+      if(success!==true)assert.ok(fills.every(shape=>Math.abs(shape.alpha-.3)<1e-9));
     }finally{photos.restore();app.seedSkins();}
   }
 });
@@ -4389,7 +4428,7 @@ test('task8 all twenty pool/golf levels offer class-filtered upgrades, precise g
     scene.update(0,0);const hud=element('#campaign-goal').textContent;
     assert.equal(element('#campaign-goal').hidden,false);assert.ok(hud.includes(`${world.remaining}/${world.budget}`));
     assert.match(hud,r===4?/球/:/标准杆/);
-    assert.match(element('#stage-progress').attributes['aria-label'],/共三点/);assert.equal((element('#stage-progress').innerHTML.match(/<i/g)||[]).length,3);
+    assert.match(element('#stage-progress').attributes['aria-label'],/共三点/);assert.equal(element('#stage-progress').children.length,3);
     assert.equal(levelRecord(state.campaignProgress,level).attempts,1);
     assert.equal(levelRecord(state.campaignProgress,level).upgradeChoices[choices[0].id],1);
   }
@@ -5498,6 +5537,47 @@ test('v7.11 Big Eye clone opacity multiplies the body and pupil through ordinary
   for(const alpha of [1,.5,.25]){
     g.clear();app.drawPlayerForTest(g,clone,app.playerInk(),alpha);
     assert.ok(g.shapes.some(shape=>shape.type==='triangle'));assert.ok(g.shapes.some(shape=>shape.type==='circle'&&shape.color===0));
-    assert.ok(g.shapes.every(shape=>Math.abs(shape.alpha-alpha*.8)<1e-9));
+    assert.ok(g.shapes.every(shape=>Math.abs(shape.alpha-alpha*.6)<1e-9));
+  }
+});
+
+test('v7.11.2 companion tails grow with speed only while the player comet can be active in a live arena',t=>{
+  t.after(()=>{app.seedSkins();app.seedCompanions();app.setFeedbackStrength(.6);});
+  function extent(mode,speed,phase='battle'){
+    const g=graphicsRecorder(),state=mode==='home'?app.seedRenderer(g):app.seedRenderer(g,390,844,true);
+    const player=(state.world||state.home).player,unit=state.world?.unit||player.r;
+    if(state.world)state.world.phase=phase;
+    app.seedSkins();app.seedCompanions({selected:'sun-1',unlocked:9});app.setFeedbackStrength(1);
+    Object.assign(player,{x:100,y:400,vx:unit*speed,vy:0,squash:0});
+    for(let frame=0;frame<24;frame++){
+      player.x+=4;app.advanceCompanions(1/60);g.clear();app.drawPlayerForTest(g,player,app.playerInk());
+    }
+    const history=app.readCompanionHistory()[0]?.[1];
+    const head=history||companionGeometry('sun-1',player,app.readCompanions().clock).satellites[0].center;
+    if(mode==='home')assert.equal(app.readCompanionHistory().length,0,'menus use orbit arcs without movement history');
+    const tails=g.shapes.filter(shape=>shape.type==='path'&&shape.alpha>0&&shape.alpha<=.24);
+    assert.ok(tails.length>0,mode+' draws its companion tail');
+    return Math.max(...tails.flatMap(shape=>shape.points).map(p=>Math.hypot(p.x-head.x,p.y-head.y)))/player.r;
+  }
+  const slow=extent('play',19),threshold=extent('play',20),medium=extent('play',30),fast=extent('play',40);
+  const sameLength=(a,b,label)=>assert.ok(Math.abs(a-b)<.01,label||'orbit deformation does not change the requested tail length');
+  sameLength(slow,threshold);assert.ok(medium>threshold*1.5);assert.ok(fast>medium*1.3);
+  sameLength(extent('play',80),fast);
+  sameLength(extent('home',20),extent('home',40));
+  sameLength(extent('play',40,'choose'),threshold,'upgrade selection keeps the ordinary orbit-tail length');
+});
+
+test('companion trail rollback keeps moving home and level players on orbit arcs without recording translation',t=>{
+  t.after(()=>{app.seedSkins();app.seedCompanions();});
+  for(const mode of ['home','levels']){
+    const g=graphicsRecorder(),{player}=pullScene(mode,g);
+    app.seedSkins();app.seedCompanions({selected:'moon-1',unlocked:9});
+    Object.assign(player,{x:120,y:400,vx:0,vy:0,squash:0});
+    for(let i=0;i<12;i++){
+      player.y-=3;app.advanceCompanions(1/60);g.clear();app.drawPlayerForTest(g,player,app.playerInk());
+      assert.deepEqual(app.readCompanionHistory(),[],mode+' never records non-gameplay displacement');
+    }
+    app.paintUiForTest({...player,y:player.y-3});
+    assert.deepEqual(app.readCompanionHistory(),[],'the detached UI keeps an orbit preview rather than a translated trail');
   }
 });

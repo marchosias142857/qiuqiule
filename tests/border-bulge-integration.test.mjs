@@ -1,3 +1,4 @@
+import {createSvgNode,isSvgMount} from './fixtures/svg-dom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -9,11 +10,12 @@ import {UPGRADES} from '../dist/upgrades.js';
 const elements=new Map();
 function element(selector){
   if(elements.has(selector))return elements.get(selector);
+  if(isSvgMount(selector)){const mount=createSvgNode('http://www.w3.org/2000/svg','g');elements.set(selector,mount);return mount;}
   const classes=new Set();
   const value={hidden:false,children:[],dataset:{},style:{setProperty(){},removeProperty(){}},
     classList:{add:(...names)=>names.forEach(name=>classes.add(name)),remove:(...names)=>names.forEach(name=>classes.delete(name)),
       contains:name=>classes.has(name),toggle(name,on){on?classes.add(name):classes.delete(name);}},
-    setAttribute(){},removeAttribute(){},addEventListener(){},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
+    attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k]??null;},removeAttribute(k){delete this.attributes[k];},addEventListener(){},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
     firstElementChild:{style:{}},lastElementChild:{style:{}},querySelector:child=>element(selector+' '+child),
     getBoundingClientRect:()=>({x:0,y:0,left:0,top:0,right:390,bottom:844,width:390,height:844})};
   elements.set(selector,value);return value;
@@ -26,8 +28,9 @@ window.Phaser=Phaser;
 globalThis.matchMedia=()=>({matches:false});
 globalThis.getComputedStyle=()=>({paddingTop:'0',paddingBottom:'0',borderTopWidth:'0',borderBottomWidth:'0',marginBottom:'0'});
 globalThis.requestAnimationFrame=fn=>fn();
-globalThis.document={readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),
-  createElement:tag=>element(tag),querySelector:element,querySelectorAll:()=>[],addEventListener(){}};
+let created=0;
+globalThis.document={createElementNS:createSvgNode,readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),
+  createElement:tag=>element(tag+(++created)),querySelector:element,querySelectorAll:()=>[],addEventListener(){}};
 
 const entry=new URL('../dist/game.js',import.meta.url);
 const source=(await readFile(entry,'utf8')).replace(/from '(\.\/[^']+)'/g,(_,path)=>`from '${new URL(path,entry).href}'`);

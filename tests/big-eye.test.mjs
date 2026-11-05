@@ -65,6 +65,24 @@ test('radial colors preserve the selected hue while brightening center and darke
   }
 });
 
+test('Big Eye shares the projected outline only when its normalized pose matches',()=>{
+  const contour=skinContour(8);
+  const pose={x:23,y:71,r:19,roll:.7,pullAmount:.8,deformAngle:-.4,flightStretch:.1,flightAngle:2.3};
+  const projectedOutline=projectSkinContour(contour,pose);
+  const shared=bigEyeGeometry(contour,pose,{lookY:.13,projectedOutline});
+  assert.strictEqual(shared.outline,projectedOutline);
+  assert.deepEqual(shared,bigEyeGeometry(contour,pose,{lookY:.13}));
+  for(const [source,options] of [
+    [pose,{pullAmount:1}],[pose,{deformAngle:2}],
+    [{...pose,r:Infinity},{}],[{...pose,x:Infinity},{}],[{...pose,r:0},{}]
+  ]){
+    const raw=projectSkinContour(contour,source);
+    const geometry=bigEyeGeometry(contour,source,{...options,projectedOutline:raw});
+    assert.notStrictEqual(geometry.outline,raw);
+    assert.deepEqual(geometry,bigEyeGeometry(contour,source,options));
+  }
+});
+
 test('WebGL gradient is one non-overlapping radial fan and one pure-black circular pupil',()=>{
   const calls=[],g={fillGradientStyle(...args){calls.push(['gradient',...args]);},fillTriangle(...args){calls.push(['triangle',...args]);},
     fillStyle(...args){calls.push(['fill',...args]);},fillCircle(...args){calls.push(['eye',...args]);}};

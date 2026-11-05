@@ -16,6 +16,8 @@
 
 原生 `android/` 工程由脚本生成，并继续作为忽略的构建目录。重复执行准备脚本会同步最新游戏资源与版本信息。
 
+从 v7.11.2 起，准备脚本还会将 `android.permission.VIBRATE` 写入应用清单。v7.11.2 开始使用新的独立发布证书。已安装旧签名 APK 的玩家需先卸载旧版，再安装新版；卸载会删除保存在应用内的本地进度。
+
 工作流上传名为 **`qiuqiule-v7.7.1-android-unsigned`** 的 artifact，名称随版本变化，包含：
 
 - `qiuqiule-v7.7.1-unsigned.apk`：已做 16 KB 页面兼容对齐的未签名 release APK。

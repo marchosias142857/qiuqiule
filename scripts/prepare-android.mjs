@@ -73,9 +73,17 @@ await writeFile(join(res,'drawable/splash.xml'),`<?xml version="1.0" encoding="u
 </layer-list>
 `);
 await access(join(android,'app/src/main/assets/public/index.html'));
-const manifest=await readFile(join(android,'app/src/main/AndroidManifest.xml'),'utf8');
+const manifestPath=join(android,'app/src/main/AndroidManifest.xml');
+let manifest=await readFile(manifestPath,'utf8');
 if(/android:screenOrientation\s*=/.test(manifest)){
   throw new Error('The game must retain both portrait and landscape support.');
+}
+// Capacitor generates the native project. Apply the permission on every
+// clean build, while leaving existing permissions intact on later syncs.
+if(!/<uses-permission\s+[^>]*\bandroid:name\s*=\s*["']android\.permission\.VIBRATE["']/.test(manifest)){
+  manifest=replaceOne(manifest,/([\n][ \t]*)<application\b/,
+    '$1<uses-permission android:name="android.permission.VIBRATE" />\n$1<application','application element');
+  await writeFile(manifestPath,manifest);
 }
 if(process.env.GITHUB_OUTPUT){
   await appendFile(process.env.GITHUB_OUTPUT,`version=${pkg.version}\nversion-code=${versionCode}\n`);

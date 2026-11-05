@@ -1,3 +1,4 @@
+import {createSvgNode,isSvgMount} from './fixtures/svg-dom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
@@ -7,9 +8,10 @@ import {campaignTutorialGuide,drawCampaign,drawCampaignBodyDetails,campaignFailu
 const elements=new Map(),events=new Map(),saved=new Map();
 function element(key){
   if(elements.has(key))return elements.get(key);
+  if(isSvgMount(key)){const mount=createSvgNode('http://www.w3.org/2000/svg','g');elements.set(key,mount);return mount;}
   const classes=new Set(),node={hidden:false,dataset:{},children:[],attributes:{},style:{setProperty(){},removeProperty(){}},
     classList:{add(...n){n.forEach(x=>classes.add(x));},remove(...n){n.forEach(x=>classes.delete(x));},contains:n=>classes.has(n),toggle(n,on){on?classes.add(n):classes.delete(n);}},
-    setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];},addEventListener(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
+    setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k]??null;},removeAttribute(k){delete this.attributes[k];},addEventListener(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
     querySelector:selector=>element(key+' '+selector),getBoundingClientRect:()=>({x:0,y:0,width:390,height:844,left:0,top:0,right:390,bottom:844}),focus(){},firstElementChild:{style:{}},lastElementChild:{style:{}}};
   elements.set(key,node);return node;
 }
@@ -21,7 +23,7 @@ globalThis.requestAnimationFrame=fn=>fn();
 globalThis.Phaser={AUTO:0,Scale:{NONE:0},Scene:class{constructor(){this.cameras={main:{setBackgroundColor(){}}};}},Game:class{constructor(config){this.scene=new config.scene();}}};
 window.Phaser=globalThis.Phaser;
 let created=0;
-globalThis.document={readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(tag+(created++)),querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){events.set(type,[...(events.get(type)||[]),fn]);}};
+globalThis.document={createElementNS:createSvgNode,readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(tag+(created++)),querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){events.set(type,[...(events.get(type)||[]),fn]);}};
 if(!globalThis.navigator)globalThis.navigator={};
 const entry=new URL('../dist/game.js',import.meta.url);
 const source=(await readFile(entry,'utf8')).replace(/from '(\.\/[^']+)'/g,(_,p)=>`from '${new URL(p,entry).href}'`);
@@ -77,13 +79,13 @@ test('cancel/reopen and abandon preserve exact offers while actual loss clears p
 
 test('live campaign HUD has exactly three dots, updates thresholds, and leaves endless ten dots clean',()=>{
   const {world}=app.setup(1);app.renderHud();
-  assert.equal((element('#stage-progress').innerHTML.match(/<i /g)||[]).length,3);
+  assert.equal(element('#stage-progress').children.length,3);
   assert.match(element('#stage-progress').attributes['aria-label'],/通关可得 3 点/);
   assert.match(element('#campaign-rating-status').textContent,/建议拉距/);
   world.shotsUsed=world.config.threePointShots+1;app.renderHud();
   assert.match(element('#stage-progress').attributes['aria-label'],/通关可得 2 点/);
   app.useEndless();
-  assert.equal((element('#stage-progress').innerHTML.match(/<i /g)||[]).length,10);
+  assert.equal(element('#stage-progress').children.length,10);
   assert.equal(element('#stage-progress').attributes.title,undefined);
   assert.equal(element('#campaign-rating-status').hidden,true);
 });
@@ -134,6 +136,7 @@ test('result shows a ten-level chapter recap with the current level identified',
 
 test('all 100 campaign HUDs stay above the frame at phone widths using the approved font advances',async()=>{
   const css=await readFile(new URL('../dist/style.css',import.meta.url),'utf8');
+  assert.doesNotMatch(css,/\.stage-dot(?:\.filled)?\s*\{[^}]*transition\s*:\s*(?!none)[^;}]+/,'a persistent rating dot must show the new fill on the threshold frame');
   assert.match(css,/#hud\.campaign-modern #campaign-goal\{white-space:nowrap;line-height:1\.4\}/);
   assert.match(css,/#campaign-rating-status\{[^}]*white-space:nowrap;[^}]*font-size:10px;line-height:1\.4/);
   const metadata=JSON.parse(await readFile(new URL('../docs/font-subset.json',import.meta.url),'utf8'));

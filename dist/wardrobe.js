@@ -3,6 +3,7 @@ import {COMPANION_DEFINITIONS,normalizeCompanionState,companionPreview} from './
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const IMAGE_KEY='qiuqiule-appearance';
+const CROP_SIZE=768;
 const isAppearanceURL=value=>typeof value==='string'&&/^data:image\/(?:png|jpeg|webp);base64,/.test(value);
 
 // Source coordinates for the largest possible square at zoom 1. Pan values
@@ -199,6 +200,8 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
   const closeCrop=()=>{
     if(saving)return;
     loadGeneration++;crop=null;pointers.clear();releaseImage();layer.hidden=true;document.body.classList.remove('appearance-cropping');
+    if(canvas.width!==1)canvas.width=1;
+    if(canvas.height!==1)canvas.height=1;
     if(restoreFocus?.isConnected)restoreFocus.focus({preventScroll:true});restoreFocus=null;
   };
   const drawCrop=()=>{
@@ -206,8 +209,8 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
     const rect=cropSourceRect(crop.image.naturalWidth,crop.image.naturalHeight,crop.zoom,crop.panX,crop.panY);
     crop.panX=((crop.image.naturalWidth-rect.side)/2-rect.x)/rect.side;
     crop.panY=((crop.image.naturalHeight-rect.side)/2-rect.y)/rect.side;
-    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,768,768);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
-    ctx.drawImage(crop.image,rect.x,rect.y,rect.side,rect.side,0,0,768,768);zoomControl.value=String(crop.zoom);
+    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,CROP_SIZE,CROP_SIZE);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+    ctx.drawImage(crop.image,rect.x,rect.y,rect.side,rect.side,0,0,CROP_SIZE,CROP_SIZE);zoomControl.value=String(crop.zoom);
   };
   const setZoom=value=>{
     if(!crop)return;
@@ -220,6 +223,8 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
     const image=new Image();image.src=sourceURL;
     try{await image.decode();}catch{if(generation===loadGeneration){releaseImage();onError('无法读取这张图片，请换一张图片重试');}return;}
     if(generation!==loadGeneration)return;
+    if(canvas.width!==CROP_SIZE)canvas.width=CROP_SIZE;
+    if(canvas.height!==CROP_SIZE)canvas.height=CROP_SIZE;
     crop={image,zoom:1,panX:0,panY:0};restoreFocus=appearanceButtons.get('custom');layer.hidden=false;document.body.classList.add('appearance-cropping');drawCrop();$('crop-cancel').focus({preventScroll:true});
   });
   $('appearance-clear').addEventListener('click',async()=>{

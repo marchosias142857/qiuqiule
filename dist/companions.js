@@ -1,11 +1,11 @@
-import {cometRibbon,cometBands} from './comet-trail.js';
+import {CometWorkspace,COMET_TRAIL} from './comet-trail.js';
 
 const TAU=Math.PI*2;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const finite=(value,fallback=0)=>Number.isFinite(value)?value:fallback;
 export const COMPANION_STATE_VERSION=1;
 export const COMPANION_UNLOCK_STEP=8000;
-export const COMPANION_ORBIT={radius:1.5,size:.21,period:3.4,opacity:.66,tailOpacity:.26};
+export const COMPANION_ORBIT={radius:1.5,size:.21,period:3.4,opacity:.60,tailOpacity:.24};
 const names=['一','二','三'];
 export const COMPANION_DEFINITIONS=Object.freeze(Array.from({length:9},(_,index)=>{
   const count=Math.floor(index/3)+1,shape=['sun','moon','star'][index%3];
@@ -105,21 +105,33 @@ function bodyTemplate(shape){
 }
 const templates=new Map(['sun','moon','star'].map(shape=>[shape,bodyTemplate(shape)]));
 const trailLength=COMPANION_ORBIT.size*4.6,trailAngle=trailLength/COMPANION_ORBIT.radius;
+const MAX_HISTORY_POINTS=96;
 const trailTemplate=Array.from({length:8},(_,i)=>{
   const angle=-trailAngle*(1-i/7);
   return {x:Math.cos(angle)*COMPANION_ORBIT.radius,y:Math.sin(angle)*COMPANION_ORBIT.radius,age:(1-i/7)*.2};
 });
 
+/** Only in-play speed stretches the existing orbit tail. Use the player's
+ * world-unit threshold, independent of the companion's own orbital speed. */
+export function companionTrailLength(radius,{speed=0,unit=radius,inPlay=false}={}){
+  const r=Math.max(0,finite(radius)),base=trailLength*r;
+  if(!inPlay||!r)return base;
+  const u=Number.isFinite(unit)&&unit>0?unit:r;
+  const amount=clamp((Math.max(0,finite(speed))/u-COMET_TRAIL.startSpeed)/(COMET_TRAIL.fullSpeed-COMET_TRAIL.startSpeed),0,1);
+  const growth=amount*amount*(3-2*amount);
+  return base*(1+2*growth);
+}
+
 /** Actual rendered world positions, never relative-to-player orbit samples.
  * Explicit clear/retain hooks keep menu transfers and newly equipped bodies
  * from inheriting another object's trail. No physics object is retained. */
 export class CompanionTrails {
-  constructor(){this.entries=new Map();}
-  clear(){this.entries.clear();}
+  constructor(){this.entries=new Map();this.recycledPoints=[];}
+  clear(){this.entries.clear();this.recycledPoints.length=0;}
   retain(keys){const living=new Set(keys);for(const key of this.entries.keys())if(!living.has(key))this.entries.delete(key);}
   retainIds(ids){const living=new Set(ids);for(const key of this.entries.keys())if(!living.has(key.slice(0,key.lastIndexOf(':'))))this.entries.delete(key);}
   sample(key,center,radius,time){
-    if(![center?.x,center?.y,radius,time].every(Number.isFinite)||radius<=0){this.entries.delete(key);return [];}
+    if(!Number.isFinite(center?.x)||!Number.isFinite(center?.y)||!Number.isFinite(radius)||!Number.isFinite(time)||radius<=0){this.entries.delete(key);return [];}
     let entry=this.entries.get(key);
     const elapsed=entry?time-entry.time:0;
     if(!entry||elapsed<0||elapsed>.25||Math.hypot(center.x-entry.x,center.y-entry.y)>Math.max(radius,entry.r)*12||
@@ -129,28 +141,65 @@ export class CompanionTrails {
       // Preserve each observed turn and resample the travelled segments, so a
       // sparse frame never turns into a detached head or FPS-dependent length.
       const steps=Math.max(1,Math.ceil(elapsed*120));
-      for(let i=1;i<=steps;i++)entry.points.push({x:entry.x+(center.x-entry.x)*i/steps,y:entry.y+(center.y-entry.y)*i/steps,time:entry.time+elapsed*i/steps});
-      entry.points=entry.points.filter(p=>time-p.time<=.5).slice(-96);
-      Object.assign(entry,{x:center.x,y:center.y,r:radius,time});
+      const points=entry.points;
+      // New samples span at most .25 seconds. Only the old prefix can expire.
+      let dropped=Math.max(0,points.length+steps-MAX_HISTORY_POINTS);
+      while(dropped<points.length&&time-points[dropped].time>.5)dropped++;
+      if(dropped){
+        for(let i=0;i<dropped&&this.recycledPoints.length<MAX_HISTORY_POINTS;i++)this.recycledPoints.push(points[i]);
+        points.copyWithin(0,dropped);
+        points.length-=dropped;
+      }
+      for(let i=1;i<=steps;i++){
+        const sample=this.recycledPoints.pop()||{};
+        sample.x=entry.x+(center.x-entry.x)*i/steps;
+        sample.y=entry.y+(center.y-entry.y)*i/steps;
+        sample.time=entry.time+elapsed*i/steps;
+        points.push(sample);
+      }
+      entry.x=center.x;entry.y=center.y;entry.r=radius;entry.time=time;
     }else if(Math.hypot(center.x-entry.x,center.y-entry.y)>1e-7){
-      // A same-time redraw with a new pose is a visual discontinuity, not
-      // travelled time. Never leave an old head inside a newly moved body.
-      entry={x:center.x,y:center.y,r:radius,time,points:[{x:center.x,y:center.y,time}]};this.entries.set(key,entry);
+      // Canvas/SVG handoffs can refine the pose twice within one frame. Move
+      // just this frame's head, preserving older real positions and time.
+      const head=entry.points.at(-1);
+      Object.assign(head,{x:center.x,y:center.y,time});
+      Object.assign(entry,{x:center.x,y:center.y,r:radius});
     }
     return entry.points.map(p=>({x:p.x,y:p.y,age:Math.max(0,time-p.time)}));
   }
 }
 
-function clipHalfPlane(polygon,distance){
-  if(!polygon.length)return [];
-  const result=[];
+// One band is completely clipped and copied back into world coordinates before
+// the next begins. Input beyond the normal 96-sample game history uses a
+// one-shot workspace, so oversized custom inputs don't grow the shared arrays.
+class ClipWorkspace {
+  constructor(){
+    this.source=[];this.first=[];this.second=[];this.strips=[];this.polygons=[];
+    this.points=[];this.used=0;
+  }
+  point(x,y){
+    if(this.used>=512)return {x,y};
+    const i=this.used++,p=this.points[i]??={};
+    p.x=x;p.y=y;return p;
+  }
+}
+const clipWorkspace=new ClipWorkspace();
+const ribbonWorkspace=new CometWorkspace();
+
+function clipHalfPlane(polygon,distance,result,work){
+  if(!polygon.length){result.length=0;return result;}
+  let count=0;
   let previous=polygon.at(-1),before=distance(previous);
   for(const current of polygon){
     const after=distance(current),inside=after<=1e-9,wasInside=before<=1e-9;
-    if(inside!==wasInside)result.push(lerpPoint(previous,current,before/(before-after)));
-    if(inside)result.push(current);
+    if(inside!==wasInside){
+      const t=before/(before-after);
+      result[count++]=work.point(previous.x+(current.x-previous.x)*t,previous.y+(current.y-previous.y)*t);
+    }
+    if(inside)result[count++]=current;
     previous=current;before=after;
   }
+  result.length=count;
   return result;
 }
 const areaTwice=polygon=>Math.abs(polygon.reduce((sum,p,i)=>{const q=polygon[(i+1)%polygon.length];return sum+p.x*q.y-p.y*q.x;},0));
@@ -229,16 +278,28 @@ function rearClipper(boundary,center,direction){
     slices.push({low,high,slope,intercept});
   }
   return vertices=>{
-    const source=vertices.map(project),min=Math.min(...source.map(p=>p.y)),max=Math.max(...source.map(p=>p.y)),polygons=[];
+    const work=vertices.length<=MAX_HISTORY_POINTS*4?clipWorkspace:new ClipWorkspace();
+    const {source,first,second,strips,polygons}=work;
+    work.used=0;
+    let min=Infinity,max=-Infinity,polygonCount=0;
+    for(let i=0;i<vertices.length;i++){
+      const p=vertices[i];
+      const x=(p.x-center.x)*dx+(p.y-center.y)*dy,y=(p.x-center.x)*nx+(p.y-center.y)*ny;
+      source[i]=work.point(x,y);min=Math.min(min,y);max=Math.max(max,y);
+    }
+    source.length=vertices.length;
     for(const slice of slices){
       if(slice.low>max||slice.high<min)continue;
       let polygon=source;
-      if(Number.isFinite(slice.low))polygon=clipHalfPlane(polygon,p=>slice.low-p.y);
-      if(Number.isFinite(slice.high))polygon=clipHalfPlane(polygon,p=>p.y-slice.high);
-      polygon=clipHalfPlane(polygon,p=>p.x-slice.slope*p.y-slice.intercept);
-      polygon=clipHalfPlane(polygon,p=>p.x);
-      if(polygon.length>=3&&areaTwice(polygon)>1e-9)polygons.push(polygon);
+      if(Number.isFinite(slice.low))polygon=clipHalfPlane(polygon,p=>slice.low-p.y,first,work);
+      if(Number.isFinite(slice.high))polygon=clipHalfPlane(polygon,p=>p.y-slice.high,second,work);
+      const intermediate=polygon===first?second:first;
+      polygon=clipHalfPlane(polygon,p=>p.x-slice.slope*p.y-slice.intercept,intermediate,work);
+      const strip=strips[polygonCount]??=[];
+      polygon=clipHalfPlane(polygon,p=>p.x,strip,work);
+      if(polygon.length>=3&&areaTwice(polygon)>1e-9)polygons[polygonCount++]=polygon;
     }
+    polygons.length=polygonCount;
     return mergeStrips(polygons).map(polygon=>polygon.map(unproject));
   };
 }
@@ -336,6 +397,7 @@ export function companionGeometry(id,pose={},time=0,options={}){
   // The orbit has no secondary bobbing, flashing or random movement.
   const phase=(finite(time)%COMPANION_ORBIT.period)/COMPANION_ORBIT.period*TAU-Math.PI/2;
   const contourPath=contourOrbit(options.contour,center,r);
+  const length=companionTrailLength(r,options);
   for(let index=0;index<definition.count;index++){
     const angle=phase+index*TAU/definition.count,c=Math.cos(angle),s=Math.sin(angle);
     const distance=contourPath?contourPath.length*((phase+Math.PI/2)/TAU+index/definition.count):0;
@@ -350,8 +412,12 @@ export function companionGeometry(id,pose={},time=0,options={}){
     }));
     const boundary=definition.shape==='moon'?[...bands[0].outer,...bands.at(-1).inner.slice().reverse()]:bands.at(-1).outer;
     const points=options.trails?options.trails.sample(id+':'+index,orbit,r,finite(time)):
-      contourPath?Array.from({length:8},(_,i)=>({...atOrbitDistance(contourPath,distance-trailLength*r*(1-i/7)),age:(1-i/7)*.2})):
-      trailTemplate.map(p=>({...transformTrail(p),age:p.age}));
+      contourPath?Array.from({length:8},(_,i)=>({...atOrbitDistance(contourPath,distance-length*(1-i/7)),age:(1-i/7)*.2})):
+      trailTemplate.map(p=>{
+        if(length===trailLength*r)return {...transformTrail(p),age:p.age};
+        const a=-length/(r*COMPANION_ORBIT.radius)*p.age/.2;
+        return {...transformTrail(point(Math.cos(a)*COMPANION_ORBIT.radius,Math.sin(a)*COMPANION_ORBIT.radius)),age:p.age};
+      });
     let direction=point(-s,c);
     for(let i=points.length-2;i>=0;i--){
       const dx=orbit.x-points[i].x,dy=orbit.y-points[i].y,span=Math.hypot(dx,dy);
@@ -361,7 +427,7 @@ export function companionGeometry(id,pose={},time=0,options={}){
     // Rendering needs subpixel path accuracy, not every time sample. Simplify
     // only the ribbon input; history still retains all actual observed turns.
     const ribbonPoints=points.length>8?simplifyChain(points,(r*.005)**2):points;
-    for(const band of cometBands(cometRibbon(ribbonPoints,{length:trailLength*r,width:r*COMPANION_ORBIT.size*.68}))){
+    for(const band of ribbonWorkspace.bands(ribbonPoints,{length,width:r*COMPANION_ORBIT.size*.68})){
       for(const vertices of clip(band.vertices))tail.push({vertices,color:colors.base,
         alpha:alpha*COMPANION_ORBIT.tailOpacity*band.crossAlpha,region:band.region});
     }
@@ -435,29 +501,90 @@ function tailGroups(tail){
 }
 // Opaque nested fills are composited before applying the body's opacity.
 // This prevents both alpha buildup and hairline gaps between tiny SVG rings.
-function bodySvg(satellite){
+function visitBodyPaths(satellite,write){
   const bands=satellite.bands,closed=bands[0].closed,levels=24;
   const colorAt=t=>{
     const position=clamp(t,0,1)*bands.length,index=Math.min(bands.length-1,Math.floor(position)),band=bands[index],fraction=position-index;
     return closed?mixColor(band.innerColor,band.outerColor,fraction):mixColor(band.outerColor,band.innerColor,fraction);
   };
   const outline=closed?bands.at(-1).outer:null,outer=bands[0].outer,inner=bands.at(-1).inner;
-  const layers=Array.from({length:levels},(_,i)=>{
+  for(let i=0;i<levels;i++){
     const depth=i/levels;
     const points=closed?outline.map(p=>lerpPoint(p,satellite.center,depth)):
       [...outer.map((p,j)=>lerpPoint(p,inner[j],depth/2)),...inner.map((p,j)=>lerpPoint(p,outer[j],depth/2)).reverse()];
-    return `<path d="${path(points)}" fill="${hex(colorAt(closed?1-depth:depth/2))}"/>`;
-  });
-  return `<g opacity="${numeric(bands[0].alpha)}">${layers.join('')}</g>`;
+    write(i,path(points),hex(colorAt(closed?1-depth:depth/2)));
+  }
+}
+function visitTailPaths(satellite,write){
+  const groups=tailGroups(satellite.tail);
+  for(let i=0;i<groups.length;i++){
+    const pieces=groups[i];
+    write(i,pieces.map(band=>path(band.vertices)).join(''),hex(pieces[0].color),numeric(pieces[0].alpha));
+  }
+  return groups.length;
 }
 function geometrySvg(geometry){
-  return geometry.satellites.map(satellite=>
-    tailGroups(satellite.tail).map(pieces=>`<path d="${pieces.map(band=>path(band.vertices)).join('')}" fill="${hex(pieces[0].color)}" opacity="${numeric(pieces[0].alpha)}"/>`).join('')+
-    bodySvg(satellite)
-  ).join('');
+  const markup=[];
+  for(const satellite of geometry.satellites){
+    visitTailPaths(satellite,(_,d,fill,opacity)=>markup.push(`<path d="${d}" fill="${fill}" opacity="${opacity}"/>`));
+    markup.push(`<g opacity="${numeric(satellite.bands[0].alpha)}">`);
+    visitBodyPaths(satellite,(_,d,fill)=>markup.push(`<path d="${d}" fill="${fill}"/>`));
+    markup.push('</g>');
+  }
+  return markup.join('');
 }
 export function companionSvg(id,pose,time,options={}){
   return geometrySvg(companionGeometry(id,pose,time,options));
+}
+
+const svgNamespace='http://www.w3.org/2000/svg';
+function svgChild(parent,index,tag){
+  const existing=parent.children[index];
+  if(existing)return existing;
+  const node=document.createElementNS(svgNamespace,tag);
+  parent.append(node);
+  return node;
+}
+function setSvgAttribute(node,name,value){
+  const text=String(value);
+  if(node.getAttribute(name)!==text)node.setAttribute(name,text);
+}
+function trimSvgChildren(parent,count){
+  while(parent.children.length>count)parent.removeChild(parent.children[parent.children.length-1]);
+}
+
+/** Keep live menu paths in place. Each satellite has a separate tail group so
+ * a band disappearing at the clipped rear edge cannot replace its body. */
+export function paintCompanionSvg(host,layers,pose,time,options={}){
+  if(!layers.length){
+    trimSvgChildren(host,0);
+    return;
+  }
+  const svg=svgChild(host,0,'svg'),size=pose.r*4;
+  setSvgAttribute(svg,'viewBox',`0 0 ${size} ${size}`);
+  setSvgAttribute(svg,'aria-hidden','true');
+  let drawn=0;
+  for(const layer of layers){
+    const geometry=companionGeometry(layer.id,pose,time,{...options,alpha:layer.weight});
+    for(const satellite of geometry.satellites){
+      const group=svgChild(svg,drawn++,'g');
+      const tail=svgChild(group,0,'g'),body=svgChild(group,1,'g');
+      const count=visitTailPaths(satellite,(i,d,fill,opacity)=>{
+        const node=svgChild(tail,i,'path');
+        setSvgAttribute(node,'d',d);
+        setSvgAttribute(node,'fill',fill);
+        setSvgAttribute(node,'opacity',opacity);
+      });
+      trimSvgChildren(tail,count);
+      setSvgAttribute(body,'opacity',numeric(satellite.bands[0].alpha));
+      visitBodyPaths(satellite,(i,d,fill)=>{
+        const node=svgChild(body,i,'path');
+        setSvgAttribute(node,'d',d);
+        setSvgAttribute(node,'fill',fill);
+      });
+    }
+  }
+  trimSvgChildren(svg,drawn);
 }
 export function companionPreview(id,color='#252720'){
   const geometry=companionGeometry(id,{x:0,y:0,r:20},.39,{color});

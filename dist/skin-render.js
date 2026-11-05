@@ -7,31 +7,40 @@ const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 // belongs to the skin; impact and drag deformation stay in their world axis.
 // The final flight map stretches along velocity and compresses the perpendicular
 // axis by its reciprocal, so it does not change the deformed silhouette's area.
-export function transformSkinPoint(point,pose={}){
+function skinProjector(pose){
   const roll=pose.roll||0,rc=Math.cos(roll),rs=Math.sin(roll);
-  const x=point.x*rc-point.y*rs,y=point.x*rs+point.y*rc;
   const angle=pose.deformAngle??pose.angle??0,c=Math.cos(angle),s=Math.sin(angle);
-  let lx=x*c+y*s,ly=-x*s+y*c;
-  const radius=Math.hypot(lx,ly),amount=clamp(pose.pullAmount||0,0,1);
-  if(amount&&radius>1e-12){
-    const pulled=pullBallPoint(lx/radius,ly/radius,amount);
-    lx=pulled.x*radius;ly=pulled.y*radius;
-  }
-  const squash=pose.squash||0;
-  lx*=1-squash;ly*=1+squash*.7;
-  const r=pose.r??1;
-  let dx=(lx*c-ly*s)*r,dy=(lx*s+ly*c)*r;
+  const amount=clamp(pose.pullAmount||0,0,1),squash=pose.squash||0;
+  const scaleX=1-squash,scaleY=1+squash*.7,r=pose.r??1;
+  const centerX=pose.x||0,centerY=pose.y||0;
   const stretch=clamp(pose.flightStretch||0,0,.12);
-  if(stretch){
-    const turn=pose.flightAngle||0,fc=Math.cos(turn),fs=Math.sin(turn),scale=1+stretch;
-    const along=(dx*fc+dy*fs)*scale,across=(-dx*fs+dy*fc)/scale;
-    dx=along*fc-across*fs;dy=along*fs+across*fc;
-  }
-  return {x:(pose.x||0)+dx,y:(pose.y||0)+dy};
+  const turn=pose.flightAngle||0,fc=stretch?Math.cos(turn):1,fs=stretch?Math.sin(turn):0,scale=1+stretch;
+  return point=>{
+    const x=point.x*rc-point.y*rs,y=point.x*rs+point.y*rc;
+    let lx=x*c+y*s,ly=-x*s+y*c;
+    if(amount){
+      const radius=Math.hypot(lx,ly);
+      if(radius>1e-12){
+        const pulled=pullBallPoint(lx/radius,ly/radius,amount);
+        lx=pulled.x*radius;ly=pulled.y*radius;
+      }
+    }
+    lx*=scaleX;ly*=scaleY;
+    let dx=(lx*c-ly*s)*r,dy=(lx*s+ly*c)*r;
+    if(stretch){
+      const along=(dx*fc+dy*fs)*scale,across=(-dx*fs+dy*fc)/scale;
+      dx=along*fc-across*fs;dy=along*fs+across*fc;
+    }
+    return {x:centerX+dx,y:centerY+dy};
+  };
+}
+
+export function transformSkinPoint(point,pose={}){
+  return skinProjector(pose)(point);
 }
 
 export function projectSkinContour(contour,pose={}){
-  return contour.map(point=>transformSkinPoint(point,pose));
+  return contour.map(skinProjector(pose));
 }
 
 export function contourPath(ctx,points){
@@ -44,8 +53,11 @@ export function contourPath(ctx,points){
 // boundary deformation. Unlike a masked stationary image, its centre, texture
 // and edge all stretch together. No extra radial rings are needed.
 export function photoMesh(contour,pose={}){
-  const center=transformSkinPoint({x:0,y:0},pose);
-  const projected=projectSkinContour(contour,pose);
+  const project=skinProjector(pose);
+  return meshTriangles(contour,contour.map(project),project({x:0,y:0}));
+}
+
+function meshTriangles(contour,projected,center){
   return contour.map((p,i)=>({
     source:[{x:0,y:0},p,contour[(i+1)%contour.length]],
     target:[center,projected[i],projected[(i+1)%projected.length]]
@@ -105,19 +117,21 @@ export function paintPhoto(ctx,image,contour,pose={},options={}){
   if(!width||!height||contour.length<3)return false;
   const extent=Math.max(...contour.map(p=>Math.max(Math.abs(p.x),Math.abs(p.y))));
   if(!Number.isFinite(extent)||extent<=0)return false;
-  const points=projectSkinContour(contour,pose),alpha=clamp(options.alpha??1,0,1);
+  const project=skinProjector(pose),points=contour.map(project),alpha=clamp(options.alpha??1,0,1);
+  const origin=project({x:0,y:0});
   ctx.save();ctx.globalAlpha*=alpha;ctx.imageSmoothingEnabled=true;
   ctx.imageSmoothingQuality='high';contourPath(ctx,points);ctx.clip();
   if(!(pose.pullAmount>1e-6)){
-    const origin=transformSkinPoint({x:0,y:0},pose);
-    const right=transformSkinPoint({x:1,y:0},pose),down=transformSkinPoint({x:0,y:1},pose);
+    const right=project({x:1,y:0}),down=project({x:0,y:1});
     ctx.transform(right.x-origin.x,right.y-origin.y,down.x-origin.x,down.y-origin.y,origin.x,origin.y);
     ctx.drawImage(image,-extent,-extent,extent*2,extent*2);
   }else{
     const seam=options.seam??.75;
     // The fallback renderer may use a lighter interior mesh. Keep the exact
     // full-resolution boundary clip and original image extent above.
-    for(const triangle of photoMesh(options.meshContour||contour,pose)){
+    const meshContour=options.meshContour||contour;
+    const meshPoints=meshContour===contour?points:meshContour.map(project);
+    for(const triangle of meshTriangles(meshContour,meshPoints,origin)){
       const source=triangle.source.map(p=>({x:(p.x/extent+1)*width/2,y:(p.y/extent+1)*height/2}));
       drawTriangle(ctx,image,source,triangle.target,seam);
     }
