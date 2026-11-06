@@ -10,11 +10,13 @@ function audioContext() {
     linearRampToValueAtTime(value, at) { this.value = value; this.events.push({type: 'linear', value, at}); },
     exponentialRampToValueAtTime(value, at) { this.value = value; this.events.push({type: 'exponential', value, at}); }});
   const node = () => ({gain: param(), frequency: param(), Q: param(),
+    setPeriodicWave(wave) { this.wave = wave; },
     connect(target) { this.target = target; }, disconnect() { this.disconnected = true; },
     start(at = 0) { this.starts = (this.starts || 0) + 1; this.startTime = at; },
     stop(at) { this.stopTime = at; this.stops = (this.stops || 0) + 1; },
     finish() { this.onended?.(); }});
   return {state: 'suspended', currentTime: 0, sampleRate: 48000, destination: {}, sources: [], oscillators: [], buffers: [], filters: [],
+    createPeriodicWave(real, imag) { return {real, imag}; },
     createGain: node, createBiquadFilter() { const n = node(); this.filters.push(n); return n; },
     createBuffer(channels, count, rate) {
       const samples = new Float32Array(count), buffer = {duration: count / rate, getChannelData: () => samples};
@@ -26,7 +28,7 @@ function audioContext() {
 }
 
 async function setup() {
-  const c = audioContext(), audio = new GameAudio({createContext: () => c, loadMusic: async () => ({duration: 90})});
+  const c = audioContext(), audio = new GameAudio({createContext: () => c, loadMusic: async () => ({duration: 121.18})});
   await audio.unlock(); await audio.loading;
   return {c, audio};
 }
@@ -48,7 +50,7 @@ test('an impact layers a fixed transient, body, energetic bass and tail on exact
   assert.ok(Math.abs(noise.stopTime - noise.startTime - .008) < 1e-9);
   assert.ok(Math.abs(tail.target.gain.events.at(-1).at - tail.startTime - .15) < 1e-9);
   assert.equal(c.sources[0], audio.source);
-  assert.equal(audio.source.target, audio.music);
+  assert.equal(audio.source.target.target, audio.player.filter);
   assert.ok([body, bass, tail, noise].reduce((sum, voice) => sum + peak(voice), 0) < .11);
   for (const voice of [...audio.voices]) {
     const gain = voice.target; voice.finish();
@@ -98,112 +100,109 @@ test('rapid impacts have a bounded voice count and new impact gain reduces with 
   audio.impact(); assert.equal(audio.voices.size, 4);
 });
 
-test('charge combines a soft elastic body and filtered texture; launch fades both sources without changing its own sound', async () => {
+const chargeLevel = charge => charge.gain.gain.events.findLast(e => e.type === 'target' && e.value > 0).value;
+
+test('one continuous string oscillator follows distance and releases before its nodes are reclaimed', async () => {
   const {c, audio} = await setup(); c.currentTime = 3;
   audio.setCharge(.25);
-  const charge = audio.charge, initialPitch = charge.osc.frequency.events.at(-1).value;
+  const charge = audio.charge, initialPitch = firstPitch(charge.osc);
   c.currentTime = 3.05; audio.setCharge(.5); c.currentTime = 3.1; audio.setCharge(1);
   assert.equal(c.oscillators.length, 1); assert.equal(charge.osc.starts, 1);
-  assert.equal(charge.osc.type, 'triangle'); assert.equal(charge.noise.loop, true);
-  assert.equal(charge.noise.target, charge.filter); assert.equal(charge.filter.type, 'bandpass');
-  assert.equal(charge.filter.target, charge.gain); assert.equal(charge.gain.target, audio.effects);
-  assert.equal(charge.osc.target, charge.bodyGain); assert.equal(charge.bodyGain.target, charge.gain);
-  assert.ok(charge.osc.frequency.events.at(-1).value > initialPitch);
-  assert.equal(audio.voices.size, 2);
-  assert.ok(charge.envelope.peak <= .0145); assert.ok(charge.bodyGain.gain.value < .4);
-  c.currentTime = 3.5; audio.launch(1);
-  assert.equal(audio.charge, null); assert.equal(charge.osc.stopTime, 3.54); assert.equal(charge.noise.stopTime, 3.54);
-  assert.equal(charge.gain.gain.events.at(-1).value, 0);
-  assert.ok(Math.abs(charge.gain.gain.events.at(-1).at - 3.535) < 1e-9);
+  assert.deepEqual([...charge.osc.wave.imag], [0, 1, .25]);
+  assert.equal(charge.osc.target, charge.gain); assert.equal(charge.gain.target, audio.effects);
+  assert.ok(initialPitch > 130 && initialPitch < 330);
+  assert.equal(charge.osc.frequency.events.at(-1).value, 330);
+  assert.equal(audio.voices.size, 1);
+  c.currentTime = 3.14; audio.launch(1);
+  assert.equal(audio.charge, null);
+  const release = charge.gain.gain.events.at(-1);
+  assert.equal(release.type, 'target'); assert.equal(release.value, 0); assert.equal(release.at, c.currentTime);
+  assert.ok(charge.osc.stopTime >= release.at + 8 * release.time);
   const launch = c.oscillators[1];
-  assert.equal(launch.startTime, 3.5); assert.equal(firstPitch(launch), 600);
+  assert.equal(launch.startTime, c.currentTime); assert.equal(firstPitch(launch), 600);
   assert.equal(launch.frequency.events.at(-1).value, 200);
-  assert.ok(Math.abs(launch.frequency.events.at(-1).at - 3.56) < 1e-9);
-  audio.stopCharge(); assert.equal(charge.osc.stops, 1); assert.equal(charge.noise.stops, 1);
-  charge.osc.finish(); charge.noise.finish();
-  assert.equal(charge.osc.disconnected, true); assert.equal(charge.noise.disconnected, true);
-  assert.equal(charge.filter.disconnected, true); assert.equal(charge.bodyGain.disconnected, true); assert.equal(charge.gain.disconnected, true);
+  assert.ok(Math.abs(launch.frequency.events.at(-1).at - c.currentTime - .06) < 1e-9);
+  audio.stopCharge(); assert.equal(charge.osc.stops, 1); charge.osc.finish();
+  assert.equal(charge.osc.disconnected, true); assert.equal(charge.gain.disconnected, true);
 });
 
 test('charge is canceled by mute, zero effects volume, hiding and release; unmuting never restarts it', async () => {
-  const {c, audio} = await setup();
+  const {audio} = await setup();
   for (const cancel of [() => audio.setLevels({sound: false}), () => audio.setLevels({sfxVolume: 0}),
     () => audio.setHidden(true), () => audio.setCharge(0), () => audio.stopCharge()]) {
     audio.setLevels({sound: true, sfxVolume: .75}); audio.setHidden(false); await audio.unlock();
     audio.setCharge(.8); const charge = audio.charge;
-    cancel(); assert.equal(audio.charge, null); assert.equal(charge.osc.stops, 1); assert.equal(charge.noise.stops, 1);
-    charge.osc.finish(); charge.noise.finish();
+    cancel(); assert.equal(audio.charge, null); assert.equal(charge.osc.stops, 1);
+    charge.osc.finish();
   }
   audio.setLevels({sound: true, sfxVolume: .75}); audio.setHidden(false); await audio.unlock();
   assert.equal(audio.charge, null); assert.equal(audio.source.starts, 1);
 });
 
-test('holding a pull still reaches exact silence even when no more pointer events arrive', async () => {
+test('a stationary hold schedules its own decay and ignores tiny pointer jitter', async () => {
   const {c, audio} = await setup(); c.currentTime = 1;
   audio.setCharge(.6); const charge = audio.charge;
-  assert.ok(audio.chargeEnvelopeAt(charge, 1.025) > 0);
-  assert.equal(audio.chargeEnvelopeAt(charge, 1.181), 0);
-  assert.equal(audio.chargeEnvelopeAt(charge, 20), 0);
-  assert.deepEqual(charge.gain.gain.events.at(-1), {type: 'linear', value: 0, at: 1.18});
-  const events = charge.gain.gain.events.length, pitches = charge.osc.frequency.events.length;
+  const events = charge.gain.gain.events;
+  const [movement, release, silence] = events.slice(-3);
+  assert.equal(movement.type, 'target'); assert.ok(movement.value > 0);
+  assert.equal(release.type, 'target'); assert.equal(release.value, 0); assert.equal(release.at, 1.12);
+  assert.equal(silence.type, 'set'); assert.equal(silence.value, 0);
+  assert.ok((silence.at - release.at) / release.time >= 7.99);
+  const count = events.length, pitches = charge.osc.frequency.events.length;
   for (let i = 1; i < 120; i++) {
     c.currentTime = 1 + i / 60;
     audio.setCharge(.6 + (i % 2 ? .001 : -.001));
   }
-  assert.equal(charge.gain.gain.events.length, events, 'small pointer jitter cannot retrigger the envelope');
-  assert.equal(charge.osc.frequency.events.length, pitches);
-  assert.equal(audio.voices.size, 2);
+  assert.equal(events.length, count); assert.equal(charge.osc.frequency.events.length, pitches);
+  assert.equal(audio.voices.size, 1);
 });
 
-test('a slow deliberate pull accumulates past the jitter threshold, while faster movement is louder and relaxing is softer', async () => {
+test('speed changes volume smoothly while the same pull distance always targets the same pitch', async () => {
   const slow = await setup(), fast = await setup();
   slow.c.currentTime = fast.c.currentTime = 1;
   slow.audio.setCharge(.2); fast.audio.setCharge(.2);
   slow.c.currentTime = 1.5; slow.audio.setCharge(.4);
   fast.c.currentTime = 1.02; fast.audio.setCharge(.4);
-  assert.ok(fast.audio.charge.envelope.peak > slow.audio.charge.envelope.peak);
-  const charge = slow.audio.charge, before = charge.gain.gain.events.length;
+  assert.ok(chargeLevel(fast.audio.charge) > chargeLevel(slow.audio.charge));
+  assert.equal(fast.audio.charge.osc.frequency.events.at(-1).value, slow.audio.charge.osc.frequency.events.at(-1).value);
+  const charge = slow.audio.charge, count = charge.gain.gain.events.length;
   for (let i = 1; i <= 6; i++) { slow.c.currentTime += .05; slow.audio.setCharge(.4 + i * .001); }
-  assert.ok(charge.gain.gain.events.length > before, 'subthreshold steps accumulate into a genuine pull');
+  assert.ok(charge.gain.gain.events.length > count, 'slow, subthreshold steps accumulate into a genuine pull');
   const outward = await setup(), inward = await setup();
   outward.audio.setCharge(.3); inward.audio.setCharge(.7);
   outward.c.currentTime = inward.c.currentTime = .1;
   outward.audio.setCharge(.5); inward.audio.setCharge(.5);
-  assert.ok(Math.abs(inward.audio.charge.envelope.peak / outward.audio.charge.envelope.peak - .55) < 1e-9);
+  assert.ok(chargeLevel(inward.audio.charge) < chargeLevel(outward.audio.charge));
 });
 
-test('re-excitation and release anchor to the live envelope instead of resetting gain and creating a click', async () => {
+test('bursts of pointer updates share one moving target with no level reset during a drag', async () => {
   const {c, audio} = await setup(); c.currentTime = 1;
-  audio.setCharge(.2); const charge = audio.charge;
-  c.currentTime = 1.01;
-  const current = audio.chargeEnvelopeAt(charge, c.currentTime);
-  assert.ok(current > 0 && current < charge.envelope.peak);
-  audio.setCharge(.4);
-  assert.deepEqual(charge.gain.gain.events.at(-3), {type: 'set', value: current, at: 1.01});
-  c.currentTime = 1.04;
-  const released = audio.chargeEnvelopeAt(charge, c.currentTime);
-  audio.stopCharge();
-  assert.deepEqual(charge.gain.gain.events.at(-2), {type: 'set', value: released, at: 1.04});
-  assert.equal(audio.chargeEnvelopeAt(charge, 1.081), 0);
+  audio.setCharge(.1); const charge = audio.charge;
+  for (let frame = 1; frame <= 16; frame++) {
+    c.currentTime = 1 + frame / 90;
+    const before = charge.gain.gain.events.length;
+    audio.setCharge(.1 + frame * .02);
+    const events = charge.gain.gain.events.slice(before);
+    assert.ok(events.some(e => e.type === 'target' && e.value > 0 && e.at === c.currentTime));
+    assert.ok(events.every(e => e.at !== c.currentTime || e.type !== 'set'));
+  }
+  assert.equal(charge.osc.starts, 1);
+  assert.equal(c.oscillators.length, 1);
 });
 
-test('texture is cached and late completion from a released gesture cannot clear a newer gesture', async () => {
+test('late completion from a released gesture cannot clear a newer gesture', async () => {
   const {c, audio} = await setup(); audio.setCharge(.4);
-  const old = audio.charge, texture = old.noise.buffer;
-  audio.stopCharge(); c.currentTime = .1; audio.setCharge(.5);
+  const old = audio.charge;
+  audio.stopCharge(); c.currentTime = .01; audio.setCharge(.5);
   const next = audio.charge;
-  assert.equal(next.noise.buffer, texture); assert.equal(c.buffers.length, 1);
-  old.osc.finish(); old.noise.finish();
-  assert.equal(audio.charge, next); assert.equal(audio.voices.size, 2);
-  const samples = texture.getChannelData(0);
-  assert.equal(samples[0], 0); assert.equal(Math.abs(samples.at(-1)), 0);
-  assert.ok(samples.every(Number.isFinite));
-  assert.ok(Math.max(...samples) <= 1 && Math.min(...samples) >= -1);
+  assert.equal(next.osc.wave, old.osc.wave);
+  old.osc.finish();
+  assert.equal(audio.charge, next); assert.equal(audio.voices.size, 1);
 });
 
 test('new feedback methods cannot unlock sound and respect all effects gates', async () => {
   const c = audioContext(); let created = 0;
-  const audio = new GameAudio({createContext: () => { created++; return c; }, loadMusic: async () => ({duration: 90})});
+  const audio = new GameAudio({createContext: () => { created++; return c; }, loadMusic: async () => ({duration: 121.18})});
   const sounds = () => { audio.impact(); audio.launch(); audio.wall(); audio.setCharge(1); };
   sounds(); assert.equal(created, 0);
   await audio.unlock(); await audio.loading;
@@ -336,7 +335,7 @@ test('endless walls use a strict quarter-power gate and quadratic gain without c
 
 test('new endless audio keeps mute gates and reserves exactly the voices it needs', async () => {
   const c = audioContext(); let created = 0;
-  const audio = new GameAudio({createContext: () => { created++; return c; }, loadMusic: async () => ({duration: 90})});
+  const audio = new GameAudio({createContext: () => { created++; return c; }, loadMusic: async () => ({duration: 121.18})});
   const sounds = () => {
     assert.equal(audio.impact({kind: 'hit', endless: true, hitTier: 'medium'}), false);
     assert.equal(audio.impact({kind: 'kill', endless: true, frenzy: true, level: 11}), false);

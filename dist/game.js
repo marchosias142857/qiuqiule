@@ -160,7 +160,7 @@ function syncAudioSettings(){
     $('#'+key+'-value').value=value+'%';
   }
 }
-function unlockAudio(){sound.unlock();}
+function unlockAudio(){if(sound.needsUnlock)sound.unlock();}
 function tone(...args){sound.tone(...args);}
 function clearChoicePress(){const press=choicePress;choicePress=null;if(press?.canvas.hasPointerCapture(press.id))press.canvas.releasePointerCapture(press.id);}
 function updateChoicePress(now=scene?.inputClock||0){
@@ -703,6 +703,7 @@ function openResult(view=null){
     return {...b,r:Math.max(1,b.r*size),renderUnit:world.unit*size};
   });
   const abandoned=world.phase!=='over'&&!world.completed;
+  if(abandoned)sound.setMusicScene(world.mode==='campaign'?'resultCampaign':'resultEndless');
   saveCampaignResult(abandoned?'abandon':world.completed?'win':'loss');
   cancelDrag();world.phase='over';world.choices=[];updateChoices();
   const campaign=world.mode==='campaign';
@@ -877,6 +878,7 @@ function prepareGame({demo=false}={}){
   runAimHoldDuration=demo?1.2:aimHoldDuration(aimMetrics);
   const starting=selectedMode==='endless'&&!demo?1:0;
   world=selectedMode==='campaign'?new CampaignWorld(viewport.width,viewport.height,currentLevel,Math.random,{upgradeId:pendingCampaignUpgrade,tutorialSeen:!!campaignProgress.tutorials?.[levelConfig(currentLevel).classId]}):new World(viewport.width,viewport.height,runDay.random,{spawnInitial:starting===0});screen='play';
+  sound.setMusicScene(world.mode==='campaign'?'campaign':'endless');
   if(world.mode==='campaign'&&!demo){
     campaignProgress=recordAttempt(campaignProgress,currentLevel,{upgradeId:pendingCampaignUpgrade,tutorialKey:world.config?.implemented?world.config.classId:null,offerChoices:levelRecord(campaignProgress,currentLevel).offerChoices});
     campaignAttemptId=levelRecord(campaignProgress,currentLevel).activeAttempt;
@@ -922,6 +924,7 @@ function openLevels(from=currentPlayerPose()){
   if(transfer||controlFlight)return;
   saveCampaignResult(world?.completed?'win':'abandon');closeCampaignOffer(false);feedbackDemo=false;
   hidePanel();selectedMode='campaign';screen='levels';world=null;result=null;drag=null;trackPointer=null;levelPointer=null;paused=false;
+  sound.setMusicScene('levels');
   selector=new LevelSelector(viewport.width,viewport.height,campaignProgress.unlocked);
   $('#home').hidden=true;$('#hud').hidden=true;clearChoiceLabels();
   $('#levels-view').removeAttribute('hidden');levelsReveal=0;clearEffects();
@@ -964,6 +967,7 @@ function offerCampaign(level,from=currentPlayerPose()){
   world=new CampaignOfferWorld(viewport.width,viewport.height,config,choices);
   world.setFeedbackOptions({strength:settings.juice,reducedMotion});
   screen='play';paused=true;result=null;campaignAttemptId=null;campaignRecorded=false;feedbackDemo=false;
+  sound.setMusicScene('levels');
   uiAnchor=null;releaseOverlay=0;pauseOnArrival=false;
   clearEffects();clearChoiceLabels();scene.accumulator=0;scene.timeSlices=[];scene.timeScale=1;
   $('#levels-view').setAttribute('hidden','');$('#level-skip').hidden=true;
@@ -1088,6 +1092,7 @@ function showHome(){
   saveCampaignResult(world?.completed?'win':'abandon');closeCampaignOffer(false);$('#campaign-note').hidden=true;$('#level-skip').hidden=true;
   const from=currentPlayerPose();hidePanel();screen='home';cancelDrag();world=null;paused=false;result=null;feedbackDemo=false;
   $('#control-transfers').replaceChildren();$('#result-shadow').hidden=true;
+  sound.setMusicScene('home');
   home=new HomeWorld(viewport.width,viewport.height,selectedMode);homeReveal=0;
   if(campaignDemoEnabled)$('#campaign-demo-panel').hidden=false;
   $('#levels-view').setAttribute('hidden','');trackPointer=null;
@@ -1825,7 +1830,7 @@ function boot(){
         }
         if(e.type==='firstTypeKill')this.firstTypeUntil=(world.feedbackTime??world.time)+.3;
         if(e.type==='shatter')this.particles(e,enemyBodyColor(e,hex(settings.enemy)),5);
-        if(e.type==='bossEntry'){tone(260,.35,'sine',.045,1.5);}
+        if(e.type==='bossEntry')tone(260,.35,'sine',.045,1.5);
         if(e.type==='bossReady')tone(520,.14,'triangle',.035,1.15);
         if(e.type==='bossHit'&&!bossDefeated){
           sound.impact({kind:'boss',power:e.power,strength:settings.juice});
@@ -1934,7 +1939,13 @@ function boot(){
           tone(cue.frequency,.25,'sine',.045,.6);
         }
         if(e.type==='over'){
-          if(world.mode==='campaign'){this.resetFeedback();openResult();}else this.beginEnding();
+          if(endless){
+            sound.setMusicScene('failedEndless');
+            this.beginEnding();
+          }else{
+            sound.setMusicScene(world.completed?'resultCampaign':'failedCampaign');
+            this.resetFeedback();openResult();
+          }
           if(!world.completed&&world.mode!=='campaign'){tone(160,.4,'sine',.06,.4);}
         }
       }
@@ -2068,6 +2079,7 @@ function boot(){
       layoutHomeControl();
       if(before!=='entering'&&home.phase==='entering'){
         screen='entering';cancelDrag();syncInputs();
+        if(home.mode==='endless')sound.setMusicScene('endless');
         $('#hud').hidden=home.mode==='campaign';$('#hud').classList.remove('campaign');$('#hud').style.opacity=0;$('#score').textContent='0000';
         clearChoiceLabels();$('.pause-button').disabled=true;
         tone(420,.24,'sine',.055,1.7);
@@ -2517,6 +2529,12 @@ function startUpgradeDemo(kind){
   updateHud();
 }
 
+// Safari can withhold activation from a drag. Keep listening for a normal tap
+// and for gestures after an interruption; once running this is just a state check.
+for(const type of ['pointerup','touchend','click','keydown']){
+  document.addEventListener(type,unlockAudio,{capture:true,passive:true});
+}
+
 // Programmatic menu focus must not leave a touch/mouse halo on round buttons.
 document.addEventListener('pointerdown',event=>{
   document.documentElement.dataset.inputMode='pointer';
@@ -2600,6 +2618,13 @@ function pauseForInterruption(){
   if(transfer)pauseOnArrival=true;else openPause();
 }
 function resumeEnding(){if(scene?.ending&&!document.hidden&&document.hasFocus()){scene.ending.suspended=false;scene.ending.resumePending=true;scene.timeScale=reducedMotion||!settings.juice?1:.25;}}
+// Start fading before pagehide when the browser announces a document departure.
+// A cancelled navigation keeps the current page and its music position.
+window.navigation?.addEventListener('navigate',event=>{
+  if(event.destination.sameDocument||event.downloadRequest!=null||event.defaultPrevented)return;
+  sound.setHidden(true);
+  event.signal.addEventListener('abort',()=>{if(!document.hidden)sound.setHidden(false);},{once:true});
+});
 document.addEventListener('visibilitychange',()=>{sound.setHidden(document.hidden);if(document.hidden)pauseForInterruption();else resumeEnding();});
 window.addEventListener('pagehide',()=>{sound.setHidden(true);pauseForInterruption();});
 window.addEventListener('pageshow',()=>{sound.setHidden(document.hidden);resumeEnding();});
@@ -2611,7 +2636,10 @@ function buffGuideIcon(rings=0){
 }
 $('#buff-guide').innerHTML=UPGRADE_DEFINITIONS.map(b=>`<article class="buff-explanation"><span aria-hidden="true">${buffGuideIcon(b.rings)}</span><div><h3>${b.name}<small>${b.short}</small></h3><p>${b.detail}</p></div></article>`).join('');
 $$('[data-icon]').forEach(button=>button.innerHTML=iconMarkup(button.dataset.icon));
-applyTheme();syncMode();layoutHomeControl();
+applyTheme();sound.setMusicScene('home');
+sound.setHidden(document.hidden);
+if(!document.hidden)sound.tryAutoplay();
+syncMode();layoutHomeControl();
 async function bootWithFont(){
   // Canvas and Phaser retain metrics from the first draw. Load the same face
   // used by the DOM before creating the scene so numbers never start in a fallback.

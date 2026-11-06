@@ -319,7 +319,7 @@ npm run check
 - `dist/icons.js`：Phaser 和 DOM 共用的圆角图标几何；功能球图案和球体共用完整变换。
 - `dist/motion.js`：连续视线跟随、平滑的 UI 滚动转场和端点采样。
 - `dist/audio.js`：BGM 循环、独立音量总线、总静音与后台音频暂停。
-- `dist/audio/light-bounce.mp3`：原创 BGM《轻轻弹》；`scripts/compose-bgm.py` 为可复现的乐谱与渲染脚本。
+- `dist/music-player.js` 管理主页／无尽与闯关两首配乐的循环与交叉混合。两份 MP3 位于 `dist/audio/`。
 - `dist/game.js`：Phaser 场景、拖拽输入、球体与碎片绘制、UI、程序音效与本地设置。
 - `dist/style.css`：桌面、手机竖屏、手机横屏与小屏布局。
 - `dist/sw.js` / `manifest.webmanifest`：离线缓存、主屏幕安装、横竖屏。
@@ -454,7 +454,7 @@ npm run check
 
 ## 声音（1.4.0）
 
-原创循环曲《轻轻弹》采用 C 大调、88 BPM、32 小节，时长约 87.27 秒。柔和木琴旋律、暖电钢和弦、圆润低音与低音量轻打击乐；第三段减配、旋律留白，避免短句高频重复。声部尾音与空间反射跨循环边界回绕。112 kbps 立体声 MP3 约 1.22 MB，无外部素材或网络音源。开发环境可用 NumPy、SciPy、ffmpeg 运行 `python scripts/compose-bgm.py` 重建；游戏运行时无这些依赖。
+旧版本使用的原创循环曲《轻轻弹》采用 C 大调、88 BPM、32 小节，时长约 87.27 秒。柔和木琴旋律、暖电钢和弦、圆润低音与低音量轻打击乐；第三段减配、旋律留白，避免短句高频重复。声部尾音与空间反射跨循环边界回绕。112 kbps 立体声 MP3 约 1.22 MB，无外部素材或网络音源。开发环境可用 NumPy、SciPy、ffmpeg 运行 `python scripts/compose-bgm.py` 重建；游戏运行时无这些依赖。
 
 首次触摸/键盘操作解锁 Web Audio 后淡入播放；菜单、暂停、重开和战斗共用一个持续的循环源，不重复叠加或重头播放。切后台先淡出再挂起 AudioContext，返回后接续；浏览器要求时下一次触摸恢复。移动浏览器首次打开时不会尝试绕过自动播放限制。
 

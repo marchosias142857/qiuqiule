@@ -8,6 +8,7 @@ import {skinContour,contourArea} from '../dist/skins.js';
 import {UPGRADE_DEFINITIONS,UPGRADES} from '../dist/upgrades.js';
 import {impactShards} from '../dist/feedback.js';
 import {BOSS_TIMING} from '../dist/physics.js';
+import {GameAudio} from '../dist/audio.js';
 import {companionGeometry,companionSvg} from '../dist/companions.js';
 import {crownOutline} from '../dist/boss-visuals.js';
 
@@ -35,6 +36,8 @@ function element(selector){
 globalThis.window={innerWidth:390,innerHeight:844,devicePixelRatio:2,
   addEventListener(type,fn){if(!windowListeners.has(type))windowListeners.set(type,[]);windowListeners.get(type).push(fn);},
   removeEventListener(type,fn){windowListeners.set(type,(windowListeners.get(type)||[]).filter(handler=>handler!==fn));}};
+// Reuse the window-listener fixture so fresh game instances also isolate navigation handlers.
+window.navigation={addEventListener:(type,fn)=>window.addEventListener('navigation:'+type,fn)};
 globalThis.localStorage={getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(k,v)};
 globalThis.Phaser={AUTO:0,Scale:{NONE:0},Scene:class{constructor(){this.cameras={main:{setBackgroundColor(){}}};}},Game:class{constructor(config){this.scene=new config.scene();}}};
 window.Phaser=globalThis.Phaser;
@@ -5602,4 +5605,130 @@ test('companion trail rollback keeps moving home and level players on orbit arcs
     app.paintUiForTest({...player,y:player.y-3});
     assert.deepEqual(app.readCompanionHistory(),[],'the detached UI keeps an orbit preview rather than a translated trail');
   }
+});
+
+
+test('the endless track continues untouched through Boss entry, pause and victory, and only changes mix on failure',t=>{
+  const calls=[];
+  t.mock.method(GameAudio.prototype,'setMusicScene',name=>calls.push(name));
+  const {scene,home}=app.seedRenderer(graphicsRecorder());
+  home.launchToPlay();advanceScene(scene,3);
+  assert.equal(app.readRestart().screen,'play');
+  assert.equal(calls.at(0),'endless');
+  assert.ok(calls.every(name=>name==='endless'));
+  const {world}=app.readRestart();
+  const beforeBoss=calls.length;
+  world.stage=5;world.beginBoss();scene.handleEvents();
+  assert.equal(calls.length,beforeBoss);
+  clickAction('pause');app.advanceUi(.5);clickAction('settings');app.advanceUi(.5);
+  clickAction('close');app.advanceUi(.5);clickAction('resume');app.advanceUi(.5);
+  assert.equal(calls.length,beforeBoss);
+  world.defeatBoss();scene.handleEvents();assert.equal(calls.length,beforeBoss);
+  world.beginBoss();scene.handleEvents();world.endRun('boss');scene.handleEvents();
+  advanceScene(scene,1.2);assert.deepEqual(calls.slice(beforeBoss),['failedEndless']);
+  assert.equal(app.readRestart().modal,'over');
+  clickRestart();assert.equal(calls.at(-1),'endless');
+  const regular=endingRun();advanceScene(regular.scene,1.2);
+  assert.equal(calls.at(-1),'failedEndless');
+  clickAction('home');assert.equal(calls.at(-1),'home');
+});
+
+test('music keeps campaign offers and exits on the map mix and distinguishes wins, losses and voluntary exits',t=>{
+  const calls=[];
+  t.mock.method(GameAudio.prototype,'setMusicScene',name=>calls.push(name));
+  app.seedLevelRenderer(graphicsRecorder(),390,844,1);
+  app.enterCampaign(1);clickAction('campaign-cancel');
+  assert.deepEqual(calls,['levels','levels']);
+  for(const won of [true,false]){
+    const {world,scene}=modernCampaignRun();
+    assert.deepEqual(calls.slice(-2),['levels','campaign']);
+    world.finishCampaign(won);scene.handleEvents();
+    assert.equal(calls.at(-1),won?'resultCampaign':'failedCampaign');
+    app.advanceUi(1);clickAction('levels');app.advanceUi(1);
+    assert.equal(calls.at(-1),'levels');
+  }
+  modernCampaignRun();clickAction('pause');app.advanceUi(1);clickAction('home');
+  assert.equal(calls.at(-1),'resultCampaign');
+  app.seedRenderer(graphicsRecorder(),390,844,true);
+  clickAction('pause');app.advanceUi(1);clickAction('home');
+  assert.equal(calls.at(-1),'resultEndless');
+});
+
+test('leaving the web page fades early and cancelling the navigation restores the visible game',t=>{
+  const calls=[];
+  t.mock.method(GameAudio.prototype,'setHidden',hidden=>calls.push(hidden));
+  const navigate=windowListeners.get('navigation:navigate')[0];
+  const controller=new AbortController();
+  const event={destination:{sameDocument:false},signal:controller.signal,downloadRequest:null};
+  navigate({...event,destination:{sameDocument:true}});
+  navigate({...event,downloadRequest:''});
+  navigate({...event,defaultPrevented:true});
+  assert.deepEqual(calls,[]);
+  navigate(event);
+  assert.deepEqual(calls,[true]);
+  controller.abort();
+  assert.deepEqual(calls,[true,false]);
+});
+
+test('a visible home attempts autoplay before any gesture using the restored audio preferences',async t=>{
+  const attempts=[];
+  t.mock.method(GameAudio.prototype,'tryAutoplay',function(){
+    attempts.push({scene:this.musicScene,sound:this.enabled,bgmVolume:this.bgmVolume,sfxVolume:this.sfxVolume});
+  });
+  const wasHidden=document.hidden;
+  t.after(()=>{document.hidden=wasHidden;});
+  document.hidden=false;
+  for(const [config,expected] of [
+    [null,{sound:true,bgmVolume:.55,sfxVolume:.75}],
+    [{sound:false,bgmVolume:.32,sfxVolume:.46},{sound:false,bgmVolume:.32,sfxVolume:.46}],
+    [{sound:true,bgmVolume:0,sfxVolume:.6},{sound:true,bgmVolume:0,sfxVolume:.6}]
+  ]){
+    attempts.length=0;
+    await withReloadedEntry(config,false,()=>{
+      assert.deepEqual(attempts,[{scene:'home',...expected}]);
+    });
+  }
+  attempts.length=0;document.hidden=true;
+  await withReloadedEntry(null,false,()=>{
+    assert.deepEqual(attempts,[]);
+    document.hidden=false;
+    listeners.get('visibilitychange').at(-1)();
+    assert.deepEqual(attempts,[{scene:'home',sound:true,bgmVolume:.55,sfxVolume:.75}]);
+  });
+});
+
+test('a blocked drag leaves global audio retries available on ordinary taps and after interruptions',async t=>{
+  const page=new EventTarget(),registered=new Set();
+  const gestures=['pointerup','touchend','click','keydown'];
+  const addListener=document.addEventListener;
+  t.mock.method(document,'addEventListener',function(type,handler,options){
+    addListener.call(this,type,handler,options);
+    // Canvas handlers may stop bubbling. Only document capture listeners see these gestures.
+    if(gestures.includes(type)&&(options===true||options?.capture)){
+      registered.add(type);
+      page.addEventListener(type,handler,options);
+    }
+  });
+  let locked=true,gestureAllowed=false;
+  t.mock.method(GameAudio.prototype,'tryAutoplay',()=>{});
+  t.mock.getter(GameAudio.prototype,'needsUnlock',()=>locked);
+  const unlock=t.mock.method(GameAudio.prototype,'unlock',()=>{if(gestureAllowed)locked=false;});
+  await withReloadedEntry(null,false,()=>{
+    assert.deepEqual(registered,new Set(gestures));
+    const release=type=>page.dispatchEvent(new Event(type));
+    release('pointerup');
+    assert.equal(unlock.mock.callCount(),1);
+    gestureAllowed=true;
+    release('pointerup');
+    assert.equal(unlock.mock.callCount(),2,'a later pointer release can retry after a drag was denied');
+    for(const type of ['touchend','click','keydown']){
+      const previous=unlock.mock.callCount();
+      release(type);
+      assert.equal(unlock.mock.callCount(),previous,'a running session ignores '+type);
+      locked=true;
+      release(type);
+      assert.equal(unlock.mock.callCount(),previous+1,type+' can recover an interrupted session');
+      assert.equal(locked,false);
+    }
+  });
 });

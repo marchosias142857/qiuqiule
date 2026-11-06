@@ -1,42 +1,126 @@
 // Local music and synthesized effects share a master mute, with independent buses.
-export const MUSIC_SECONDS = 32 * 4 * 60 / 88;
+import {MusicPlayer, MUSIC_SCENES, MUSIC_TRACKS} from './music-player.js';
+export {MUSIC_TRACKS} from './music-player.js';
 export const audioLevel = (value, fallback = 0) => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
 export const volumeGain = value => audioLevel(value) ** 1.5;
 const LEGACY_IMPACT_NOTES = Object.freeze([523.251, 659.255, 783.991, 1046.502, 1318.51, 1567.982]);
+const MASTER_FADE_SECONDS = .05;
 export const IMPACT_NOTES = Object.freeze([...LEGACY_IMPACT_NOTES, 2093.004, 2637.02]);
 export const MAX_EFFECT_VOICES = 32;
+
+async function musicBytes(name) {
+  const response = await fetch(new URL(MUSIC_TRACKS[name].url, import.meta.url));
+  if (!response.ok || response.redirected) throw new Error('Music unavailable');
+  return response.arrayBuffer();
+}
+
+async function prepareHomeMusic() {
+  const bytes = await musicBytes('endless');
+  const Offline = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
+  if (Offline) {
+    try {
+      // This decoder has no device output. Keep the original MP3 until decoding
+      // succeeds, since decodeAudioData takes ownership of the passed bytes.
+      const decoder = new Offline(2, 1, 44100);
+      return {buffer: await decoder.decodeAudioData(bytes.slice(0))};
+    } catch { /* The playback context can still decode the original bytes. */ }
+  }
+  return {bytes};
+}
 
 export class GameAudio {
   constructor({createContext = () => new (window.AudioContext || window.webkitAudioContext)(), loadMusic} = {}) {
     this.createContext = createContext;
-    this.loadMusic = loadMusic || (async context => {
-      const response = await fetch(new URL('./audio/light-bounce.mp3', import.meta.url));
-      if (!response.ok || response.redirected) throw new Error('Music unavailable');
-      return context.decodeAudioData(await response.arrayBuffer());
+    this.preparedHome = null;
+    this.prepareHome = loadMusic ? null : prepareHomeMusic;
+    this.loadMusic = loadMusic || (async (context, name) => {
+      const prepared = name === 'endless' ? await this.preparedHome : null;
+      if (name === 'endless') this.preparedHome = null;
+      return prepared?.buffer || context.decodeAudioData(prepared?.bytes || await musicBytes(name));
     });
     this.enabled = true; this.bgmVolume = .55; this.sfxVolume = .75;
-    this.hidden = false; this.context = null; this.source = null;
+    this.hidden = false; this.context = null; this.player = null; this.musicScene = 'home';
     this.loading = null; this.suspendTimer = null; this.voices = new Set();
-    this.charge = null; this.impactNoise = null; this.chargeNoise = null;
+    this.masterFade = null; this.suspending = null;
+    this.autoplayAttempted = false; this.hasRunAudio = false;
+    this.charge = null; this.chargeWave = null; this.impactNoise = null;
     this.clearSequence = null;
   }
   setLevels({sound = this.enabled, bgmVolume = this.bgmVolume, sfxVolume = this.sfxVolume}) {
+    const hadMusic = this.enabled && this.bgmVolume;
     this.enabled = sound; this.bgmVolume = audioLevel(bgmVolume, .55); this.sfxVolume = audioLevel(sfxVolume, .75);
     this.applyLevels();
+    if (!hadMusic && this.enabled && this.bgmVolume) this.setMusicScene(this.musicScene);
   }
   ramp(param, value, time = .04) {
     param.cancelScheduledValues(this.context.currentTime);
     param.setTargetAtTime(value, this.context.currentTime, time);
   }
+  fadeMaster() {
+    const now = this.context.currentTime, param = this.master.gain;
+    const target = this.enabled && !this.hidden ? 1 : 0;
+    const old = this.masterFade;
+    if (!target && this.context.state !== 'running') {
+      // The browser already silenced the device. Start the next resume at zero.
+      param.cancelScheduledValues(now); param.setValueAtTime(0, now);
+      this.masterFade = {start: now, end: now, from: 0, to: 0};
+      return;
+    }
+    if (target === old?.to || this.suspending) return;
+    const end = now + MASTER_FADE_SECONDS;
+    let from = old?.to ?? 0;
+    param.cancelScheduledValues(now);
+    if (old && now > old.start && now <= old.end) {
+      // Restore the unfinished segment before reversing direction. This also
+      // works in WebViews without AudioParam.cancelAndHoldAtTime.
+      from = old.from + (old.to - old.from) * (now - old.start) / (old.end - old.start);
+      param.linearRampToValueAtTime(from, now);
+    } else {
+      if (old && now === old.start) from = old.from;
+      param.setValueAtTime(from, now);
+    }
+    param.linearRampToValueAtTime(target, end);
+    this.masterFade = {start: now, end, from, to: target};
+  }
   applyLevels() {
     if (!this.enabled || this.hidden || !this.sfxVolume) { this.stopCharge(); this.clearEnd(); }
     if (!this.context) return;
-    this.ramp(this.master.gain, this.enabled && !this.hidden ? 1 : 0);
+    this.fadeMaster();
     this.ramp(this.music.gain, volumeGain(this.bgmVolume));
     this.ramp(this.effects.gain, volumeGain(this.sfxVolume));
   }
+  prepareMusic() {
+    if (this.hidden || !this.enabled || !this.bgmVolume || this.player || !this.prepareHome) return;
+    this.preparedHome ??= this.prepareHome().catch(() => null);
+    return this.preparedHome;
+  }
+  tryAutoplay() {
+    if (this.autoplayAttempted || this.hidden || !this.enabled || !this.bgmVolume) return;
+    this.autoplayAttempted = true;
+    this.prepareMusic();
+    return this.unlock();
+  }
+  get source() { return this.player?.resident?.source || null; }
+  get needsUnlock() {
+    if (this.hidden) return false;
+    if (this.context?.state !== 'running' || this.suspending) return true;
+    return !!(this.enabled && this.bgmVolume && !this.player.pending &&
+      (!this.source || this.player.track !== MUSIC_SCENES[this.musicScene].track));
+  }
+  setMusicScene(scene) {
+    if (!Object.hasOwn(MUSIC_SCENES, scene)) return;
+    this.musicScene = scene;
+    if (this.player && this.context.state === 'running' && !this.hidden && this.enabled && this.bgmVolume) {
+      this.loading = this.player.setScene(scene);
+    }
+    return this.loading;
+  }
+  musicStatus() {
+    return this.player?.status() || {scene: this.musicScene, track: null, title: null, switching: false};
+  }
   async unlock() {
     try {
+      if (this.hidden) return;
       if (!this.context) {
         const c = this.context = this.createContext();
         this.master = c.createGain(); this.music = c.createGain(); this.effects = c.createGain();
@@ -44,30 +128,58 @@ export class GameAudio {
         this.master.gain.value = 0; this.music.gain.value = 0;
         this.music.connect(this.feedbackDuck); this.effects.connect(this.feedbackDuck);
         this.feedbackDuck.connect(this.master); this.master.connect(c.destination);
+        this.player = new MusicPlayer(c, this.music, name => this.loadMusic(c, name), this.musicScene);
+        c.addEventListener?.('statechange', () => this.syncRunningAudio());
         this.applyLevels();
       }
-      if (!this.hidden && this.context.state !== 'running') await this.context.resume();
-      if (!this.source && !this.loading) {
-        this.loading = this.loadMusic(this.context).then(buffer => {
-          const source = this.context.createBufferSource();
-          source.buffer = buffer; source.loop = true; source.loopStart = 0;
-          source.loopEnd = Math.min(MUSIC_SECONDS, buffer.duration);
-          source.connect(this.music); this.source = source;
-          this.music.gain.cancelScheduledValues(this.context.currentTime);
-          this.music.gain.setValueAtTime(0, this.context.currentTime);
-          this.ramp(this.music.gain, volumeGain(this.bgmVolume), .45);
-          source.start();
-        }).catch(() => {}).finally(() => { this.loading = null; });
+      const c = this.context;
+      if (this.suspending) {
+        // Submit this request while the gesture is valid, even if the previous
+        // suspend is still queued. Some engines report 'running' until it lands.
+        c.resume().catch(() => {});
+        await this.suspending;
+        if (this.hidden) return;
       }
+      if (c.state !== 'running') {
+        const resumed = c.resume();
+        if (this.enabled && this.bgmVolume && !this.source) this.player.ensure('endless').catch(() => {});
+        await resumed;
+      }
+      this.syncRunningAudio();
     } catch { /* A later touch retries if this browser has not unlocked audio yet. */ }
   }
+  syncRunningAudio() {
+    if (this.context.state !== 'running' || this.suspending) return;
+    this.hasRunAudio = true;
+    if (this.hidden) { this.suspendAfterFade(); return; }
+    this.fadeMaster();
+    this.setMusicScene(this.musicScene);
+  }
   setHidden(hidden) {
-    this.hidden = hidden; clearTimeout(this.suspendTimer); this.applyLevels();
-    if (!this.context) return;
-    if (hidden) this.suspendTimer = setTimeout(() => {
-      if (this.hidden) this.context.suspend().catch(() => {});
-    }, 180);
-    else this.unlock();
+    if (this.hidden === hidden) return;
+    this.hidden = hidden; clearTimeout(this.suspendTimer); this.suspendTimer = null;
+    if (!this.context) {
+      if (!hidden) return this.tryAutoplay();
+      return;
+    }
+    this.applyLevels();
+    if (hidden) this.suspendAfterFade();
+    // A policy-blocked first attempt must wait for a real gesture. Once the
+    // context has run, normal foreground resume can restore the same source.
+    else if (this.hasRunAudio || this.context.state === 'running') return this.unlock();
+  }
+  suspendAfterFade() {
+    const c = this.context;
+    if (!this.hidden || c.state !== 'running' || this.suspending || this.suspendTimer !== null) return;
+    const silentAt = this.masterFade.end;
+    const waitMs = 10 + 1000 * Math.max(0, silentAt - c.currentTime);
+    this.suspendTimer = setTimeout(() => {
+      this.suspendTimer = null;
+      if (!this.hidden || c.state !== 'running') return;
+      if (c.currentTime < silentAt) { this.suspendAfterFade(); return; }
+      this.suspending = c.suspend().catch(() => {}).finally(() => { this.suspending = null; });
+    }, Math.ceil(waitMs));
+    this.suspendTimer.unref?.();
   }
   tone(freq = 300, duration = .09, type = 'sine', volume = .06, slide = .5) {
     this.toneAt(this.context?.currentTime, freq, duration, type, volume, slide);
@@ -197,80 +309,48 @@ export class GameAudio {
   setCharge(amount) {
     const value = audioLevel(amount);
     if (!value || !this.canPlayEffects) { this.stopCharge(); return; }
-    const c = this.context, at = c.currentTime;
+    const c = this.context, at = c.currentTime, pitch = 130 + 200 * value ** .65;
     if (!this.charge) {
-      if (value < .004 || this.voices.size + 2 > MAX_EFFECT_VOICES) return;
-      const osc = c.createOscillator(), noise = c.createBufferSource();
-      const gain = c.createGain(), bodyGain = c.createGain(), filter = c.createBiquadFilter();
-      osc.type = 'triangle'; osc.frequency.setValueAtTime(105 + 170 * value ** .65, at);
-      bodyGain.gain.value = .32;
-      filter.type = 'bandpass'; filter.Q.value = 1.35;
-      filter.frequency.setValueAtTime(360 + 520 * value, at);
-      noise.buffer = this.chargeNoiseBuffer(); noise.loop = true;
-      gain.gain.setValueAtTime(0, at);
-      osc.connect(bodyGain); bodyGain.connect(gain); noise.connect(filter); filter.connect(gain); gain.connect(this.effects);
-      const charge = this.charge = {osc, noise, gain, bodyGain, filter, amount: 0, lastAt: at - 1 / 60,
-        envelope: {at, from: 0, peak: 0, duration: .18}, ended: new Set()};
-      for (const source of [osc, noise]) {
-        this.voices.add(source);
-        source.onended = () => {
-          source.disconnect(); this.voices.delete(source); charge.ended.add(source);
-          if (charge.ended.size === 2) {
-            gain.disconnect(); bodyGain.disconnect(); filter.disconnect();
-            if (this.charge === charge) this.charge = null;
-          }
-        };
-        source.start(at);
-      }
+      if (value < .004 || this.voices.size >= MAX_EFFECT_VOICES) return;
+      const osc = c.createOscillator(), gain = c.createGain();
+      this.chargeWave ??= c.createPeriodicWave(new Float32Array(3), Float32Array.of(0, 1, .25));
+      osc.setPeriodicWave(this.chargeWave);
+      osc.frequency.setValueAtTime(pitch, at);
+      gain.gain.value = 0;
+      osc.connect(gain); gain.connect(this.effects);
+      const charge = this.charge = {osc, gain, amount: 0, lastAt: at - 1 / 60, speed: 0};
+      this.voices.add(osc);
+      osc.onended = () => {
+        osc.disconnect(); gain.disconnect(); this.voices.delete(osc);
+        if (this.charge === charge) this.charge = null;
+      };
+      osc.start(at);
     }
     const charge = this.charge, delta = value - charge.amount;
-    // Anchor to the last audible change: tiny back-and-forth pointer noise does
-    // not keep exciting the sound, while a genuinely slow pull still accumulates.
+    // Accumulate small moves until they exceed stationary pointer jitter.
     if (Math.abs(delta) < .004) return;
-    const velocity = Math.min(1, Math.abs(delta) / Math.max(1 / 240, at - charge.lastAt) / 2.5);
-    const peak = (.0035 + .011 * velocity) * (.4 + .6 * value) * (delta < 0 ? .55 : 1);
-    charge.osc.frequency.setTargetAtTime((105 + 170 * value ** .65) * (1 + velocity * .06), at, .025);
-    charge.filter.frequency.setTargetAtTime(360 + 520 * value + 140 * velocity, at, .025);
-    const from = this.chargeEnvelopeAt(charge, at);
-    charge.gain.gain.cancelScheduledValues(at);
-    charge.gain.gain.setValueAtTime(from, at);
-    charge.gain.gain.linearRampToValueAtTime(peak, at + .025);
-    charge.gain.gain.linearRampToValueAtTime(0, at + .18);
-    charge.envelope = {at, from, peak, duration: .18};
+    const dt = Math.max(0, at - charge.lastAt);
+    const speed = Math.min(1, Math.abs(delta) / (2.5 * Math.max(dt, 1 / 240)));
+    charge.speed += (speed - charge.speed) * -Math.expm1(-dt / .08);
     charge.amount = value; charge.lastAt = at;
+    const level = (.0028 + .0095 * charge.speed) * (.4 + .6 * value) * (delta < 0 ? .55 : 1);
+    charge.osc.frequency.setTargetAtTime(pitch, at, .025);
+    // The previous target continues up to this instant. Only future idle events
+    // are replaced, so coalesced pointer moves never restart an attack from zero.
+    const volume = charge.gain.gain;
+    volume.cancelScheduledValues(at);
+    volume.setTargetAtTime(level, at, .04);
+    volume.setTargetAtTime(0, at + .12, .05);
+    volume.setValueAtTime(0, at + .52);
   }
   stopCharge() {
-    const charge = this.charge, c = this.context;
-    if (!charge || !c) return;
+    const charge = this.charge;
+    if (!charge) return;
     this.charge = null;
-    const at = c.currentTime, from = this.chargeEnvelopeAt(charge, at);
-    charge.gain.gain.cancelScheduledValues(at);
-    charge.gain.gain.setValueAtTime(from, at);
-    charge.gain.gain.linearRampToValueAtTime(0, at + .035);
-    charge.envelope = {at, from, peak: from, duration: .035, releasing: true};
-    charge.osc.stop(at + .04); charge.noise.stop(at + .04);
-  }
-  chargeEnvelopeAt(charge, at) {
-    const envelope = charge.envelope, age = Math.max(0, at - envelope.at);
-    if (envelope.releasing) return envelope.from * Math.max(0, 1 - age / envelope.duration);
-    if (age < .025) return envelope.from + (envelope.peak - envelope.from) * age / .025;
-    return envelope.peak * Math.max(0, 1 - (age - .025) / (envelope.duration - .025));
-  }
-  chargeNoiseBuffer() {
-    if (this.chargeNoise) return this.chargeNoise;
-    const c = this.context, count = Math.ceil(c.sampleRate * .8);
-    const buffer = c.createBuffer(1, count, c.sampleRate), samples = buffer.getChannelData(0);
-    let seed = 0x73e1, low = 0;
-    for (let i = 0; i < count; i++) {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      const white = seed / 4294967296 * 2 - 1;
-      low = .76 * low + .24 * white;
-      // Softened texture with a quiet loop seam; the envelope, not the source,
-      // controls movement. Holding still always reaches exact silence in 180 ms.
-      const edge = Math.min(1, i / (c.sampleRate * .012), (count - 1 - i) / (c.sampleRate * .012));
-      samples[i] = (low * .8 + white * .1) * edge;
-    }
-    return this.chargeNoise = buffer;
+    const at = this.context.currentTime, volume = charge.gain.gain;
+    volume.cancelScheduledValues(at);
+    volume.setTargetAtTime(0, at, .006);
+    charge.osc.stop(at + .06);
   }
   noiseAt(at, duration, volume) {
     const c = this.context;
