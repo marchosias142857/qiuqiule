@@ -68,9 +68,9 @@ export function injuredEnemyScale(body,endless=true){
   return .82+.18*clamp(body.hp/body.maxHp,0,1);
 }
 
-export function pressureLook(player,enemies,time){
+export function pressureLook(player,enemies,time,count){
   const alive=enemies.filter(body=>body.hp>0);
-  if(alive.length<24)return null;
+  if((count??alive.length)<24)return null;
   const phase=((Math.max(0,time||0)%1.5)+1.5)%1.5;
   if(phase>=.36)return null;
   let nearest=null,distance=Infinity;

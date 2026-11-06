@@ -2032,6 +2032,25 @@ test('red pressure is layered above the unchanged original border and cannot mov
   });
 });
 
+test('the actual red border uses one slot per split family until its final child dies',t=>{
+  const {world,scene,g}=pressureRun(24);
+  t.after(()=>{app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  const family=world.enemies.slice(0,3),familyId=family[0].id;
+  for(const child of family)Object.assign(child,{enemyType:'fragment',splitFamilyId:familyId});
+  assert.equal(world.liveCount,24);assert.equal(world.pressureCount,22);
+  advanceScene(scene,.35);assert.equal(scene.pressureWarning.active,false);
+  assert.ok(g.borders.every(border=>border.strokeColor!==0xd94f4f));
+  for(let i=0;i<2;i++)rhythmEnemy(world,50+i*58,700);
+  advanceScene(scene,.35);assert.equal(world.pressureCount,24);assert.equal(scene.pressureWarning.active,true);
+  for(const child of family.slice(0,2)){
+    world.damage(child,child.hp+1);scene.handleEvents();advanceScene(scene,.1);
+    assert.equal(world.pressureCount,24);assert.equal(scene.pressureWarning.active,true);
+  }
+  world.damage(family[2],family[2].hp+1);scene.handleEvents();advanceScene(scene,.7);
+  assert.equal(world.pressureCount,23);assert.equal(scene.pressureWarning.active,false);
+  assert.equal(scene.pressureWarning.alpha,0);
+});
+
 test('red warning breathes out continuously across real phase, menu and World replacement transitions',t=>{
   t.after(()=>{document.hidden=false;app.setFeedbackStrength(.6);});
   const transitions={
@@ -2764,21 +2783,29 @@ test('hollow and fragment result transfers preserve their appearance before fadi
   }
 });
 
-test('split children wait at the hard capacity, survive a pause, and fill newly opened slots without losing their parent profile',t=>{
+test('locally delayed split children retain their family slot through pause and keep their parent profile after space opens',t=>{
   const {world,scene,enemy}=typedEnemyRun('split'),events=observeWorldEvents(world),parentHp=enemy.maxHp;
   t.after(()=>app.setFeedbackStrength(.6));
+  const safe=world.safeSpawnPosition;let spaceOpen=false,childBirths=0;
+  t.mock.method(world,'safeSpawnPosition',function(...args){
+    if(args[3]?.localOnly&&!spaceOpen&&childBirths>=1)return null;
+    const result=safe.apply(this,args);if(args[3]?.localOnly&&result)childBirths++;
+    return result;
+  });
   for(let index=0;index<27;index++)rhythmEnemy(world,38+(index%7)*50,100+Math.floor(index/7)*100,{r:world.unit*.3,hp:10000});
   world.damage(enemy,enemy.hp+1);scene.update(0,1000/120);
-  assert.equal(world.liveCount,28);assert.equal(world.fragmentQueue.length,2);
+  assert.equal(world.liveCount,28);assert.equal(world.pressureCount,28);assert.equal(world.fragmentQueue.length,2);
   assert.equal(world.enemies.filter(body=>body.enemyType==='fragment').length,1);
   clickAction('pause');scene.update(0,0);const snapshot=JSON.stringify({queue:world.fragmentQueue,time:world.feedbackTime});
   advanceScene(scene,.5);assert.equal(JSON.stringify({queue:world.fragmentQueue,time:world.feedbackTime}),snapshot);
   clickAction('resume');app.advanceUi(.42);
   const normals=world.enemies.filter(body=>!body.enemyType).slice(0,2);
   assert.equal(normals.length,2);for(const body of normals)world.damage(body,body.hp+1);
+  spaceOpen=true;
   scene.update(0,1000/120);
   const children=world.enemies.filter(body=>body.enemyType==='fragment');
   assert.equal(children.length,3);assert.equal(world.fragmentQueue.length,0);assert.equal(world.liveCount,28);
+  assert.equal(world.pressureCount,26,'the two later child births reuse their existing family slot');
   for(const child of children){near(child.r,world.unit*.6);near(child.maxHp,parentHp*.3);assert.equal(child.value,5);}
   assert.equal(events.filter(event=>event.type==='spawn'&&event.enemyType==='fragment').length,3);
   assert.equal(events.filter(event=>event.type==='firstTypeKill').length,1);assert.equal(world.stageKills,3);
@@ -4193,6 +4220,28 @@ test('companion trail rollback keeps the moving home player on orbit arcs withou
   }
 });
 
+
+test('the actual stage route prepares the upcoming Boss early and resets preparation on restart',t=>{
+  const prepared=[],scenes=[];
+  t.mock.method(GameAudio.prototype,'prepareBossMusic',()=>prepared.push(true));
+  t.mock.method(GameAudio.prototype,'setMusicScene',(name,options)=>scenes.push({name,options}));
+  const {world,scene}=feedbackRun();
+  t.after(()=>{app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  world.events=[];
+  for(const previous of [3,4,8,9,43,44]){
+    const before=prepared.length;
+    world.stage=previous;world.startingUpgrades=false;world.rewardSelectionsRemaining=1;
+    world.finishRewardRound();scene.handleEvents();
+    assert.equal(world.phase,'battle');
+    assert.equal(prepared.length-before,1);
+    assert.equal(scenes.length,0,'preparation must not switch the regular battle soundtrack');
+    scene.handleEvents();assert.equal(prepared.length-before,1,'a redraw does not prepare twice');
+  }
+  const beforeRestart=prepared.length;
+  clickAction('pause');app.advanceUi(.5);clickRestart();
+  assert.deepEqual(scenes.at(-1),{name:'endless',options:{resetPreparation:true}});
+  assert.equal(prepared.length,beforeRestart+1,'a fresh run prepares its first Boss before the starting reward is chosen');
+});
 
 test('Boss entry selects its track, pause menus preserve it, and victory returns to endless before rewards',t=>{
   const calls=[];

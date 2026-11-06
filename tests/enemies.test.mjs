@@ -118,6 +118,53 @@ test('heavy, magnet and walker never occupy more than one slot even when selecte
   }
 });
 
+test('split clusters keep the same composition and random draws across the late-stage boundary', () => {
+  for (const stage of [16, 20, 21, 26, 60]) {
+    const values = [.68, .95, .5]; let draws = 0;
+    const plan = planEnemyCluster({stage, size: 8, random: () => {
+      assert.ok(draws < values.length, 'stage boundary consumed extra randomness');
+      return values[draws++];
+    }});
+    assert.equal(draws, 3);
+    assert.deepEqual(plan, [...Array(6).fill('split'), 'normal', 'normal']);
+  }
+});
+
+test('split plans reserve type slots without imposing mother or descendant family budgets', () => {
+  for (const stage of [20, 21, 26, 60]) {
+    const liveTypes = ['normal', ...Array(7).fill('split')];
+    const reservedTypes = [...Array(12).fill('split'), ...Array(9).fill('fragment')];
+    const plan = planEnemyCluster({stage, size: 8, liveTypes, reservedTypes, random: sequence(.68, .95, .5)});
+    assert.deepEqual(plan, [...Array(6).fill('split'), 'normal', 'normal']);
+    assert.equal(new Set([...liveTypes, ...reservedTypes, ...plan].map(canonical)).size, 2);
+  }
+});
+
+test('late split plans still respect reserved type slots and ordinary-type exclusions', () => {
+  const full = ['ring', 'heavy', 'walker', 'magnet'];
+  const reserved = planEnemyCluster({stage: 26, size: 8, liveTypes: full, random: () => .68});
+  assert.equal(reserved.length, 8);
+  assert.ok(reserved.includes('normal'));
+  assert.ok(!reserved.includes('split'));
+  assert.equal(new Set([...full, ...reserved]).size, 5);
+
+  const excludedTypes = ['normal', 'heavy', 'walker', 'magnet', 'shield', 'leader'];
+  const allSplit = planEnemyCluster({stage: 26, size: 8, excludedTypes, random: sequence(.999)});
+  assert.deepEqual(allSplit, Array(8).fill('split'));
+  const excludedSplit = planEnemyCluster({stage: 26, size: 8, excludedTypes: [...excludedTypes, 'split'], random: sequence(.999)});
+  assert.deepEqual(excludedSplit, Array(8).fill('ring'));
+});
+
+test('late cluster plans remain valid at random input boundaries', () => {
+  for (const draw of [-1, 0, .64, .73, 1, Infinity, NaN]) {
+    const plan = planEnemyCluster({stage: 26, size: 14, random: () => draw});
+    assert.equal(plan.length, 14);
+    assert.ok(plan.every(type => ENEMY_TYPES[type]?.spawnable));
+    assert.ok(new Set(plan).size <= enemyTypeLimit(26));
+    for (const type of ['heavy', 'walker', 'magnet', 'leader']) assert.ok(plan.filter(id => id === type).length <= 1);
+  }
+});
+
 test('live and reserved types jointly cap new plans, including the normal part and leader', () => {
   const first = planEnemyCluster({stage: 8, size: 8, liveTypes: ['normal', 'ring'], random: sequence(.99, .5)});
   assert.equal(first[0], 'split');

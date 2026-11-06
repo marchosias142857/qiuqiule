@@ -12,6 +12,12 @@ export const BREATH_SPAWN_RATE = 2 / 3;
 export const BLACK_HOLE_GRAVITY = Object.freeze({radius: 5, acceleration: 2.4});
 export const BOSS_TIMING = Object.freeze({entry: .85, brake: .8, spin: .85, hold: .6, fade: .22});
 export const REWARD_TIMING = Object.freeze({move: 1, transition: 1.2, bornDelay: .15, bornDuration: .8, rest: .6});
+const lateEnemyHp = [19 * 1.2 ** 19];
+for (let stage = 21; stage <= 30; stage++) lateEnemyHp.push(lateEnemyHp.at(-1) * (1.2 - .01 * (stage - 20)));
+export function enemyBaseHp(stage) {
+  const s = Number.isFinite(stage) ? Math.max(1, Math.floor(stage)) : 1;
+  return s <= 20 ? 19 * 1.2 ** (s - 1) : s <= 30 ? lateEnemyHp[s - 20] : lateEnemyHp[10] * 1.1 ** (s - 30);
+}
 const LEGACY_REWARD_TIMING = Object.freeze({move: 1.45, transition: 1.85, bornDelay: .25, bornDuration: 1.5, rest: 1});
 const smooth = value => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
 const smoother = value => { const t = clamp(value, 0, 1); return t * t * t * (10 + t * (-15 + 6 * t)); };
@@ -270,6 +276,19 @@ export class World {
   get launchCap() { return this.unit * (60 + (this.mode !== 'campaign' ? upgradeStat('overspeed', this.buffs.overspeed || 0) : 0)); }
   scoreValue(base) { return Math.round(base); }
   get liveCount() { return this.enemies.filter(body => body.hp > 0).length; }
+  get pressureCount() {
+    if (this.mode === 'campaign') return this.liveCount;
+    const families = new Set();
+    let count = 0;
+    for (const body of this.enemies) if (body.hp > 0) {
+      if (body.splitFamilyId == null) count++;
+      else families.add(body.splitFamilyId);
+    }
+    // A family stays alive while any of its three children awaits a safe
+    // birth position, even if all of its already-born siblings were killed.
+    for (const child of this.fragmentQueue) if (child.splitFamilyId != null) families.add(child.splitFamilyId);
+    return count + families.size;
+  }
   get resultMisses() { return this.shotHistory.filter(shot => this.feedbackTime - shot.time <= 20 && shot.hits === 0).length; }
   get maxPhysicsSpeed() { return (this.launchCap + this.readySpeed) * (this.mode !== 'campaign' && this.buffs.boomerang ? UPGRADES.boomerang.effect.speedMultiplier : 1); }
   get combatActive() { return ['battle', 'boss-entry', 'boss'].includes(this.phase); }
@@ -353,9 +372,32 @@ export class World {
       this.seenEnemyKills.add(type); this.emit('firstTypeKill', {bodyId: body.id, enemyType: type, x: body.x, y: body.y, r: body.r});
     }
     if (type === 'split' && !this.pendingClearing) {
-      const angle = this.random() * Math.PI * 2, clusterId = ++this.clusterId;
-      for (let i = 0; i < 3; i++) this.fragmentQueue.push({x: body.x, y: body.y, maxHp: body.maxHp,
-        density: body.density, clusterId, angle: angle + i * Math.PI * 2 / 3});
+      const initialAngle = this.random() * Math.PI * 2, clusterId = ++this.clusterId;
+      const radius = this.unit * ENEMY_TYPES.fragment.radius;
+      const distanceUnits = Math.min(2.35, body.r / this.unit + ENEMY_TYPES.fragment.radius + .1);
+      // Rotate the whole three-way burst before falling back to local placement.
+      // Every child is a visible, damageable full-size body from its first frame.
+      const bounds = this.arenaBounds, blockers = [this.player, ...this.auxiliaries, ...this.enemies.filter(b => b.hp > 0)];
+      let angle = initialAngle, bestScore = -Infinity;
+      for (let turn = 0; turn < 12; turn++) {
+        const candidate = initialAngle + turn * Math.PI / 18;
+        let score = 0, clear = 0;
+        for (let i = 0; i < 3; i++) {
+          const direction = candidate + i * Math.PI * 2 / 3;
+          const x = body.x + Math.cos(direction) * distanceUnits * this.unit;
+          const y = body.y + Math.sin(direction) * distanceUnits * this.unit;
+          const gap = Math.min(x - bounds.left - radius, bounds.right - x - radius,
+            y - bounds.top - radius, bounds.bottom - y - radius,
+            ...blockers.map(b => Math.hypot(x - b.x, y - b.y) - radius - b.r - this.unit * .08));
+          if (gap >= 0) clear++;
+          score += clamp(gap / this.unit, -10, 1);
+        }
+        score += clear * 100;
+        if (score > bestScore) { bestScore = score; angle = candidate; }
+        if (clear === 3) break;
+      }
+      for (let i = 0; i < ENEMY_TYPES.split.splitCount; i++) this.fragmentQueue.push({x: body.x, y: body.y, maxHp: body.maxHp,
+        density: body.density, splitFamilyId: body.splitFamilyId ?? body.id, clusterId, distanceUnits, angle: angle + i * Math.PI * 2 / 3});
     }
     if (type === 'magnet' || type === 'leader') {
       for (const other of this.enemies) {
@@ -371,9 +413,11 @@ export class World {
 
   flushFragments() {
     if (this.mode === 'campaign' || !this.combatActive || this.pendingClearing) return;
-    while (this.fragmentQueue.length && this.liveCount < this.limit && this.canSpawnType('fragment')) {
-      if (!this.spawnEnemy(null, 'fragment', this.fragmentQueue[0])) break;
-      this.fragmentQueue.shift();
+    // One locally blocked child must not hold up safe births from another family.
+    let attempts = this.fragmentQueue.length;
+    while (attempts-- > 0 && this.fragmentQueue.length && this.canSpawnType('fragment')) {
+      const child = this.fragmentQueue.shift();
+      if (!this.spawnEnemy(null, 'fragment', child)) this.fragmentQueue.push(child);
     }
   }
   get spawnInterval() {
@@ -384,7 +428,7 @@ export class World {
     return {
       radiusScale: .62 + this.random() * .36,
       density: .65 + this.stage * .06 + this.time * .0004,
-      hp: 19 * (this.mode === 'campaign' ? 1.16 : 1.20) ** (this.stage - 1) + Math.floor(this.time / 45) * 2,
+      hp: (this.mode === 'campaign' ? 19 * 1.16 ** (this.stage - 1) : enemyBaseHp(this.stage)) + Math.floor(this.time / 45) * 2,
       value: 10,
     };
   }
@@ -480,7 +524,8 @@ export class World {
 
   reservedEnemyTypes(includeIntroduction = false) {
     const types = [...this.enemies.filter(b => b.hp > 0).map(b => b.enemyType || 'normal'),
-      ...(this.wave?.types?.slice(this.wave.index) || []), ...(this.floorCluster?.types?.slice(this.floorCluster.index) || []),
+      ...(this.wave?.types?.slice(this.wave.index) || []),
+      ...(this.floorCluster?.types?.slice(this.floorCluster.index) || []),
       ...this.fragmentQueue.map(() => 'normal')];
     const counted = new Set(types.map(type => type === 'fragment' ? 'normal' : type));
     if (counted.has('split')) counted.add('normal');
@@ -507,7 +552,7 @@ export class World {
 
   advanceIntroduction(dt) {
     this.introTimer -= dt;
-    if (this.introTimer > 1e-10 || this.liveCount >= this.limit) return;
+    if (this.introTimer > 1e-10 || this.pressureCount >= this.limit) return;
     const type = this.nextIntroduction();
     if (!type || !this.canSpawnType(type)) return;
     const body = this.spawnEnemy(null, type);
@@ -521,14 +566,15 @@ export class World {
     const bounds = this.arenaBounds;
     const fit = pos => ({x: clamp(pos.x, bounds.left + radius, bounds.right - radius), y: clamp(pos.y, bounds.top + radius, bounds.bottom - radius)});
     const clearance = pos => Math.min(Math.hypot(pos.x - this.player.x, pos.y - this.player.y) - radius - this.player.r,
-      ...this.enemies.filter(b => b.hp > 0).map(b => Math.hypot(pos.x - b.x, pos.y - b.y) - radius - b.r));
+      ...(localOnly ? this.auxiliaries : []).map(b => Math.hypot(pos.x - b.x, pos.y - b.y) - radius - b.r),
+      ...this.enemies.filter(b => b.hp > 0).map(b => Math.hypot(pos.x - b.x, pos.y - b.y) - radius - b.r)) - (localOnly ? this.unit * .08 : 0);
     let best = fit(point), gap = clearance(best);
     if (gap >= 0 && (!localOnly || Math.hypot(best.x - cluster.x, best.y - cluster.y) <= this.unit * 2.5)) return {point: best, cluster};
     for (let pass = 0; pass < (localOnly ? 1 : 2); pass++) {
       if (pass) cluster = this.makeCluster(1);
       for (let i = 0; i < 48; i++) {
         const angle = cluster.angle + i * Math.PI * (3 - Math.sqrt(5));
-        const distance = this.unit * (localOnly ? .75 + 1.75 * Math.sqrt(i / 47) : 2.5 * Math.sqrt(i / 48));
+        const distance = this.unit * (localOnly ? 1.8 + .7 * Math.sqrt(i / 47) : 2.5 * Math.sqrt(i / 48));
         const candidate = fit({x: cluster.x + Math.cos(angle) * distance, y: cluster.y + Math.sin(angle) * distance});
         if (localOnly && Math.hypot(candidate.x - cluster.x, candidate.y - cluster.y) > this.unit * 2.5 + 1e-8) continue;
         const next = clearance(candidate);
@@ -605,7 +651,7 @@ export class World {
     while (this.wave && this.wave.timer <= 1e-10) {
       // Full capacity consumes this scheduled slot; it does not accumulate an
       // unbounded burst to release after the player makes room.
-      if (this.liveCount < this.limit) this.spawnEnemy(this.wave); else this.wave.index++;
+      if (this.pressureCount < this.limit) this.spawnEnemy(this.wave); else this.wave.index++;
       this.wave.timer += .3;
       if (this.wave.index >= this.wave.size) this.wave = null;
     }
@@ -613,9 +659,15 @@ export class World {
   }
 
   spawnEnemy(cluster = null, type = 'normal', fragment = null) {
-    if (!this.combatActive || this.liveCount >= this.limit) return;
+    if (!this.combatActive) return;
     const variants = this.mode !== 'campaign';
     if (variants) type = cluster?.types?.[cluster.index] || type;
+    // Children inherit their mother's occupied slot. A full field must still
+    // allow this existing family to finish splitting; only new entities wait.
+    const familyId = variants && type === 'fragment' ? fragment?.splitFamilyId : null;
+    const existingFamily = familyId != null && (this.enemies.some(b => b.hp > 0 && b.splitFamilyId === familyId)
+      || this.fragmentQueue.some(child => child.splitFamilyId === familyId));
+    if (this.pressureCount >= this.limit && !existingFamily) return;
     if (variants && !this.canSpawnType(type)) { if (cluster) cluster.index++; return; }
     const base = fragment ? {radiusScale: .6, density: fragment.density, hp: fragment.maxHp, value: 5} : this.enemyProfile();
     const profile = variants ? enemyProfileFor(type, base) : base;
@@ -643,7 +695,8 @@ export class World {
       pos = {x: clamp(cluster.x + Math.cos(angle) * radius, bounds.left + r, bounds.right - r),
         y: clamp(cluster.y + Math.sin(angle) * radius, bounds.top + r, bounds.bottom - r)};
       if (type === 'leader') pos = {x: cluster.x, y: cluster.y};
-      if (fragment) pos = {x: fragment.x + Math.cos(fragment.angle) * this.unit * 1.3, y: fragment.y + Math.sin(fragment.angle) * this.unit * 1.3};
+      if (fragment) pos = {x: fragment.x + Math.cos(fragment.angle) * this.unit * (fragment.distanceUnits ?? 1.9),
+        y: fragment.y + Math.sin(fragment.angle) * this.unit * (fragment.distanceUnits ?? 1.9)};
       if (type === 'walker') { pos = this.edgeSpawnPosition(r); if (!pos) return; cluster = {...this.makeCluster(1), x: pos.x, y: pos.y}; }
       else {
         const safe = this.safeSpawnPosition(pos, r, cluster, {localOnly: !!fragment}); if (!safe) return;
@@ -661,9 +714,12 @@ export class World {
     b.maxHp = b.hp = profile.hp;
     b.value = profile.value;
     b.born = 0;
+    if (variants && type === 'fragment') { b.born = 1; b.solid = true; b.fragmentReveal = 0; }
     b.angle = this.random() * Math.PI * 2;
     if (variants) {
       Object.assign(b, {enemyType: type, shield: profile.shield, drag: profile.drag, moveSpeed: profile.moveSpeed});
+      if (type === 'split') b.splitFamilyId = b.id;
+      else if (familyId != null) b.splitFamilyId = familyId;
       b.mass *= profile.massScale;
     }
     if (cluster) Object.assign(b, {clusterId: cluster.id, clusterX: cluster.x, clusterY: cluster.y});
@@ -846,7 +902,9 @@ export class World {
   }
 
   collide(a, b, spawning = false) {
-    if (this.phase === 'clearing') return;
+    // A mother can die and create solid children inside this same body pass.
+    // Its retained array entry is a corpse, not another collider for the burst.
+    if (this.phase === 'clearing' || a.hp <= 0 || b.hp <= 0) return;
     if ((a.feedbackFreeze || 0) > 1e-10 || (b.feedbackFreeze || 0) > 1e-10) return;
     const dx = b.x - a.x, dy = b.y - a.y;
     const dist = Math.hypot(dx, dy);
@@ -1013,15 +1071,21 @@ export class World {
   }
 
   advancePressure(realDt) {
-    if (this.liveCount < this.limit) { this.overTimer = 0; return; }
+    if (this.pressureCount < this.limit) { this.overTimer = 0; return; }
     this.overTimer += realDt;
     if (this.overTimer + 1e-10 < .8) return;
     if (!this.saveUsed) {
       this.saveUsed = true; this.overTimer = 0;
-      const rescued = this.enemies.filter(body => body.hp > 0).sort((a, b) => a.id - b.id).slice(0, 3);
+      const alive = this.enemies.filter(body => body.hp > 0);
+      const ids = new Set(alive.map(body => body.splitFamilyId ?? body.id));
+      for (const child of this.fragmentQueue) if (child.splitFamilyId != null) ids.add(child.splitFamilyId);
+      const rescuedIds = new Set([...ids].sort((a, b) => a - b).slice(0, 3));
+      const rescued = alive.filter(body => rescuedIds.has(body.splitFamilyId ?? body.id))
+        .sort((a, b) => (a.splitFamilyId ?? a.id) - (b.splitFamilyId ?? b.id) || a.id - b.id);
       for (const b of rescued) { b.hp = 0; this.emit('shatter', {x: b.x, y: b.y, r: b.r * ease(b.born), vx: b.vx, vy: b.vy, bodyId: b.id, enemyType: b.enemyType || 'normal', shield: !!b.shield, source: 'rescue'}); }
       this.enemies = this.enemies.filter(body => body.hp > 0);
-      this.emit('rescue', {x: this.player.x, y: this.player.y, count: rescued.length, bodyIds: rescued.map(body => body.id)});
+      this.fragmentQueue = this.fragmentQueue.filter(child => !rescuedIds.has(child.splitFamilyId));
+      this.emit('rescue', {x: this.player.x, y: this.player.y, count: rescuedIds.size, bodyIds: rescued.map(body => body.id)});
     } else {
       this.endRun('capacity');
     }
@@ -1518,6 +1582,7 @@ export class World {
       this.advanceBoomerang(b, bodyDt);
       if (b.isAuxiliary) b.slowAge = length(b) < this.unit * 3 ? (b.slowAge || 0) + bodyDt : 0;
       if (!b.isPlayer) { b.born = Math.min(1, b.born + bodyDt / .8); b.solid = b.born >= 1; }
+      if (Number.isFinite(b.fragmentReveal)) b.fragmentReveal = Math.min(1, b.fragmentReveal + bodyDt / .12);
       const drag = b.isPlayer ? (this.bossControl ? .04 : this.continuousControl ? (length(b) > this.unit * 8 ? .35 : 1.2) : dragging ? 10 : .60) : this.mode !== 'campaign' ? b.drag || 1.20 : 1.20;
       const friction = b.isPlayer && this.continuousControl && !this.bossControl ? this.playerFriction(bodyDt, b) : Math.exp(-drag * bodyDt);
       b.vx *= friction; b.vy *= friction;
@@ -1566,7 +1631,11 @@ export class World {
       if (this.phase === 'boss-celebrate') return;
       for (const enemy of this.enemies) this.collideBoss(enemy);
     }
-    for (const b of bodies) this.clampBodyToArena(b);
+    // Collisions can add fragments after the motion snapshot was collected.
+    // Include those newborns in this frame's final boundary correction too.
+    this.clampBodyToArena(p);
+    for (const b of this.auxiliaries) this.clampBodyToArena(b);
+    for (const b of this.enemies) this.clampBodyToArena(b);
     if (this.boss?.solid && ['boss-entry', 'boss'].includes(this.phase)) for (const body of bodies) this.separateBossPlayer(body);
     this.enemies = this.enemies.filter(b => b.hp > 0);
     this.auxiliaries = this.auxiliaries.filter(b => (b.slowAge || 0) + 1e-10 < .4);

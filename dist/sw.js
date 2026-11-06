@@ -1,6 +1,6 @@
 const ROOT = new URL('./',self.location).href;
 const CACHE_PREFIX = 'qiuqiule-'+encodeURIComponent(new URL(ROOT).pathname)+'-';
-const CACHE = CACHE_PREFIX+'v9.0.2';
+const CACHE = CACHE_PREFIX+'v10.0.5';
 const urls = files => files.map(path => new URL(path,ROOT).href);
 const CORE = urls(['./','./index.html','./style.css','./game.js','./feedback.js','./border-bulge.js','./aim.js','./aim-metrics.js','./comet-trail.js','./rhythm-feedback.js','./enemies.js','./enemy-render.js','./upgrades.js','./upgrade-render.js','./shockwave-render.js','./run-upgrades.js','./stage-hud.js','./physics.js','./home.js','./icons.js','./motion.js','./boss-visuals.js','./endless-progress.js','./skins.js','./skin-render.js','./photo-renderer.js','./wardrobe.js','./appearances.js','./big-eye.js','./companions.js','./skin-unlock.js','./skin-unlock.css','./audio.js','./music-player.js','./offline.js','./display.js','./vendor/phaser.min.js','./fonts/qiuqiule-ui.woff2']);
 // Update these fingerprints when replacing a track; only identical cached audio may cross releases.

@@ -8,43 +8,62 @@ const MASTER_FADE_SECONDS = .05;
 export const IMPACT_NOTES = Object.freeze([...LEGACY_IMPACT_NOTES, 2093.004, 2637.02]);
 export const MAX_EFFECT_VOICES = 32;
 
-async function musicBytes(name) {
-  const response = await fetch(new URL(MUSIC_TRACKS[name].url, import.meta.url));
+async function musicBytes(name, signal) {
+  const response = await fetch(new URL(MUSIC_TRACKS[name].url, import.meta.url), {signal});
   if (!response.ok || response.redirected) throw new Error('Music unavailable');
   return response.arrayBuffer();
-}
-
-async function prepareHomeMusic() {
-  const bytes = await musicBytes('endless');
-  const Offline = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
-  if (Offline) {
-    try {
-      // This decoder has no device output. Keep the original MP3 until decoding
-      // succeeds, since decodeAudioData takes ownership of the passed bytes.
-      const decoder = new Offline(2, 1, 44100);
-      return {buffer: await decoder.decodeAudioData(bytes.slice(0))};
-    } catch { /* The playback context can still decode the original bytes. */ }
-  }
-  return {bytes};
 }
 
 export class GameAudio {
   constructor({createContext = () => new (window.AudioContext || window.webkitAudioContext)(), loadMusic} = {}) {
     this.createContext = createContext;
-    this.preparedHome = null;
-    this.prepareHome = loadMusic ? null : prepareHomeMusic;
+    // Keep only the small compressed files between encounters. A single
+    // playback context owns decoding; no OfflineAudioContext can hold up entry.
+    this.musicByteCache = new Map(); this.musicByteLoads = new Map();
+    this.prefetchMusic = loadMusic ? null : name => this.fetchMusicBytes(name);
     this.loadMusic = loadMusic || (async (context, name) => {
-      const prepared = name === 'endless' ? await this.preparedHome : null;
-      if (name === 'endless') this.preparedHome = null;
-      return prepared?.buffer || context.decodeAudioData(prepared?.bytes || await musicBytes(name));
+      const bytes = await this.fetchMusicBytes(name);
+      try {
+        // decodeAudioData detaches its input. Preserve the compressed original
+        // for a later Boss encounter after its large PCM buffer is released.
+        const buffer = await context.decodeAudioData(bytes.slice(0));
+        if (!Number.isFinite(buffer?.duration) || buffer.duration < MUSIC_TRACKS[name].loopEnd) throw new Error('Incomplete music track: ' + name);
+        return buffer;
+      } catch (error) {
+        if (this.musicByteCache.get(name) === bytes) this.musicByteCache.delete(name);
+        throw error;
+      }
     });
     this.enabled = true; this.bgmVolume = .55; this.sfxVolume = .75;
     this.hidden = false; this.context = null; this.player = null; this.musicScene = 'home';
     this.loading = null; this.suspendTimer = null; this.voices = new Set();
+    this.bossPreparationWanted = false; this.preparingBoss = null;
     this.masterFade = null; this.suspending = null;
     this.autoplayAttempted = false; this.hasRunAudio = false;
     this.charge = null; this.chargeWave = null; this.impactNoise = null;
     this.clearSequence = null;
+  }
+  fetchMusicBytes(name) {
+    if (this.musicByteCache.has(name)) return Promise.resolve(this.musicByteCache.get(name));
+    if (this.musicByteLoads.has(name)) return this.musicByteLoads.get(name);
+    const controller = new AbortController();
+    let timer;
+    // A stalled download must not poison every later gesture with the same
+    // never-settling promise. The next request can retry after this deadline.
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error('Music download timed out')); }, 20000);
+      timer.unref?.();
+    });
+    const work = Promise.race([musicBytes(name, controller.signal), deadline]).then(bytes => {
+      if (!bytes.byteLength) throw new Error('Empty music track: ' + name);
+      this.musicByteCache.set(name, bytes);
+      return bytes;
+    }).finally(() => {
+      clearTimeout(timer);
+      if (this.musicByteLoads.get(name) === work) this.musicByteLoads.delete(name);
+    });
+    this.musicByteLoads.set(name, work);
+    return work;
   }
   setLevels({sound = this.enabled, bgmVolume = this.bgmVolume, sfxVolume = this.sfxVolume}) {
     const hadMusic = this.enabled && this.bgmVolume;
@@ -93,9 +112,26 @@ export class GameAudio {
     }
   }
   prepareMusic() {
-    if (this.hidden || !this.enabled || !this.bgmVolume || this.player || !this.prepareHome) return;
-    this.preparedHome ??= this.prepareHome().catch(() => null);
-    return this.preparedHome;
+    if (this.hidden || !this.enabled || !this.bgmVolume || !this.prefetchMusic) return;
+    return this.prefetchMusic(MUSIC_SCENES[this.musicScene].track).catch(() => null);
+  }
+  prepareBossMusic() {
+    // Remember the upcoming encounter without opening an audio device or
+    // fetching while muted/backgrounded. Resume or a later gesture retries it.
+    this.bossPreparationWanted = true;
+    return this.syncBossPreparation();
+  }
+  syncBossPreparation() {
+    if (!this.bossPreparationWanted || this.hidden || !this.enabled || !this.bgmVolume) return null;
+    // Fetch before an output context exists; once it exists, decoding is safe
+    // even while autoplay keeps it suspended. Neither path starts a source.
+    this.preparingBoss = this.player ? this.player.prepare('boss') : this.prefetchMusic?.('boss').catch(() => null) || null;
+    return this.preparingBoss;
+  }
+  prepareContextMusic() {
+    if (this.hidden || !this.enabled || !this.bgmVolume) return;
+    this.player.ensure(MUSIC_SCENES[this.musicScene].track).catch(() => {});
+    this.syncBossPreparation();
   }
   tryAutoplay() {
     if (this.autoplayAttempted || this.hidden || !this.enabled || !this.bgmVolume) return;
@@ -107,18 +143,24 @@ export class GameAudio {
   get needsUnlock() {
     if (this.hidden) return false;
     if (this.context?.state !== 'running' || this.suspending) return true;
-    return !!(this.enabled && this.bgmVolume && !this.player.pending &&
-      (!this.source || this.player.track !== MUSIC_SCENES[this.musicScene].track));
+    return !!(this.enabled && this.bgmVolume && (
+      !this.player.pending && (!this.source || this.player.track !== MUSIC_SCENES[this.musicScene].track)
+      || this.bossPreparationWanted && !this.player.preparation?.work && !this.player.buffers.has('boss')));
   }
-  setMusicScene(scene) {
+  setMusicScene(scene, {resetPreparation = false} = {}) {
     if (!Object.hasOwn(MUSIC_SCENES, scene)) return;
+    if (resetPreparation || scene === 'boss' || scene !== 'endless' || this.musicScene === 'boss') {
+      this.bossPreparationWanted = false; this.preparingBoss = null;
+    }
     this.musicScene = scene;
     if (this.player) {
       // Update intent even while silent so a slow, obsolete decode cannot start
       // a Boss track after the run has already ended or returned home.
       const activate = this.context.state === 'running' && !this.hidden && this.enabled && this.bgmVolume > 0;
-      this.loading = this.player.setScene(scene, {activate});
+      this.loading = this.player.setScene(scene, {activate, resetPreparation});
+      if (!activate) this.prepareContextMusic();
     }
+    this.syncBossPreparation();
     return this.loading;
   }
   musicStatus() {
@@ -143,12 +185,13 @@ export class GameAudio {
         // Submit this request while the gesture is valid, even if the previous
         // suspend is still queued. Some engines report 'running' until it lands.
         c.resume().catch(() => {});
+        this.prepareContextMusic();
         await this.suspending;
         if (this.hidden) return;
       }
       if (c.state !== 'running') {
         const resumed = c.resume();
-        if (this.enabled && this.bgmVolume && !this.source) this.player.ensure('endless').catch(() => {});
+        this.prepareContextMusic();
         await resumed;
       }
       this.syncRunningAudio();
@@ -172,7 +215,10 @@ export class GameAudio {
     if (hidden) this.suspendAfterFade();
     // A policy-blocked first attempt must wait for a real gesture. Once the
     // context has run, normal foreground resume can restore the same source.
-    else if (this.hasRunAudio || this.context.state === 'running') return this.unlock();
+    else {
+      this.syncBossPreparation();
+      if (this.hasRunAudio || this.context.state === 'running') return this.unlock();
+    }
   }
   suspendAfterFade() {
     const c = this.context;

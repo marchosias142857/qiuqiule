@@ -122,6 +122,38 @@ test('birth and result fades also apply to lines and details, and hidden births 
   }
 });
 
+test('v10 fragments are visibly full-sized at birth and reveal only their opacity',()=>{
+  const initial=body('fragment',{born:0,fragmentReveal:0}),before=structuredClone(initial);
+  const alphas=[];
+  for(const reveal of [0,.5,1]){
+    const g=recorder();
+    assert.equal(drawEnemyBall(g,{...initial,fragmentReveal:reveal},0xe88c72,{alpha:.6}),true);
+    assert.equal(g.shapes.length,1);
+    for(const point of g.shapes[0].points)near(Math.hypot(point.x-initial.x,point.y-initial.y),initial.r);
+    alphas.push(g.shapes[0].alpha);
+  }
+  near(alphas[0],.42);near(alphas[1],.5775);near(alphas[2],.6);
+  assert.ok(alphas[0]<alphas[1]&&alphas[1]<alphas[2]);
+  assert.deepEqual(initial,before);
+
+  const ordinary=recorder(),ordinaryWithReveal=recorder();
+  drawEnemyBall(ordinary,body('normal',{born:.4}),0xe88c72,{alpha:.6});
+  drawEnemyBall(ordinaryWithReveal,body('normal',{born:.4,fragmentReveal:0}),0xe88c72,{alpha:.6});
+  assert.deepEqual(ordinaryWithReveal.shapes,ordinary.shapes);
+});
+
+test('v10 fragment opacity preserves result fades and transfers without an oversized birth silhouette',()=>{
+  const b=body('fragment',{fragmentReveal:0}),g=recorder();
+  drawEnemyBall(g,b,0xe88c72,{alpha:.5,birthAlpha:.4});
+  near(g.shapes[0].alpha,.14);
+  near(g.shapes[0].points[0].x-b.x,b.r);
+  const markup=enemyTransferMarkup(b,0xe88c72,{alpha:.5});
+  assert.ok(markup.includes('opacity="0.35"'));
+  const hidden=recorder();
+  assert.equal(drawEnemyBall(hidden,b,0xe88c72,{alpha:0}),false);
+  assert.equal(hidden.shapes.length,0);
+});
+
 test('result transfer markup preserves the displayed enemy paths and never fills a hollow source',()=>{
   for(const enemyType of ['ring','heavy','split','walker','magnet','shield','leader','fragment']){
     const b=body(enemyType,{r:14.4,born:.6,angle:.3,squash:.12,shield:true});

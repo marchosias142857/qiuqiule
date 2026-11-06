@@ -88,3 +88,11 @@ test('pressure glance targets the closest living ball once per 1.5 seconds',()=>
   assert.equal(pressureLook(player,enemies.slice(0,23),.18),null);
   enemies[5].hp=0;assert.equal(pressureLook(player,enemies,.18),null);
 });
+
+test('pressure glance follows the family count while still looking at the closest physical child',()=>{
+  const player={x:0,y:0},enemies=Array.from({length:28},(_,i)=>({x:20+i,y:0,hp:1}));
+  enemies[5]={x:0,y:10,hp:1};
+  assert.equal(pressureLook(player,enemies,.18,23),null,'28 bodies below 24 occupied slots do not warn');
+  const gaze=pressureLook(player,enemies,.18,24);near(gaze.x,0);near(gaze.y,.13);
+  assert.equal(pressureLook(player,[],.18,24),null,'queued families do not create an imaginary gaze target');
+});

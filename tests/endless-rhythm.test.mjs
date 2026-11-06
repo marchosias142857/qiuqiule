@@ -51,7 +51,7 @@ test('opening clusters never overlap across random radii and four viewport shape
   }
 });
 
-test('stage formulas use rounded-up floors, bounded wave size and exponential health', () => {
+test('stage formulas keep floor and wave pacing with the v10 late health curve', () => {
   const w = run();
   for (const stage of [1, 2, 5, 10, 15, 20, 40]) {
     w.stage = stage; w.time = 91;
@@ -59,7 +59,7 @@ test('stage formulas use rounded-up floors, bounded wave size and exponential he
     assert.equal(w.waveSize, Math.min(8, 4 + Math.floor((stage - 1) / 3)));
     near(w.spawnInterval, (.65 + 1.35 * .86 ** (stage - 1)) * ([3, 6, 8, 10, 12, 13, 16].includes(stage) ? 1.15 : 1));
     assert.equal(w.killTarget, 14 + 4 * (stage - 1));
-    const profile = w.enemyProfile(); near(profile.hp, 19 * 1.20 ** (stage - 1) + 4);
+    const profile = w.enemyProfile(); near(profile.hp, (stage === 40 ? 6078.71481658351 : 19 * 1.20 ** (stage - 1)) + 4);
     near(profile.density, .65 + .06 * stage + .0004 * 91); near(profile.radiusScale, .8);
   }
 });

@@ -22,8 +22,11 @@ export function isSpecialEnemy(body){return !body.isPlayer&&!body.isBoss&&types.
 // Drawing never changes the body's collision radius or its physics state.
 export function drawEnemyBall(g,body,color,{alpha=1,unit=body.r,player=null,flashAlpha=0,flashColor=0xffffff,birthScale,birthAlpha}={}){
   color=enemyBodyColor(body,color);
-  const born=birthScale??ease(body.born??1),r=body.r*born;
-  const opacity=alpha*(birthAlpha??born);
+  // Enemy fragments have their full collider from birth. Their brief reveal
+  // only changes opacity, keeping every hittable pixel visible at full size.
+  const fragmentReveal=body.enemyType==='fragment'&&!body.isPlayer&&!body.isBoss&&Number.isFinite(body.fragmentReveal);
+  const born=birthScale??(fragmentReveal?1:ease(body.born??1)),r=body.r*born;
+  const opacity=alpha*(birthAlpha??born)*(fragmentReveal ? .7+.3*ease(body.fragmentReveal) : 1);
   if(r<.3||opacity<=0)return false;
   const angle=body.angle||0,turn=angle+(body.roll||0);
   const pose={x:body.x,y:body.y,r,squash:body.squash||0,deformAngle:angle,roll:turn};

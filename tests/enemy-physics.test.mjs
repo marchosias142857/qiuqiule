@@ -58,18 +58,25 @@ test('heavy collisions bank this shot and charge only the next damage hit; heavy
   advance(isolated, .1); near(b.vx, 100 * Math.exp(-3 * .1));
 });
 
-test('split children use mother maximum health, outward speed, one queue and the hard capacity', () => {
+test('split children preserve their profile and share one logical slot even at full capacity', () => {
   const w = world(8), mother = spawn(w, 'split', {x: 500, y: 300});
   for (let i = 0; i < 27; i++) spawn(w, 'normal', {x: 80 + i % 7 * 170, y: 80 + Math.floor(i / 7) * 190});
   const hp = mother.maxHp; w.damage(mother, 1e9); assert.equal(w.fragmentQueue.length, 3);
-  w.flushFragments(); assert.equal(w.liveCount, 28); assert.equal(w.fragmentQueue.length, 2);
-  let children = w.enemies.filter(b => b.enemyType === 'fragment'); assert.equal(children.length, 1);
-  near(children[0].maxHp, hp * .3); near(children[0].r, w.unit * .6); near(length(children[0]), w.unit * 6);
+  assert.equal(w.pressureCount, 28, 'the pending family keeps its existing slot');
+  w.flushFragments(); assert.equal(w.liveCount, 30); assert.equal(w.fragmentQueue.length, 0);
+  const children = w.enemies.filter(b => b.enemyType === 'fragment'); assert.equal(children.length, 3);
+  assert.equal(w.pressureCount, 28);
+  children.forEach(b => {
+    near(b.maxHp, hp * .3); near(b.r, w.unit * .6); near(length(b), w.unit * 6);
+    near(b.density, mother.density); assert.equal(b.splitFamilyId, mother.id);
+  });
   const victims = w.enemies.filter(b => b.hp > 0 && b.enemyType === 'normal').slice(0, 2);
   victims.forEach(b => w.damage(b, 1e9)); w.flushFragments();
-  children = w.enemies.filter(b => b.enemyType === 'fragment'); assert.equal(children.length, 3); assert.equal(w.fragmentQueue.length, 0); assert.equal(w.liveCount, 28);
+  assert.equal(children.length, 3); assert.equal(w.fragmentQueue.length, 0); assert.equal(w.liveCount, 28);
+  assert.equal(w.pressureCount, 26, 'two ordinary kills each release one slot');
   children.forEach(b => { near(b.hp, hp * .3); near(length(b), w.unit * 6); });
   w.damage(children[0], 1e9); assert.equal(w.fragmentQueue.length, 0, 'fragments cannot recursively split');
+  assert.equal(w.pressureCount, 26, 'a partially surviving family retains one slot');
   assert.equal(w.events.filter(e => e.type === 'firstTypeKill' && e.enemyType === 'split').length, 1);
   assert.equal(w.events.filter(e => e.type === 'firstTypeKill' && e.enemyType === 'fragment').length, 0);
 });
@@ -222,7 +229,7 @@ test('natural clustered plans never exceed population or visible type caps acros
     let state = stage; const random = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 2 ** 32; };
     const w = new World(900, 700, random, {spawnInitial: false}); w.stage = stage; w.spawnTimer = 0;
     for (let i = 0; i < 2400 && w.phase === 'battle'; i++) {
-      w.step(1 / 120); assert.ok(w.liveCount <= 28); assert.ok(typeCount(w) <= enemyTypeLimit(stage));
+      w.step(1 / 120); assert.ok(w.pressureCount <= 28); assert.ok(w.liveCount <= 84); assert.ok(typeCount(w) <= enemyTypeLimit(stage));
       assert.ok(w.reservedEnemyTypes().length <= enemyTypeLimit(stage));
     }
     for (const id of new Set(w.enemies.map(b => b.clusterId))) {

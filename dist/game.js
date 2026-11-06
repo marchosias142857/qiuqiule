@@ -820,7 +820,8 @@ function prepareGame({demo=false}={}){
   $('#control-transfers').replaceChildren();$('#ui-ball').hidden=true;$('#ui-companions').hidden=true;$('#result-shadow').hidden=true;$('.result-actions').classList.remove('arriving');
   scene.g.clear();clearEffects();scene.accumulator=0;scene.timeSlices=[];scene.clock=0;scene.hitSoundAt=0;
   runDay=createEndlessRun();runAimHoldDuration=demo?1.2:aimHoldDuration(aimMetrics);
-  world=new World(viewport.width,viewport.height,runDay.random,{spawnInitial:demo});screen='play';sound.setMusicScene('endless');
+  world=new World(viewport.width,viewport.height,runDay.random,{spawnInitial:demo});screen='play';sound.setMusicScene('endless',{resetPreparation:true});
+  sound.prepareBossMusic();
   if(!demo)world.beginStartingUpgrades();world.setFeedbackOptions({strength:settings.juice,reducedMotion});scoreFeedback.reset(0);
   clearTimeout(toastTimer);$('#toast').classList.remove('show');lastScore=-1;
   $('#home').hidden=true;$('#home').style.opacity=1;$('#hud').hidden=false;$('#hud').style.opacity=1;$('.pause-button').disabled=false;updateHud();
@@ -1017,7 +1018,7 @@ function updatePlayerGaze(b,pull){
 
   let target=faceTarget(b,pull,screen==='home'?home.maxPull:(world?.maxPull||150));
   if(screen==='play'&&world?.phase==='battle'&&settings.expressions&&!paused&&!modal&&!pull){
-    target=pressureLook(b,world.enemies,world.feedbackTime??world.time)||target;
+    target=pressureLook(b,world.enemies,world.feedbackTime??world.time,world.pressureCount)||target;
   }
 
   const faceOffset=smoothFace({x:b.lookX||0,y:b.lookY||0},target,scene?.frameDt??1/60);
@@ -1487,6 +1488,9 @@ function boot(){
         }
 
         if(e.type==='stage'&&endless){
+          // Prepare the next Boss from the start of the run and again after
+          // each encounter, rather than waiting for its fifth-stage battle.
+          sound.prepareBossMusic();
           if(this.rewardVisuals?.world!==world)this.rewardVisuals={world};
           this.rewardVisuals.flightAt=e.feedbackTime;
         }
@@ -1714,7 +1718,7 @@ function boot(){
       this.inputClock+=realDt;this.frameStamp=Number.isFinite(time)?time/1000:null;
       this.frameDt=dt;this.clock+=dt;this.g.clear();
       const pressureActive=screen==='play'&&!paused&&!modal&&!result&&!this.ending&&world?.phase==='battle';
-      this.pressureWarning.step(pressureActive?world.enemies.filter(body=>body.hp>0).length:0,dt,{juice:settings.juice,reducedMotion});
+      this.pressureWarning.step(pressureActive?world.pressureCount:0,dt,{juice:settings.juice,reducedMotion});
       clearPhoto();updateSkin(dt);updateCompanionVisual(dt);this.radiance?.setVisible(false);
       this.updateTrails();
       if(screen==='home'||screen==='entering'){this.updateHome(dt);updateUiBall(dt);return;}
@@ -1800,7 +1804,7 @@ function installFeedbackDemo(){
 function startFeedbackDemo(kind){
   unlockAudio();hidePanel();prepareGame({demo:true});
   feedbackDemo=true;paused=false;world.enemies=[];world.events=[];world.spawnTimer=Infinity;world.floorTimer=Infinity;world.introTimer=Infinity;world.wave=null;
-  const hints={steer:'球在飞行时也能拖拽；轻点不会发射',reward:'最后一杀引发碎裂波，清场后选择强化',rescue:'触顶后有0.8秒宽限，本局首次自动击碎三颗',danger:'保命已用完；新球出现触顶后，及时击杀可以挽回'};
+  const hints={steer:'球在飞行时也能拖拽；轻点不会发射',reward:'最后一杀引发碎裂波，清场后选择强化',rescue:'触顶后有0.8秒宽限，本局首次自动清除三个名额，同族子球一并清除',danger:'保命已用完；新球出现触顶后，及时击杀可以挽回'};
   const type=kind.startsWith('type-')?kind.slice(5):null;
   const typeHints={ring:'空心环很轻；试着将它弹开',heavy:'重球更难推动；碰撞时注意反弹',split:'击碎后分成三颗子球，可继续清理',walker:'游走球会持续移动；拖拽瞄准它',magnet:'靠近磁球会被吸引，击碎后邻球散开',shield:'第一击破盾，之后才能伤到球体',leader:'周围球向簇长聚拢，击碎后散开'};
   const hint=$('#feedback-demo .demo-title span');if(hint)hint.textContent=typeHints[type]||hints[kind]||'选择场景，可继续拖拽弹射';

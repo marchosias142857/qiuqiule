@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {GameAudio, MUSIC_TRACKS, MAX_EFFECT_VOICES, audioLevel, volumeGain} from '../dist/audio.js';
+import {MusicPlayer} from '../dist/music-player.js';
 
 function context() {
   const param = () => ({value:1,events:[],cancelScheduledValues(at){this.events.push({type:'cancel',at});},setTargetAtTime(value,at){this.value=value;this.events.push({type:'target',value,at});},setValueAtTime(value,at){this.value=value;this.events.push({type:'set',value,at});},linearRampToValueAtTime(value,at){this.value=value;this.events.push({type:'linear',value,at});},exponentialRampToValueAtTime(value,at){this.value=value;this.events.push({type:'exponential',value,at});}});
@@ -448,21 +449,25 @@ async function musicSetup(loadMusic = async (_, name) => completeMusic(name)) {
   return {c, audio};
 }
 
-test('first gesture decodes resident music first and respects a Boss scene selected before unlock', async () => {
+test('first gesture prioritizes Boss without waiting for a slow resident and late resident stays silent', async () => {
   const c = context(), loads = [], initial = staged(), boss = staged();
   const audio = new GameAudio({createContext: () => c, loadMusic: async (_, name) => {
     loads.push(name); return name === 'endless' ? initial.promise : boss.promise;
   }});
   audio.setMusicScene('boss');
   assert.equal(audio.context, null); assert.deepEqual(loads, []);
-  await audio.unlock(); assert.deepEqual(loads, ['endless']);
-  initial.resolve({duration: 122});
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(loads, ['endless', 'boss']);
-  assert.equal(audio.musicStatus().track, 'endless');
-  assert.equal(audio.player.resident.gain.gain.value, 1, 'the original stays audible throughout a slow decode');
+  await audio.unlock(); assert.deepEqual(loads, ['boss', 'endless']);
   const pending = audio.loading;
   boss.resolve(completeMusic('boss')); await pending;
+  assert.equal(audio.source, null, 'the requested track is audible before the resident finishes');
+  assert.equal(audio.musicStatus().track, 'boss');
+  const bossStartedAt = audio.musicStatus().startedAt;
+  initial.resolve({duration: 122});
+  await audio.player.residentWork;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(loads, ['boss', 'endless']);
+  assert.equal(audio.player.resident.gain.gain.value, 0, 'a late ordinary track cannot interrupt Boss');
+  assert.equal(audio.musicStatus().startedAt, bossStartedAt);
   const status = audio.musicStatus(), bossVoice = audio.player.voices.get('boss');
   assert.equal(status.track, 'boss'); assert.equal(status.title, '冠冕');
   assert.equal(audio.source.loopStart, 9.1393); assert.equal(audio.source.loopEnd, 118.849);
@@ -472,7 +477,26 @@ test('first gesture decodes resident music first and respects a Boss scene selec
   await audio.setMusicScene('boss');
   assert.equal(audio.player.voices.get('boss'), bossVoice);
   assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
-  assert.deepEqual(loads, ['endless', 'boss']);
+  assert.deepEqual(loads, ['boss', 'endless']);
+});
+
+test('resume between resident readiness and activation keeps one tracked ordinary source', async () => {
+  const c = context(), delayed = staged(); c.state = 'running';
+  const player = new MusicPlayer(c, c.destination, () => delayed.promise, 'home');
+  const ready = player.ensure('endless');
+  // Resolve while muted, then re-enable playback in the microtask immediately
+  // after ensureResident handles the buffer but before activate resumes.
+  ready.then(() => queueMicrotask(() => player.setScene('home', {activate: true})));
+  const first = player.setScene('home', {activate: true});
+  player.setScene('home', {activate: false});
+  delayed.resolve(completeMusic('endless')); await first;
+  assert.ok(player.resident);
+  assert.equal(player.voices.get('endless'), player.resident);
+  const source = player.resident.source;
+  await player.setScene('home', {activate: true});
+  assert.equal(player.resident.source, source);
+  assert.equal(player.starts.endless, 1);
+  assert.equal(c.sources.filter(node => node.stopTime === undefined).length, 1);
 });
 
 test('abandoned Boss fetches neither activate nor retain a decoded track; retries can reuse an in-flight request', async () => {
@@ -708,7 +732,7 @@ test('out-of-order resident recovery and Boss decoding honor the latest scene wi
   delayed.endless.resolve(completeMusic('endless')); await home;
   assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 0});
   assert.deepEqual(audio.musicStatus().cached, ['endless']); assert.equal(audio.player.loads.size, 0);
-  assert.deepEqual(calls, ['endless', 'boss', 'endless']);
+  assert.deepEqual(calls, ['boss', 'endless', 'endless']);
 });
 
 test('returning to a pending Boss load reuses its request and starts only one voice', async () => {
@@ -773,11 +797,12 @@ test('Boss can still play when the resident file is unavailable and later gains 
   assert.equal(audio.musicStatus().track, 'boss'); assert.equal(audio.source, null); assert.equal(audio.musicStatus().starts.boss, 1);
   const boss = audio.player.voices.get('boss'); near(boss.points[0].value, 0); near(boss.points.at(-1).value, 1);
   c.currentTime += 1; residentAvailable = true; await audio.setMusicScene('boss');
+  await audio.player.residentWork;
   assert.ok(audio.source); assert.equal(audio.player.voices.get('boss'), boss); near(audio.player.resident.points[0].value, 0);
   assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
 });
 
-test('home music can be prepared before a gesture without opening the audio device or fetching twice',async t=>{
+test('home preparation fetches once without an output or offline decoder and unlock uses the playback context',async t=>{
   const c=context(), bytes=new Uint8Array([7,8,9]).buffer, prepared={duration:122};
   let fetches=0, decodes=0, outputs=0;
   t.mock.method(globalThis,'fetch',async url=>{
@@ -785,19 +810,19 @@ test('home music can be prepared before a gesture without opening the audio devi
     return {ok:true,arrayBuffer:async()=>bytes};
   });
   const decoder=globalThis.OfflineAudioContext;
-  globalThis.OfflineAudioContext=class{
-    async decodeAudioData(data){assert.deepEqual(data,bytes);decodes++;return prepared;}
-  };
+  globalThis.OfflineAudioContext=class{constructor(){throw Error('Offline decoding must not block startup');}};
   t.after(()=>{if(decoder)globalThis.OfflineAudioContext=decoder;else delete globalThis.OfflineAudioContext;});
+  c.decodeAudioData=async data=>{assert.notEqual(data,bytes);assert.deepEqual(data,bytes);decodes++;return prepared;};
   const audio=new GameAudio({createContext:()=>{outputs++;return c;}});
   await Promise.all([audio.prepareMusic(),audio.prepareMusic()]);
   assert.equal(outputs,0);assert.equal(audio.source,null);assert.equal(audio.needsUnlock,true);
+  assert.equal(decodes,0, 'preparation holds only compressed bytes until the playback context exists');
   await audio.unlock();await audio.loading;
   assert.equal(audio.source.buffer,prepared);assert.equal(fetches,1);assert.equal(decodes,1);
   assert.equal(outputs,1);assert.equal(audio.needsUnlock,false);
 });
 
-test('fallback decoding shares the warm MP3 while saved mute and zero music volume skip warm-up',async t=>{
+test('playback decoding shares the warm MP3 while saved mute and zero music volume skip warm-up',async t=>{
   const c=context(), bytes=new Uint8Array([9,6,3]).buffer;
   let fetches=0, liveDecodes=0;
   t.mock.method(globalThis,'fetch',async()=>{
@@ -806,7 +831,7 @@ test('fallback decoding shares the warm MP3 while saved mute and zero music volu
   const decoder=globalThis.OfflineAudioContext;
   globalThis.OfflineAudioContext=class{async decodeAudioData(){throw Error('decoder unavailable');}};
   t.after(()=>{if(decoder)globalThis.OfflineAudioContext=decoder;else delete globalThis.OfflineAudioContext;});
-  c.decodeAudioData=async data=>{liveDecodes++;assert.equal(data,bytes);return {duration:122};};
+  c.decodeAudioData=async data=>{liveDecodes++;assert.notEqual(data,bytes);assert.deepEqual(data,bytes);return {duration:122};};
   const audio=new GameAudio({createContext:()=>c});
   audio.setLevels({sound:false});await audio.prepareMusic();
   audio.setLevels({sound:true,bgmVolume:0});await audio.prepareMusic();
@@ -862,7 +887,7 @@ test('entry plays immediately when allowed, using a single preparation, output a
     return {ok: true, arrayBuffer: async () => bytes};
   });
   c.decodeAudioData = async data => {
-    decodes++; assert.equal(data, bytes);
+    decodes++; assert.notEqual(data, bytes); assert.deepEqual(data, bytes);
     return {duration: 122};
   };
   const audio = new GameAudio({createContext: () => {outputs++; return c;}});
@@ -981,4 +1006,146 @@ test('music exposes only the endless and Boss catalog and ignores retired campai
     assert.equal(audio.musicStatus().scene, 'home');
   }
   assert.deepEqual(calls, ['endless']);assert.deepEqual(audio.musicStatus().starts, {endless:1,boss:0});
+});
+
+test('upcoming Boss preparation finishes during ordinary play without changing the audible track', async () => {
+  const delayed = staged(), calls = [];
+  const {c, audio} = await musicSetup(async (_, name) => {
+    calls.push(name); return name === 'boss' ? delayed.promise : completeMusic(name);
+  });
+  await audio.setMusicScene('endless');
+  const resident = audio.player.resident, points = resident.points;
+  const prepared = audio.prepareBossMusic();
+  assert.equal(audio.prepareBossMusic(), prepared, 'repeated preparation shares one request');
+  await new Promise(resolve => setImmediate(resolve));
+  c.currentTime += 8;
+  await audio.setMusicScene('endless');
+  assert.equal(audio.player.resident, resident); assert.equal(resident.points, points);
+  assert.equal(audio.musicStatus().scene, 'endless'); assert.equal(audio.musicStatus().track, 'endless');
+  assert.equal(audio.musicStatus().starts.boss, 0); assert.equal(audio.player.voices.size, 1);
+  delayed.resolve(completeMusic('boss')); await prepared;
+  assert.deepEqual(audio.musicStatus().cached, ['endless', 'boss']);
+  assert.equal(audio.musicStatus().starts.boss, 0, 'decoded preparation does not start a silent source');
+  await audio.setMusicScene('endless');
+  assert.equal(audio.musicStatus().cached.includes('boss'), true, 'ordinary scene reaffirmation preserves the preparation');
+  await audio.setMusicScene('boss');
+  assert.deepEqual(calls, ['endless', 'boss']);
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
+  assert.equal(audio.musicStatus().track, 'boss'); assert.equal(audio.player.preparation, null);
+  assert.equal(audio.bossPreparationWanted, false);
+  near(audio.player.voices.get('boss').trim.gain.value, 10 ** (-3 / 20));
+});
+
+test('Boss entry shares an unfinished preparation and starts only after that single decode resolves', async () => {
+  const delayed = staged(), calls = [];
+  const {audio} = await musicSetup(async (_, name) => {
+    calls.push(name); return name === 'boss' ? delayed.promise : completeMusic(name);
+  });
+  await audio.setMusicScene('endless');
+  const prepared = audio.prepareBossMusic();
+  await new Promise(resolve => setImmediate(resolve));
+  const entry = audio.setMusicScene('boss');
+  assert.equal(audio.musicStatus().track, 'endless'); assert.equal(audio.musicStatus().starts.boss, 0);
+  delayed.resolve(completeMusic('boss')); await Promise.all([prepared, entry]);
+  assert.deepEqual(calls, ['endless', 'boss']);
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
+});
+
+test('leaving or restarting the run discards both ready and late upcoming Boss preparations', async () => {
+  for (const exit of ['home', 'resultEndless', 'failedEndless', 'restart']) for (const ready of [false, true]) {
+    const delayed = staged();
+    const {audio} = await musicSetup(async (_, name) => name === 'boss' ? delayed.promise : completeMusic(name));
+    await audio.setMusicScene('endless');
+    const prepared = audio.prepareBossMusic();
+    await new Promise(resolve => setImmediate(resolve));
+    if (ready) { delayed.resolve(completeMusic('boss')); await prepared; }
+    await audio.setMusicScene(exit === 'restart' ? 'endless' : exit, {resetPreparation: exit === 'restart'});
+    if (!ready) { delayed.resolve(completeMusic('boss')); await prepared; }
+    assert.equal(audio.bossPreparationWanted, false, exit);
+    assert.equal(audio.player.preparation, null, exit);
+    assert.deepEqual(audio.musicStatus().cached, ['endless'], exit);
+    assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 0}, exit);
+  }
+});
+
+test('a consumed Boss preparation is released after the encounter instead of becoming a permanent PCM cache', async () => {
+  const calls = [], {c, audio} = await musicSetup(async (_, name) => {calls.push(name); return completeMusic(name);});
+  await audio.setMusicScene('endless');
+  await audio.prepareBossMusic(); await audio.setMusicScene('boss'); c.currentTime += 1;
+  const boss = audio.player.voices.get('boss');
+  await audio.setMusicScene('endless');
+  assert.deepEqual(audio.musicStatus().cached, ['endless']); assert.equal(audio.player.preparation, null);
+  c.currentTime += 1; await audio.setMusicScene('endless');
+  assert.equal(boss.source.disconnected, true); assert.equal(audio.player.voices.size, 1);
+  await audio.prepareBossMusic();
+  assert.deepEqual(calls, ['endless', 'boss', 'boss']);
+  assert.equal(audio.musicStatus().starts.boss, 1, 'the next prepared encounter is not played early');
+});
+
+test('an injected context decoder remembers an upcoming Boss until a context exists without opening the device', async () => {
+  const c = context(), calls = []; let contexts = 0;
+  const audio = new GameAudio({createContext: () => {contexts++; return c;},
+    loadMusic: async (_, name) => {calls.push(name); return completeMusic(name);}});
+  audio.setMusicScene('endless');
+  assert.equal(audio.prepareBossMusic(), null);
+  audio.setMusicScene('endless');
+  assert.equal(contexts, 0); assert.deepEqual(calls, []); assert.equal(audio.bossPreparationWanted, true);
+  await audio.unlock(); await audio.loading; await audio.preparingBoss;
+  assert.equal(contexts, 1); assert.deepEqual(calls, ['endless', 'boss']);
+  assert.deepEqual(audio.musicStatus().cached, ['endless', 'boss']);
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 0});
+});
+
+test('muted, zero-volume and background Boss preparation starts only after ordinary playback resumes', async () => {
+  for (const mode of ['mute', 'volume', 'hidden']) {
+    const calls = [], {audio} = await musicSetup(async (_, name) => {calls.push(name); return completeMusic(name);});
+    await audio.setMusicScene('endless');
+    if (mode === 'hidden') audio.setHidden(true);
+    else audio.setLevels(mode === 'mute' ? {sound: false} : {bgmVolume: 0});
+    assert.equal(audio.prepareBossMusic(), null);
+    assert.deepEqual(calls, ['endless']); assert.equal(audio.bossPreparationWanted, true);
+    if (mode === 'hidden') await audio.setHidden(false);
+    else audio.setLevels(mode === 'mute' ? {sound: true} : {bgmVolume: .55});
+    await audio.preparingBoss;
+    assert.deepEqual(calls, ['endless', 'boss'], mode);
+    assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 0}, mode);
+    assert.equal(audio.musicStatus().cached.includes('boss'), true, mode);
+  }
+});
+
+test('canceling a locked preparation prevents a later unlock from loading the abandoned Boss', async () => {
+  for (const exit of ['home', 'failedEndless', 'restart']) {
+    const calls = [], c = context();
+    const audio = new GameAudio({createContext: () => c,
+      loadMusic: async (_, name) => {calls.push(name); return completeMusic(name);}});
+    audio.setMusicScene('endless'); audio.prepareBossMusic();
+    audio.setMusicScene(exit === 'restart' ? 'endless' : exit, {resetPreparation: exit === 'restart'});
+    await audio.unlock(); await audio.loading;
+    assert.deepEqual(calls, ['endless'], exit); assert.equal(audio.bossPreparationWanted, false);
+  }
+});
+
+test('failed and incomplete preparation can retry on later gestures without interrupting ordinary music', async () => {
+  let attempts = 0;
+  const {audio} = await musicSetup(async (_, name) => {
+    if (name !== 'boss') return completeMusic(name);
+    attempts++;
+    if (attempts === 1) throw Error('network miss');
+    if (attempts === 2) return {duration: 20};
+    return completeMusic(name);
+  });
+  await audio.setMusicScene('endless');
+  const resident = audio.player.resident, points = resident.points;
+  await audio.prepareBossMusic();
+  assert.equal(attempts, 1); assert.equal(audio.needsUnlock, true);
+  assert.deepEqual(audio.musicStatus().cached, ['endless']);
+  await audio.unlock(); await audio.preparingBoss;
+  assert.equal(attempts, 2); assert.equal(audio.needsUnlock, true);
+  await audio.unlock(); await audio.preparingBoss;
+  assert.equal(attempts, 3); assert.equal(audio.needsUnlock, false);
+  assert.deepEqual(audio.musicStatus().cached, ['endless', 'boss']);
+  assert.equal(audio.player.resident, resident); assert.equal(resident.points, points);
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 0});
+  await audio.setMusicScene('boss'); assert.equal(attempts, 3);
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
 });

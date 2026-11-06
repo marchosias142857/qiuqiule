@@ -1,4 +1,6 @@
-// Background-only cache preparation. The v1.4.0 game UI is unchanged.
+// APKs already contain every asset. Leave their startup I/O to the game/music;
+// only web/PWA installs need a second offline copy and music warm-cache work.
+const nativeApp=window.Capacitor?.isNativePlatform?.()===true;
 let registration,starting=false,retryTimer;
 function retryLater(){
   clearTimeout(retryTimer);
@@ -26,7 +28,14 @@ async function start(force=false){
     if(force&&navigator.onLine)await registration.update();
   }catch{retryLater();}finally{starting=false;}
 }
-if('serviceWorker' in navigator){
+if(nativeApp&&'serviceWorker' in navigator){
+  // Retire a registration left by an older APK, without reloading a live game
+  // or touching settings/scores. Existing clients detach on their next launch.
+  const scope=new URL('./',import.meta.url).href;
+  navigator.serviceWorker.getRegistration(scope).then(previous=>{
+    if(previous?.scope===scope)return previous.unregister();
+  }).catch(()=>{});
+}else if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='CACHE_FAILED')retryLater();
     if(event.data?.type==='CACHE_READY'){

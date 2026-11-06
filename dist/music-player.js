@@ -50,8 +50,10 @@ export class MusicPlayer {
     this.voices = new Map();
     this.starts = Object.fromEntries(Object.keys(MUSIC_TRACKS).map(name => [name, 0]));
     this.resident = null;
+    this.residentWork = null;
     this.track = null;
     this.pending = null;
+    this.preparation = null;
     this.activationAllowed = false;
     this.switchAt = this.fadeEnd = 0;
     this.scene = scene;
@@ -69,11 +71,32 @@ export class MusicPlayer {
       if (!Number.isFinite(buffer?.duration) || buffer.duration < MUSIC_TRACKS[name].loopEnd) {
         throw new Error('Incomplete music track: ' + name);
       }
-      if (name === 'endless' || this.wanted === name) this.buffers.set(name, buffer);
+      if (name === 'endless' || this.wanted === name || this.preparation?.name === name) this.buffers.set(name, buffer);
       return buffer;
     }).finally(() => this.loads.delete(name));
     this.loads.set(name, work);
     return work;
+  }
+  prepare(name) {
+    if (name === 'endless' || !Object.hasOwn(MUSIC_TRACKS, name)) return null;
+    if (this.preparation?.name !== name) {
+      this.cancelPreparation();
+      this.preparation = {name, work: null};
+    }
+    const preparation = this.preparation;
+    if (preparation.work) return preparation.work;
+    // Preparation owns a temporary decoded buffer, never an audible voice.
+    // A failed attempt remains eligible for a later gesture or Boss entry.
+    const work = this.ensure(name).catch(() => null).finally(() => {
+      if (preparation.work === work) preparation.work = null;
+    });
+    preparation.work = work;
+    return work;
+  }
+  cancelPreparation() {
+    const name = this.preparation?.name;
+    this.preparation = null;
+    if (name && name !== this.wanted) this.buffers.delete(name);
   }
   spawn(name, buffer, time, gainValue) {
     const track = MUSIC_TRACKS[name], source = this.context.createBufferSource(), gain = this.context.createGain();
@@ -95,7 +118,8 @@ export class MusicPlayer {
     this.voices.set(name, voice);
     return voice;
   }
-  setScene(scene, {activate = true} = {}) {
+  setScene(scene, {activate = true, resetPreparation = false} = {}) {
+    const previousScene = this.scene;
     this.activationAllowed = activate;
     if (scene !== this.scene) {
       this.scene = scene;
@@ -108,9 +132,13 @@ export class MusicPlayer {
         {time: now, value: valueAt(this.filterPoints, now)}, {time: end, value: mix.cutoff},
       ]);
     }
+    // An ordinary scene reaffirmation (resume, unmute) keeps the upcoming
+    // Boss ready. Entering Boss consumes preparation; leaving the run or
+    // restarting explicitly abandons it, including any late decode result.
+    if (resetPreparation || scene === 'boss' || scene !== 'endless' || previousScene === 'boss') this.cancelPreparation();
     this.retireSilent();
     if (!this.retirement && this.fadeEnd > this.context.currentTime) this.queueRetirement();
-    for (const name of this.buffers.keys()) if (name !== 'endless' && name !== this.wanted) this.buffers.delete(name);
+    for (const name of this.buffers.keys()) if (name !== 'endless' && name !== this.wanted && name !== this.preparation?.name) this.buffers.delete(name);
     if (!activate) return null;
     if (this.wanted === this.track && this.resident) return null;
     if (this.pending?.name === this.wanted) return this.pending.work;
@@ -121,25 +149,33 @@ export class MusicPlayer {
     this.pending = {name, work};
     return work;
   }
+  ensureResident() {
+    if (this.resident) return Promise.resolve(this.resident.source.buffer);
+    if (this.residentWork) return this.residentWork;
+    const work = this.ensure('endless').then(buffer => {
+      this.attachResident(buffer);
+      return buffer;
+    }).finally(() => { if (this.residentWork === work) this.residentWork = null; });
+    this.residentWork = work;
+    return work;
+  }
+  attachResident(buffer) {
+    if (!this.activationAllowed || this.resident) return;
+    this.resident = this.voices.get('endless') || this.spawn('endless', buffer, this.context.currentTime, this.track ? 0 : 1);
+    if (!this.track) this.track = 'endless';
+  }
   async activate(name) {
-    if (!this.resident) {
-      try {
-        const buffer = await this.ensure('endless');
-        if (!this.activationAllowed) return;
-        if (!this.resident) {
-          const now = this.context.currentTime;
-          this.resident = this.spawn('endless', buffer, now, this.track ? 0 : 1);
-          if (!this.track) this.track = 'endless';
-        }
-      } catch (error) {
-        // A secondary track can still play offline if it was cached separately.
-        if (name === 'endless') throw error;
-      }
-    }
+    // Start the requested track independently. A missing/slow ordinary file
+    // must never delay Boss music; a late resident joins silently behind it.
+    const wanted = name === 'endless' ? this.ensureResident()
+      : this.voices.get(name)?.source.buffer || this.ensure(name);
+    if (name !== 'endless') this.ensureResident().catch(() => {});
+    const buffer = await wanted;
     if (!this.activationAllowed || this.wanted !== name) return;
+    // Mute/resume can change between the resident promise and this continuation.
+    // Always attach the singleton before a crossfade can create an ordinary voice.
+    if (name === 'endless') this.attachResident(buffer);
     if (this.track === name) return;
-    const buffer = this.voices.get(name)?.source.buffer || await this.ensure(name);
-    if (!this.activationAllowed || this.wanted !== name || this.track === name) return;
     this.crossfade(name, buffer);
   }
   crossfade(name, buffer) {
