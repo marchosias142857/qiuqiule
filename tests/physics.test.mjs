@@ -1,10 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, BUFFS, length, BREATH_DURATION} from '../dist/physics.js';
-import {LegacyCampaignWorld as CampaignWorld} from '../dist/campaign.js';
 
 function world(){const w=new World(900,700,()=>.5);w.enemies=[];w.spawnTimer=999;w.floorTimer=Infinity;w.introTimer=Infinity;w.events=[];return w;}
-function campaignWorld(){const w=new CampaignWorld(900,700,1,()=>.5);w.enemies=[];w.spawnTimer=999;w.events=[];w.energy=1;return w;}
 function enemy(w,x,y,options={}){const b=w.makeBody(x,y,w.unit,.8);Object.assign(b,{born:1,solid:true,hp:100,maxHp:100},options);w.enemies.push(b);return b;}
 function advance(w,seconds){for(let i=0;i<Math.ceil(seconds*120);i++)w.step(1/120);}
 const near=(a,b,eps=1e-6)=>assert.ok(Math.abs(a-b)<eps,`${a} ≠ ${b}`);
@@ -18,10 +16,10 @@ test('endless launch speed follows energy while density does not slow it',()=>{
   const a=world(),b=world();a.shoot(170,0);b.energy=1.3;b.density=1.35;b.shoot(170,0);
   near(length(b.player)/length(a.player),Math.sqrt(1.3));
 });
-test('campaign circle collision preserves momentum and dissipates energy',()=>{
-  const w=campaignWorld(),a=w.player;Object.assign(a,{x:300,y:300,vx:500,vy:0});const b=enemy(w,300+w.unit*1.9,300);
+test('ordinary enemy circle collision preserves momentum and dissipates energy',()=>{
+  const w=world(),a=enemy(w,300,300,{vx:500,vy:0}),b=enemy(w,300+w.unit*1.9,300);
   const p0=a.mass*a.vx+b.mass*b.vx,e0=.5*a.mass*a.vx**2;
-  w.collide(a,b);near(a.mass*a.vx+b.mass*b.vx,p0);assert.ok(b.vx>0);assert.ok(.5*a.mass*a.vx**2+.5*b.mass*b.vx**2<e0);assert.ok(b.hp<100);
+  w.collide(a,b);near(a.mass*a.vx+b.mass*b.vx,p0);assert.ok(b.vx>0);assert.ok(.5*a.mass*a.vx**2+.5*b.mass*b.vx**2<e0);assert.equal(b.hp,100);
 });
 test('glancing collision changes player direction',()=>{
   const w=world();Object.assign(w.player,{x:300,y:300,vx:600,vy:0});const b=enemy(w,340,320);
@@ -144,9 +142,10 @@ test('growth increases reach and damage ten percent per layer while preserving t
 });
 test('growth remains offerable after skips and leaves the pool only after two acquired layers',()=>{
   const w=world();w.stage=2;
-  // Leave growth as the only available regular upgrade, while real special
-  // alternatives let the player decline it without acquiring a growth layer.
-  for(const buff of BUFFS)if(buff.kind==='regular'&&buff.id!=='growth')w.buffs[buff.id]=buff.maxStacks;
+  // Select the last eligible regular upgrade so growth keeps reappearing;
+  // uncapped base upgrades remain real alternatives after other caps are reached.
+  w.random=()=>.999999;
+  for(const buff of BUFFS)if(buff.kind==='regular'&&buff.id!=='growth')w.buffs[buff.id]=Number.isFinite(buff.maxStacks)?buff.maxStacks:60;
   for(let offer=1;offer<=3;offer++){
     w.phase='battle';w.beginUpgrade();assert.ok(w.choices.some(c=>c.id==='growth'));
     w.phase='choose';w.choose(w.choices.find(c=>c.id!=='growth'));
@@ -249,30 +248,12 @@ test('reward-choice capture threshold retains its stage bands and resets with a 
   gainGrowth(w);near(w.readySpeed/w.unit,12);
   near(world().readySpeed/world().unit,8);
 });
-test('campaign release still adds captured scalar speed after drag braking and follows the new aim',()=>{
-  const w=campaignWorld();Object.assign(w.player,{vx:w.unit*3,vy:w.unit*4});
-  assert.equal(w.beginPull(),true);near(w.pullStartSpeed,w.unit*5);
-  for(let i=0;i<36;i++)w.step(1/120,true);
-  assert.ok(length(w.player)<w.unit*.3);
-  assert.equal(w.shoot(0,-w.maxPull),true);
-  near(w.player.vx,0);near(w.player.vy,w.baseSpeed+w.unit*5);assert.equal(w.pullStartSpeed,null);
-});
 test('cancel, tiny gestures, rotation and stage transitions cannot bank stale speed',()=>{
   const w=world();w.player.vx=w.unit*5;assert.ok(w.beginPull());assert.equal(w.beginPull(),false);
   w.cancelPull();w.player.vx=0;w.shoot(w.maxPull,0);near(length(w.player),w.baseSpeed);
   w.player.vx=w.unit*4;w.beginPull();assert.equal(w.shoot(1,0),false);assert.equal(w.pullStartSpeed,null);
   w.beginPull();w.resize(390,844);assert.equal(w.pullStartSpeed,null);
   w.beginPull();w.beginUpgrade();assert.equal(w.pullStartSpeed,null);assert.equal(w.shoot(100,0),false);
-});
-test('campaign active pull keeps its original speed snapshot when a collision accelerates the ball',()=>{
-  const w=campaignWorld();w.player.vx=w.unit*2;w.beginPull();w.player.vx=w.unit*20;
-  assert.equal(w.ready,true);w.shoot(-w.maxPull,0);near(length(w.player),w.baseSpeed+w.unit*2);
-});
-test('campaign captured speed remains above the launch cap and survives the next physics frame',()=>{
-  const w=new CampaignWorld(10000,10000,1,()=>.5);w.enemies=[];w.spawnTimer=999;w.floorTimer=Infinity;w.introTimer=Infinity;w.stage=101;w.energy=100;
-  w.player.vx=w.unit*47;assert.ok(w.beginPull());w.player.vx=0;w.shoot(-w.maxPull,0);
-  const speed=w.unit*107;near(length(w.player),speed);w.step(1/120);
-  near(length(w.player),speed*Math.exp(-.6/120));assert.ok(length(w.player)>w.unit*60);
 });
 test('adaptive steps catch high-speed enemy and wall contacts on phone and desktop',()=>{
   for(const [width,height] of [[390,844],[844,390],[1440,900]]){

@@ -55,6 +55,10 @@ export function iconGeometry(type,muted=false){
     strokes.push(arc(0,-.07,.23,Math.PI,Math.PI*2));
     width=.09;
   }
+  if(type==='upgrades'){
+    for(const y of [-.33,0,.33])strokes.push([[-.27,y+.12],[0,y-.12],[.27,y+.12]]);
+    width=.085;
+  }
   if(type==='home')strokes.push([[.34,-.35],[.34,.08],[-.35,.08]],[[-.1,-.17],[-.35,.08],[-.1,.33]]);
   const geometry={fills,strokes,width};geometries.set(key,geometry);return geometry;
 }

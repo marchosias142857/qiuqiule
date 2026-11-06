@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {UPGRADE_DEFINITIONS} from '../dist/upgrades.js';
-import {upgradePreviewGeometry,drawUpgradeBall,drawAuxiliaryBall} from '../dist/upgrade-render.js';
+import {upgradePreviewGeometry,drawUpgradeBall,drawAuxiliaryBall,upgradeAppearance,upgradeIconMarkup} from '../dist/upgrade-render.js';
 import {transformSkinPoint} from '../dist/skin-render.js';
 import {skinContour} from '../dist/skins.js';
 
@@ -13,7 +13,7 @@ function recorder(){
     fillPath(){shapes.push({type:'fill',...style,points});},strokePath(){shapes.push({type:'stroke',...style,points});}};
 }
 
-test('all eighteen previews use distinct text-free diagrams entirely inside their reward ball',()=>{
+test('all current upgrade previews use distinct text-free diagrams entirely inside their reward ball',()=>{
   const signatures=new Set();
   for(const upgrade of UPGRADE_DEFINITIONS){
     for(const time of [0,.4,1,2.4])for(const shape of upgradePreviewGeometry(upgrade.id,time)){
@@ -23,35 +23,62 @@ test('all eighteen previews use distinct text-free diagrams entirely inside thei
     }
     signatures.add(JSON.stringify(upgradePreviewGeometry(upgrade.id,0)));
   }
-  assert.equal(signatures.size,18);
+  assert.equal(signatures.size,UPGRADE_DEFINITIONS.length);
 });
 
-test('reward rarity is exactly zero, one or two theme-colored outline rings with no text or extra colors',()=>{
-  for(const rings of [0,1,2]){
-    const g=recorder(),choice={id:'energy',x:50,y:80,r:30,born:.5,rings};
-    drawUpgradeBall(g,choice,0xc4dc86);
-    assert.equal(g.shapes.length,1+rings);assert.equal(g.shapes[0].type,'fill');
-    const r=30*(1-.5**3);near(g.shapes[0].points[0].x,50+r);
-    g.shapes.forEach(shape=>assert.equal(shape.color,0xc4dc86));
-    g.shapes.slice(1).forEach((shape,i)=>{assert.equal(shape.type,'stroke');near(shape.width,1);near(shape.points[0].x,50+r*(1.14+i*.13));});
+test('reward categories share the original collision radius and enter together with distinct colors and interior polygons',()=>{
+  const colors=new Set();
+  for(const [kind,sides] of [['regular',3],['special',4],['risk',5]]){
+    for(const born of [0,.001,.15,.5,1]){
+      const g=recorder(),choice={id:'energy',x:50,y:80,r:30,born,kind},before=structuredClone(choice);
+      drawUpgradeBall(g,choice,0xf4f3eb,{alpha:.6});
+      assert.deepEqual(choice,before);
+      const appear=1-(1-born)**3,r=30*appear;
+      if(r<1){assert.equal(g.shapes.length,0);continue;}
+      assert.equal(g.shapes.length,2);assert.ok(g.shapes.every(s=>s.type==='fill'));
+      const [body,mark]=g.shapes;
+      colors.add(body.color);near(body.alpha,.6*appear);near(mark.alpha,body.alpha);
+      near(body.points[0].x,choice.x+r);assert.equal(mark.points.length,sides);
+      assert.notEqual(mark.color,body.color);
+      for(const point of mark.points)assert.ok(Math.hypot(point.x-choice.x,point.y-choice.y)<r*.4);
+      const edges=mark.points.map((p,i)=>Math.hypot(p.x-mark.points[(i+1)%sides].x,p.y-mark.points[(i+1)%sides].y));
+      edges.forEach(edge=>near(edge,edges[0]));
+    }
+  }
+  assert.equal(colors.size,3);
+});
+
+test('reward guide and balls use the same category colors, including a background close to the default ball color',()=>{
+  for(const kind of ['regular','special','risk']){
+    const basic=upgradeAppearance(kind);
+    for(const background of [0xffffff,0, basic.color]){
+      const appearance=upgradeAppearance({kind},background),g=recorder();
+      drawUpgradeBall(g,{kind,x:0,y:0,r:20,born:1},background);
+      assert.equal(g.shapes[0].color,appearance.color);assert.equal(g.shapes[1].color,appearance.ink);
+      if(background===basic.color)assert.notEqual(appearance.color,background);
+      const markup=upgradeIconMarkup(kind,background);
+      assert.match(markup,new RegExp('fill="#'+appearance.color.toString(16).padStart(6,'0')+'"'));
+      assert.equal((markup.match(/<circle/g)||[]).length,1);assert.equal((markup.match(/<polygon/g)||[]).length,1);
+      assert.equal(markup.match(/points="([^"]+)"/)[1].split(' ').length,appearance.sides);
+    }
   }
 });
 
-test('the gambler preview places three offers above and two below its central player',()=>{
+test('the gambler preview shows two successive groups of three offers',()=>{
   const geometry=upgradePreviewGeometry('gambler'),player=geometry.find(shape=>shape.type==='dot'),offers=geometry.filter(shape=>shape.type==='ring');
-  assert.equal(offers.length,5);assert.equal(offers.filter(offer=>offer.y<player.y).length,3);assert.equal(offers.filter(offer=>offer.y>player.y).length,2);
+  assert.equal(offers.length,6);assert.equal(offers.filter(offer=>offer.y<player.y).length,3);assert.equal(offers.filter(offer=>offer.y>player.y).length,3);
   for(const offer of offers)assert.ok(Math.hypot(offer.x-player.x,offer.y-player.y)>offer.r+player.r);
   for(let i=0;i<offers.length;i++)for(let j=i+1;j<offers.length;j++)assert.ok(Math.hypot(offers[i].x-offers[j].x,offers[i].y-offers[j].y)>offers[i].r+offers[j].r);
 });
 
 test('preview adds small balls and dotted trajectories and becomes static under reduced motion',()=>{
   const choice={id:'split',x:80,y:120,r:36,born:1,rings:1},plain=recorder(),preview=recorder();
-  drawUpgradeBall(plain,choice,0xc4dc86);drawUpgradeBall(preview,choice,0xc4dc86,{preview:true,time:.7});
+  drawUpgradeBall(plain,choice,0xf4f3eb);drawUpgradeBall(preview,choice,0xf4f3eb,{preview:true,time:.7});
   assert.ok(preview.shapes.length>plain.shapes.length+10);
   for(const shape of preview.shapes.slice(plain.shapes.length))for(const p of shape.points)assert.ok(Math.hypot(p.x-choice.x,p.y-choice.y)<choice.r);
   const first=recorder(),later=recorder();
-  drawUpgradeBall(first,{...choice,id:'energy'},0xc4dc86,{preview:true,reducedMotion:true,time:0});
-  drawUpgradeBall(later,{...choice,id:'energy'},0xc4dc86,{preview:true,reducedMotion:true,time:20});
+  drawUpgradeBall(first,{...choice,id:'energy'},0xf4f3eb,{preview:true,reducedMotion:true,time:0});
+  drawUpgradeBall(later,{...choice,id:'energy'},0xf4f3eb,{preview:true,reducedMotion:true,time:20});
   assert.deepEqual(first.shapes,later.shapes);
 });
 

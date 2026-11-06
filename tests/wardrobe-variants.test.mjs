@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {initWardrobe,wardrobeShapeCards,wardrobeAppearanceCards,wardrobeCompanionCards} from '../dist/wardrobe.js';
-import {normalizeSkins,selectSkin,toggleSkins,unlockSkin} from '../dist/skins.js';
+import {initWardrobe,wardrobeAppearanceCards,wardrobeCompanionCards} from '../dist/wardrobe.js';
 import {normalizeCompanionState,selectCompanion} from '../dist/companions.js';
 
 function wardrobe(t,initial,saveImage){
@@ -10,7 +9,7 @@ function wardrobe(t,initial,saveImage){
   t.after(()=>{for(const [key,descriptor] of Object.entries(previous)){
     if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];
   }});
-  const nodes=new Map();let created=0;
+  const nodes=new Map(),lookups=[],removed=new Set(['shape-select','shape-gallery','shape-grid','appearance-tools','appearance-clear']);let created=0;
   const node=id=>{
     if(nodes.has(id))return nodes.get(id);
     const listeners=new Map(),attributes=new Map(),classes=new Set();let identity=id;
@@ -25,55 +24,36 @@ function wardrobe(t,initial,saveImage){
     };
     nodes.set(id,result);return result;
   };
-  Object.defineProperty(globalThis,'document',{configurable:true,value:{body:node('body'),getElementById:node,createElement:tag=>node(`created-${tag}-${++created}`),addEventListener(){},hidden:false}});
+  Object.defineProperty(globalThis,'document',{configurable:true,value:{body:node('body'),getElementById:id=>{lookups.push(id);return removed.has(id)?null:node(id);},createElement:tag=>node(`created-${tag}-${++created}`),addEventListener(){},hidden:false}});
   Object.defineProperty(globalThis,'window',{configurable:true,value:{addEventListener(){}}});
   node('appearance-cropper').hidden=true;
-  let state=initial;const errors=[],images=[];
+  let state=initial;const errors=[],images=[],appearances=[];
   const ui=initWardrobe({getState:()=>state,
-    onToggle:enabled=>{state={...state,...toggleSkins(state,enabled)};},
-    onSides:selection=>{state={...state,...toggleSkins(selectSkin(state,selection),true)};},
-    onAppearance:id=>{state={...state,appearanceId:id};},
-    onCompanion:id=>{const next=selectCompanion(normalizeCompanionState({unlocked:state.companionUnlocked,selected:state.companionId},{best:state.best}),id);state={...state,companionId:next.selected,companionUnlocked:next.unlocked};},
-    onImage:image=>{images.push(image);return saveImage?.(image);},onError:error=>errors.push(error)});
+    onAppearance:id=>{appearances.push(id);state={...state,appearanceId:id};},
+    onCompanion:id=>{const next=selectCompanion(normalizeCompanionState({unlocked:state.companionUnlocked,selected:state.companionId},{highestStage:state.highestStage}),id);state={...state,companionId:next.selected,companionUnlocked:next.unlocked};},
+    onImage:async image=>{images.push(image);await saveImage?.(image);state={...state,image,appearanceId:'custom'};},onError:error=>errors.push(error)});
   const open=kind=>{node(`${kind}-select`).fire('click');ui.update(.24);};
-  return {node,ui,open,state:()=>state,setState:value=>{state=value;ui.refresh();},errors,images};
+  return {node,ui,open,state:()=>state,setState:value=>{state=value;ui.refresh();},errors,images,appearances,lookups};
 }
 
-test('retired endless-only unlock fields leave polygons locked while the circle selector remains available',t=>{
-  const view=wardrobe(t,normalizeSkins({enabled:true,sides:9,unlocked:0,variants:[6,7,8,9],variant:true}));
-  assert.equal(view.node('shape-select').hidden,false);
-  view.node('shape-select').fire('click');view.ui.update(1);
-  assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'shape');
-  const circle=view.node('shape-option-0');
-  assert.equal(circle.getAttribute('aria-disabled'),'false');assert.equal(circle.getAttribute('aria-pressed'),'true');
-  circle.fire('click');assert.equal(view.state().enabled,false);
-  for(let sides=6;sides<=15;sides++)assert.equal(view.node(`shape-option-${sides}`).getAttribute('aria-disabled'),'true');
-  assert.equal(view.state().variant,undefined);assert.equal(view.state().variants,undefined);
+test('wardrobe initializes without querying removed shape or image-removal controls',t=>{
+  const view=wardrobe(t,{appearanceId:'custom',image:'data:image/png;base64,b2xk'});
+  view.ui.refresh();view.ui.resetNavigation();
+  assert.equal(view.node('appearance-grid').children.length,3);
+  assert.equal(view.node('companion-grid').children.length,9);
+  assert.ok(!view.lookups.some(id=>['shape-select','shape-gallery','shape-grid','appearance-tools','appearance-clear'].includes(id)));
+  assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'main');
 });
 
-test('shape gallery shows every milestone but selects only genuinely owned polygons across skipped gaps',t=>{
-  let state=normalizeSkins({enabled:true,sides:6},10);
-  state=unlockSkin(state,30).state;state=unlockSkin(state,50).state;
-  const view=wardrobe(t,state);view.open('shape');
-  assert.equal(view.node('shape-grid').children.length,11);
-  for(let sides=6;sides<=15;sides++){
-    const button=view.node(`shape-option-${sides}`),owned=[6,8,10].includes(sides);
-    assert.equal(button.getAttribute('aria-disabled'),String(!owned));
-    assert.equal(button.querySelector('.wardrobe-card-lock').hidden,owned);
-    button.fire('click');assert.equal(view.state().sides,owned?sides:([6,8,10].filter(x=>x<sides).at(-1)||6));
-  }
-  assert.deepEqual(view.state().owned,[6,8,10]);assert.equal(view.errors.length,7);
-  assert.equal(view.node('shape-option-10').getAttribute('aria-pressed'),'true');
-  assert.equal(view.node('shape-option-8').getAttribute('aria-pressed'),'false');
-});
+
 
 test('gallery fades only content and keeps the same header and preview nodes mounted',t=>{
-  const view=wardrobe(t,normalizeSkins({enabled:true,sides:6},30)),preview=view.node('wardrobe-ball'),header=view.node('wardrobe-title');
-  view.node('shape-select').fire('click');
+  const view=wardrobe(t,{}),preview=view.node('wardrobe-ball'),header=view.node('wardrobe-title');
+  view.node('appearance-select').fire('click');
   assert.equal(view.node('wardrobe-content').inert,true);
   view.ui.update(.06);assert.equal(view.node('wardrobe-content').style.opacity,'0.5');
-  assert.equal(view.node('wardrobe-main').hidden,false);assert.equal(view.node('shape-gallery').hidden,true);
-  view.ui.update(.06);assert.equal(view.node('wardrobe-main').hidden,true);assert.equal(view.node('shape-gallery').hidden,false);
+  assert.equal(view.node('wardrobe-main').hidden,false);assert.equal(view.node('appearance-gallery').hidden,true);
+  view.ui.update(.06);assert.equal(view.node('wardrobe-main').hidden,true);assert.equal(view.node('appearance-gallery').hidden,false);
   assert.equal(view.node('wardrobe-content').style.opacity,'0');
   view.ui.update(.12);assert.equal(view.node('wardrobe-content').style.opacity,'1');
   assert.equal(view.node('wardrobe-content').inert,false);assert.equal(view.node('wardrobe-back').getAttribute('aria-label'),'返回换装');
@@ -85,19 +65,19 @@ test('gallery fades only content and keeps the same header and preview nodes mou
   assert.equal(view.node('wardrobe-back').innerHTML,'×');assert.equal(view.ui.back(),false);
 });
 
-test('rapid navigation or selection during a fade cannot change the active skin or lose the return route',t=>{
-  const view=wardrobe(t,normalizeSkins({enabled:true,sides:6},30));
-  view.node('shape-select').fire('click');view.node('appearance-select').fire('click');
-  view.node('shape-option-8').fire('click');assert.equal(view.state().sides,6);assert.equal(view.ui.back(),true);
-  view.ui.update(.24);assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'shape');
-  view.node('shape-option-8').fire('click');assert.equal(view.state().sides,8);
+test('rapid navigation or selection during a fade cannot change the appearance or lose the return route',t=>{
+  const view=wardrobe(t,{appearanceId:'original',appearanceUnlocked:true});
+  view.node('appearance-select').fire('click');view.node('companion-select').fire('click');
+  view.node('appearance-option-big-eye').fire('click');assert.equal(view.state().appearanceId,'original');assert.equal(view.ui.back(),true);
+  view.ui.update(.24);assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'appearance');
+  view.node('appearance-option-big-eye').fire('click');assert.equal(view.state().appearanceId,'big-eye');
   view.ui.back();view.ui.update(.04);view.ui.resetNavigation();view.ui.update(1);
   assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'main');
   assert.equal(view.node('wardrobe-content').inert,false);assert.equal(view.node('wardrobe-content').style.opacity,'1');
 });
 
 test('appearance gallery has exactly three choices and enforces the 26767 score lock',t=>{
-  const initial={...normalizeSkins(null),appearanceId:'original',best:26766};
+  const initial={appearanceId:'original',best:26766};
   const view=wardrobe(t,initial);view.open('appearance');
   assert.equal(view.node('appearance-grid').children.length,3);
   const big=view.node('appearance-option-big-eye');
@@ -109,17 +89,63 @@ test('appearance gallery has exactly three choices and enforces the 26767 score 
   assert.equal(big.getAttribute('aria-pressed'),'false');
 });
 
-test('custom appearance opens the existing picker and an equipped saved image is highlighted',t=>{
-  const view=wardrobe(t,{...normalizeSkins(null),image:'data:image/png;base64,abc',appearanceId:'custom'});view.open('appearance');
+test('equipped custom opens its picker again and cancelling preserves the image and selection',async t=>{
+  const image='data:image/png;base64,b2xk';
+  const view=wardrobe(t,{image,appearanceId:'custom'});view.open('appearance');
+  const file=view.node('appearance-file');file.value='previous';
   assert.equal(view.node('appearance-option-custom').getAttribute('aria-pressed'),'true');
-  assert.equal(view.node('appearance-clear').hidden,false);assert.equal(view.node('appearance-tools').hidden,false);
-  view.node('appearance-option-custom').fire('click');assert.equal(view.node('appearance-file').clickCount,1);
-  assert.equal(view.images.length,0,'opening a picker never deletes or replaces the saved image');
+  await view.node('appearance-option-custom').fire('click');assert.equal(file.clickCount,1);assert.equal(file.value,'');
+  file.files=[];await file.fire('change');
+  assert.equal(view.state().image,image);assert.equal(view.state().appearanceId,'custom');
+  assert.deepEqual(view.images,[]);assert.deepEqual(view.appearances,[]);assert.equal(view.ui.isCropping(),false);
+});
+
+test('switching to original or Big Eye keeps a saved image reusable without a new picker',t=>{
+  const image='data:image/png;base64,b2xk';
+  const view=wardrobe(t,{image,appearanceId:'custom',appearanceUnlocked:true});view.open('appearance');
+  for(const id of ['original','big-eye','original']){
+    view.node(`appearance-option-${id}`).fire('click');
+    assert.equal(view.state().appearanceId,id);assert.equal(view.state().image,image);
+    view.node('appearance-option-custom').fire('click');
+    assert.equal(view.state().appearanceId,'custom');assert.equal(view.state().image,image);
+    assert.equal(view.node('appearance-file').clickCount||0,0);
+  }
+  assert.deepEqual(view.images,[]);
+  assert.deepEqual(view.appearances,['original','custom','big-eye','custom','original','custom']);
+});
+
+test('custom without a saved image opens the picker without changing the previous appearance',async t=>{
+  const view=wardrobe(t,{image:null,appearanceId:'big-eye',appearanceUnlocked:true});view.open('appearance');
+  await view.node('appearance-option-custom').fire('click');assert.equal(view.node('appearance-file').clickCount,1);
+  view.node('appearance-file').files=[];await view.node('appearance-file').fire('change');
+  assert.equal(view.state().appearanceId,'big-eye');assert.equal(view.state().image,null);
+  assert.deepEqual(view.images,[]);assert.deepEqual(view.appearances,[]);
+});
+
+test('image storage loading waits before a picker but never blocks other appearances or a known saved image',t=>{
+  const view=wardrobe(t,{image:null,imageLoading:true,appearanceId:'custom',appearanceUnlocked:true});view.open('appearance');
+  const custom=view.node('appearance-option-custom'),file=view.node('appearance-file');
+  assert.equal(custom.getAttribute('aria-busy'),'true');assert.equal(custom.getAttribute('aria-disabled'),'true');
+  assert.match(custom.getAttribute('aria-label'),/图片读取中/);
+  custom.fire('click');assert.equal(file.clickCount||0,0);assert.deepEqual(view.appearances,[]);
+  for(const id of ['original','big-eye']){
+    const button=view.node(`appearance-option-${id}`);
+    assert.equal(button.getAttribute('aria-disabled'),'false');button.fire('click');
+    assert.equal(view.state().appearanceId,id);
+  }
+  view.setState({...view.state(),image:'data:image/png;base64,b2xk'});
+  assert.equal(custom.getAttribute('aria-busy'),'false');assert.equal(custom.getAttribute('aria-disabled'),'false');
+  custom.fire('click');assert.equal(view.state().appearanceId,'custom');assert.equal(file.clickCount||0,0);
+  custom.fire('click');assert.equal(file.clickCount,1,'a known equipped image can be replaced even while its initial decode is finishing');
+  view.setState({...view.state(),image:null,imageLoading:false,appearanceId:'original'});
+  custom.fire('click');assert.equal(file.clickCount,2,'confirmed absence opens the picker normally');
+  assert.equal(view.state().appearanceId,'original');assert.deepEqual(view.images,[]);
 });
 
 test('temporary crop surface preserves the 768px edit through a failed save and releases on cancel or success',async t=>{
   let resolveSave,rejectSave,finishDecode;
-  const view=wardrobe(t,normalizeSkins(null),()=>new Promise((resolve,reject)=>{resolveSave=resolve;rejectSave=reject;}));
+  const saved={image:'data:image/png;base64,b2xk',appearanceId:'custom'};
+  const view=wardrobe(t,saved,()=>new Promise((resolve,reject)=>{resolveSave=resolve;rejectSave=reject;}));
   const originalImage=Object.getOwnPropertyDescriptor(globalThis,'Image');
   Object.defineProperty(globalThis,'Image',{configurable:true,value:class{
     naturalWidth=1200;naturalHeight=800;
@@ -143,9 +169,14 @@ test('temporary crop surface preserves the 768px edit through a failed save and 
 
   const abandoned=select();view.ui.cancelInteraction();finishDecode();await abandoned;
   assert.deepEqual(size(),[1,1]);assert.equal(view.ui.isCropping(),false);assert.equal(draws.length,0);
+  assert.deepEqual(view.state(),saved);assert.deepEqual(view.images,[]);
   const open=async()=>{const decoding=select();assert.deepEqual(size(),[1,1]);finishDecode();await decoding;
     assert.equal(view.ui.isCropping(),true);assert.deepEqual(draws.at(-1),[200,0,800,800,0,0,768,768]);};
   await open();await cancel.fire('click');assert.deepEqual(size(),[1,1]);assert.equal(document.activeElement,custom);
+  assert.deepEqual(view.state(),saved);assert.deepEqual(view.images,[]);
+  const original={image:null,appearanceId:'original'};view.setState(original);
+  await open();await cancel.fire('click');assert.deepEqual(view.state(),original);assert.deepEqual(view.images,[]);
+  view.setState(saved);
   await open();const zoom=view.node('crop-zoom');zoom.value='2';await zoom.fire('input');
   assert.deepEqual(draws.at(-1),[400,200,400,400,0,0,768,768]);
 
@@ -153,36 +184,24 @@ test('temporary crop surface preserves the 768px edit through a failed save and 
   assert.deepEqual(size(),[768,768]);rejectSave(new Error('storage full'));await failed;
   assert.equal(view.ui.isCropping(),true);assert.equal(apply.disabled,false);assert.equal(cancel.disabled,false);
   assert.equal(view.errors.at(-1),'storage full');assert.deepEqual(size(),[768,768]);assert.equal(zoom.value,'2');
+  assert.deepEqual(view.state(),saved);
   const retry=apply.fire('click');resolveSave();await retry;
   assert.deepEqual(view.images,['data:image/png;base64,test','data:image/png;base64,test']);
+  assert.equal(view.state().image,'data:image/png;base64,test');assert.equal(view.state().appearanceId,'custom');
   assert.deepEqual(size(),[1,1]);assert.equal(view.ui.isCropping(),false);assert.equal(document.activeElement,custom);
-  await open();view.ui.cancelInteraction();assert.deepEqual(size(),[1,1]);assert.equal(revocations.mock.callCount(),4);
+  await open();view.ui.cancelInteraction();assert.deepEqual(size(),[1,1]);assert.equal(revocations.mock.callCount(),5);
 });
 
-test('card models keep exact campaign thresholds and persistent appearance ownership',()=>{
-  const shapes=wardrobeShapeCards(normalizeSkins(null));assert.deepEqual(shapes.slice(1).map(x=>x.level),[10,20,30,40,50,60,70,80,90,100]);
-  assert.deepEqual(shapes[0],{sides:0,label:'圆形',level:null,unlocked:true,selected:true});
-  assert.ok(shapes.slice(1).every(x=>!x.unlocked&&!x.selected));
+test('appearance card models preserve earned ownership independently of the current score',()=>{
   const cards=wardrobeAppearanceCards({appearanceId:'big-eye',appearanceUnlocked:true,best:0});
-  assert.equal(cards.find(x=>x.id==='big-eye').unlocked,true);assert.equal(cards.find(x=>x.id==='big-eye').selected,true);
-});
-
-test('circle and polygon cards form one selection and retain the previous polygon when returning to circle',t=>{
-  const view=wardrobe(t,normalizeSkins({enabled:true,sides:8},30));view.open('shape');
-  const circle=view.node('shape-option-0'),polygon=view.node('shape-option-8');
-  assert.match(circle.innerHTML,/>圆形</);assert.match(circle.innerHTML,/class="shape-outline"/);
-  assert.equal(circle.querySelector('.wardrobe-card-lock').hidden,true);
-  assert.equal(circle.getAttribute('aria-pressed'),'false');assert.equal(polygon.getAttribute('aria-pressed'),'true');
-  circle.fire('click');assert.equal(view.state().enabled,false);assert.equal(view.state().sides,8);
-  assert.equal(circle.getAttribute('aria-pressed'),'true');assert.equal(polygon.getAttribute('aria-pressed'),'false');
-  polygon.fire('click');assert.equal(view.state().enabled,true);assert.equal(view.state().sides,8);
-  assert.equal(circle.getAttribute('aria-pressed'),'false');assert.equal(polygon.getAttribute('aria-pressed'),'true');
+  assert.equal(cards.find(card=>card.id==='big-eye').unlocked,true);
+  assert.equal(cards.find(card=>card.id==='big-eye').selected,true);
 });
 
 test('preview separator fades with every subpage and back while preserving the ball layout',t=>{
-  const view=wardrobe(t,normalizeSkins(null)),line=view.node('wardrobe-preview-line'),ball=view.node('wardrobe-ball');
+  const view=wardrobe(t,{}),line=view.node('wardrobe-preview-line'),ball=view.node('wardrobe-ball');
   assert.equal(line.style.opacity,'0');
-  for(const page of ['shape','appearance','companion']){
+  for(const page of ['appearance','companion']){
     view.node(`${page}-select`).fire('click');view.ui.update(.06);
     assert.equal(Number(line.style.opacity),.15625);
     view.ui.update(.06);assert.equal(Number(line.style.opacity),.5);
@@ -201,24 +220,25 @@ test('preview separator fades with every subpage and back while preserving the b
 });
 
 
-test('companion gallery exposes all nine score milestones, protects locked choices and supports click-to-remove',t=>{
-  const initial={...normalizeSkins(null),best:15999,companionId:null,companionUnlocked:0,playerColor:'#526a9b'};
+test('companion gallery exposes stage milestones, protects locked choices and supports click-to-remove',t=>{
+  const initial={highestStage:9,best:999999,companionId:null,companionUnlocked:0,playerColor:'#526a9b'};
   const view=wardrobe(t,initial);view.open('companion');
   assert.equal(view.node('companion-grid').children.length,9);
   assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'companion');
   const sun=view.node('companion-option-sun-1'),moon=view.node('companion-option-moon-1');
   assert.equal(sun.getAttribute('aria-disabled'),'false');assert.equal(moon.getAttribute('aria-disabled'),'true');
+  assert.match(moon.innerHTML,/到达第 10 阶段/);assert.match(moon.getAttribute('aria-label'),/到达第 10 阶段解锁/);
   assert.equal(sun.querySelector('.wardrobe-card-lock').hidden,true);assert.equal(moon.querySelector('.wardrobe-card-lock').hidden,false);
-  moon.fire('click');assert.equal(view.state().companionId,null);assert.equal(view.errors.at(-1),'达16000分解锁');
+  moon.fire('click');assert.equal(view.state().companionId,null);assert.equal(view.errors.at(-1),'到达第 10 阶段解锁');
   sun.fire('click');assert.equal(view.state().companionId,'sun-1');assert.equal(sun.getAttribute('aria-pressed'),'true');
   sun.fire('click');assert.equal(view.state().companionId,null);assert.equal(sun.getAttribute('aria-pressed'),'false');
-  view.setState({...view.state(),best:16000});moon.fire('click');
+  view.setState({...view.state(),highestStage:10});moon.fire('click');
   assert.equal(view.state().companionId,'moon-1');assert.equal(moon.getAttribute('aria-pressed'),'true');
   assert.equal(sun.getAttribute('aria-pressed'),'false');assert.equal(moon.querySelector('.wardrobe-card-lock').hidden,true);
 });
 
 test('companion navigation preserves preview motion nodes and selection waits until the content transition completes',t=>{
-  const view=wardrobe(t,{...normalizeSkins(null),companionId:null,companionUnlocked:9,best:0});
+  const view=wardrobe(t,{companionId:null,companionUnlocked:9,best:0});
   const preview=view.node('wardrobe-ball'),orbit=view.node('ui-companions');
   view.node('companion-select').fire('click');view.node('companion-option-star-3').fire('click');
   assert.equal(view.state().companionId,null);view.ui.update(.24);
@@ -233,7 +253,7 @@ test('companion navigation preserves preview motion nodes and selection waits un
 });
 
 test('companion card preview colors refresh with the player and keep static trails without replacing selection controls',t=>{
-  const view=wardrobe(t,{...normalizeSkins(null),companionId:'sun-1',companionUnlocked:1,playerColor:'#526a9b'});
+  const view=wardrobe(t,{companionId:'sun-1',companionUnlocked:1,playerColor:'#526a9b'});
   const button=view.node('companion-option-sun-1'),preview=button.querySelector('.companion-preview'),first=preview.innerHTML;
   assert.match(first,/<svg/);assert.match(first,/<path/);
   view.setState({...view.state(),playerColor:'#b8db8a'});
@@ -241,13 +261,13 @@ test('companion card preview colors refresh with the player and keep static trai
   assert.equal(button.getAttribute('aria-pressed'),'true');
 });
 
-test('companion cards follow sun moon star tiers and preserve earned ownership independently of current score',()=>{
+test('companion cards follow stage milestones and preserve previously earned ownership',()=>{
   const cards=wardrobeCompanionCards({best:0,companionUnlocked:9,companionId:'star-3'});
   assert.deepEqual(cards.map(card=>card.label),['日·一','月·一','星·一','日·二','月·二','星·二','日·三','月·三','星·三']);
-  assert.deepEqual(cards.map(card=>card.score),[8000,16000,24000,32000,40000,48000,56000,64000,72000]);
-  assert.ok(cards.every(card=>card.unlocked));assert.equal(cards.filter(card=>card.selected).length,1);
+  assert.deepEqual(cards.map(card=>card.stage),[5,10,15,20,25,30,35,40,45]);
+  assert.ok(cards.every(card=>card.unlocked&&card.score===undefined));assert.equal(cards.filter(card=>card.selected).length,1);
   assert.equal(cards.at(-1).selected,true);
-  assert.equal(wardrobeCompanionCards({best:7999}).some(card=>card.unlocked),false);
+  assert.equal(wardrobeCompanionCards({highestStage:4,best:999999}).some(card=>card.unlocked),false);
 });
 
 

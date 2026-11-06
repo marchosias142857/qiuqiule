@@ -2,7 +2,7 @@ import {skinContour} from './skins.js';
 import {paintPhoto,projectSkinContour,contourPath} from './skin-render.js';
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
-const SHAPES=[0,6,7,8,9,10,11,12,13,14,15];
+const SHAPES=[0];
 const VERTEX=`
 attribute vec2 a_point;
 attribute vec2 a_uv;
@@ -81,7 +81,8 @@ export function photoFrame(mesh,pose,scale=1,maxPixels=1024){
   return {halfUnit,size,pixels,left:(pose.x||0)-size/2,top:(pose.y||0)-size/2};
 }
 
-/** Caches image pixels and all eleven skin meshes once. Continuous deformation
+/** Caches image pixels and the circle mesh once. Other contours use one reusable
+ * on-demand buffer. Continuous deformation
  * is a handful of uniforms and one GPU draw, never an atlas of all drag poses. */
 export class PhotoRenderer {
   constructor(canvas,{maxPixels=1024,prefer2d=false}={}){

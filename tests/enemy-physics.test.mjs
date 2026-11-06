@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, length} from '../dist/physics.js';
-import {CampaignWorld} from '../dist/campaign.js';
 import {ENEMY_TYPES, enemyTypeLimit} from '../dist/enemies.js';
 
 const near = (a, b, tolerance = 1e-7) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
@@ -34,8 +33,6 @@ test('variant profiles apply independent health, geometry, mass and movement whi
     assert.equal(b.enemyType, type); assert.equal(b.shield, definition.shield);
   }
   const w = world(); assert.equal(w.spawnEnemy().enemyType, 'normal');
-  const campaign = new CampaignWorld(900, 700, 100, () => .5); campaign.spawnEnemy(null, 'split');
-  assert.ok(campaign.enemies.every(b => !b.enemyType && !b.shield)); assert.equal(campaign.fragmentQueue.length, 0);
 });
 
 test('rings return almost all player speed while their half-mass body follows the elastic solve', () => {

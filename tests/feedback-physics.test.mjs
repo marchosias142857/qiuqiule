@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, length, BOSS_TIMING} from '../dist/physics.js';
-import {LegacyCampaignWorld as CampaignWorld} from '../dist/campaign.js';
 
 const near = (a, b, epsilon = 1e-8) => assert.ok(Math.abs(a - b) < epsilon, `${a} != ${b}`);
 function run(strength = .6, reducedMotion = false) {
@@ -94,19 +93,13 @@ test('real contacts halve only light-hit squash without changing impulses and re
   near(lethal.w.events.find(e => e.type === 'kill').freezeDuration, .048);
 });
 
-test('ordinary damage boundaries do not change old campaign flashes or hold timings', () => {
+test('ordinary damage boundaries select the exact flash and local hold tier', () => {
   for (const [damage, tier, hold] of [[99, 'light', 0], [100, 'medium', 0], [299, 'medium', 0], [300, 'heavy', .025]]) {
     const w = run(), b = enemy(w, 300, 300, {hp: 1000, maxHp: 1000});
     const feedback = w.damage(b, damage);
     assert.equal(feedback.hitTier, tier); near(feedback.freezeDuration, hold);
     near(b.hitAlpha, tier === 'light' ? 0 : damage / 1000);
   }
-  const campaign = new CampaignWorld(900, 700, 1, () => .5);
-  campaign.setFeedbackOptions({strength: .6});
-  const b = campaign.enemies[0]; Object.assign(b, {hp: 1000, maxHp: 1000, born: 1, solid: true});
-  const feedback = campaign.damage(b, 1);
-  near(b.hitAlpha, .15 + .35 / 1000);
-  assert.notEqual(feedback.hitTier, 'light'); near(feedback.freezeDuration, 0);
 });
 
 test('v7.2 leaves default Boss hit and stun holds at sixty and ninety milliseconds', () => {
@@ -209,19 +202,6 @@ test('reduced motion caps each hold at 50 ms and switching feedback off releases
   const x = w.player.x;
   w.step(.01);
   assert.notEqual(w.player.x, x);
-});
-
-test('campaign shares feedback metadata and preserves its finite kills and upgrade rules', () => {
-  const w = new CampaignWorld(900, 700, 1, () => .5);
-  w.setFeedbackOptions({strength: .6}); w.spawnTimer = 999; w.floorTimer = Infinity; w.introTimer = Infinity;
-  const b = w.enemies[0]; Object.assign(b, {born: 1, solid: true, x: 300, y: 300});
-  strike(w, b);
-  const kill = w.events.find(e => e.type === 'kill');
-  assert.equal(kill.value, 0); assert.equal(kill.bodyId, b.id);
-  near(kill.freezeDuration, .048);
-  assert.equal(w.kills, 1); assert.equal(w.upgrades, 0); assert.equal(w.score, 0);
-  w.damage(b, 1e6);
-  assert.equal(w.kills, 1);
 });
 
 test('boss contact holds freeze player motion and inflation while the world clock keeps running', () => {

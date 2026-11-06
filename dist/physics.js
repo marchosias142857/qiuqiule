@@ -1,5 +1,5 @@
 import {ENEMY_TYPES, enemyTypeLimit, enemyProfileFor, planEnemyCluster} from './enemies.js';
-import {UPGRADES, UPGRADE_DEFINITIONS, canAcquireUpgrade, rollUpgrades, eligibleUpgrades} from './upgrades.js';
+import {UPGRADES, UPGRADE_DEFINITIONS, canAcquireUpgrade, rollUpgrades, eligibleUpgrades, upgradeStat, upgradeOffer} from './upgrades.js';
 import {hitFeedbackTier} from './feedback.js';
 
 export const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
@@ -16,8 +16,8 @@ const LEGACY_REWARD_TIMING = Object.freeze({move: 1.45, transition: 1.85, bornDe
 const smooth = value => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
 const smoother = value => { const t = clamp(value, 0, 1); return t * t * t * (10 + t * (-15 + 6 * t)); };
 
-// Endless upgrades have fixed per-layer values. Campaign's automatic rewards
-// remain in CampaignWorld and do not pass through this upgrade pool.
+// The original layers keep their fixed bonuses. Further endless layers use
+// upgradeStat; campaign rewards are applied separately in CampaignWorld.
 export function regularBuffBonus(id) {
   return id === 'density' ? .35 : id === 'energy' ? .30 : 0;
 }
@@ -72,6 +72,8 @@ export class World {
     this.stageKills = 0;
     this.stageKillCarry = 0;
     this.shotKills = 0;
+    this.shotRelease = null;
+    this.shotRecoveryUsed = false;
     this.shotBanked = false;
     this.shotHistory = [];
     this.auxiliaries = [];
@@ -141,6 +143,9 @@ export class World {
     for (const body of [this.player, ...this.auxiliaries, ...this.enemies, this.boss].filter(Boolean)) {
       if (!this.feedbackOptions.strength) body.feedbackFreeze = 0;
       else if (reducedMotion) body.feedbackFreeze = Math.min(body.feedbackFreeze || 0, .05);
+      if ((!this.feedbackOptions.strength || reducedMotion) && body.shockwaveSquashTime > 0) {
+        body.shockwaveSquashTime = 0; body.squash = 0;
+      }
     }
     return this;
   }
@@ -165,6 +170,10 @@ export class World {
   // Consume only the held portion of a step. The remainder integrates normally,
   // preventing frame-rate rounding from lengthening the 250 ms shot budget.
   feedbackStep(body, dt, timeScale = 1) {
+    if (body.shockwaveSquashTime > 0) {
+      body.shockwaveSquashTime = Math.max(0, body.shockwaveSquashTime - dt / timeScale);
+      body.squash = .15 * body.shockwaveSquashTime / .12;
+    }
     const held = Math.min(dt / timeScale, body.feedbackFreeze || 0);
     body.feedbackFreeze = Math.max(0, (body.feedbackFreeze || 0) - held);
     if (!body.feedbackFreeze) {
@@ -198,9 +207,22 @@ export class World {
     if (feedback.hitTier === 'light') body.hitAlpha = 0;
     const seconds = lethal ? Math.min(.14, .08 + .02 * (this.feedbackKills - 1))
       : damage >= body.maxHp * .3 ? .025 : 0;
-    feedback.freezeDuration = this.freezeFeedback(body, seconds, {scaled: lethal, actor: contact.attacker || this.player});
+    feedback.freezeDuration = contact.source === 'shockwave' ? this.shockwaveFeedback(body, contact.attacker || this.player)
+      : this.freezeFeedback(body, seconds, {scaled: lethal, actor: contact.attacker || this.player});
     if (lethal) feedback.bodySnapshot = {...body};
     return feedback;
+  }
+
+  shockwaveFeedback(body, actor) {
+    if (!this.feedbackOptions.strength || this.feedbackOptions.reducedMotion) return 0;
+    body.squash = .15; body.angle = Math.atan2(body.y - actor.y, body.x - actor.x); body.shockwaveSquashTime = .12;
+    // Each target shares one 35 ms actor hold; later hits in this same wave
+    // cannot extend it or invoke the stronger ordinary kill/Boss hold.
+    return this.freezeFeedback(body, .035, {scaled: false, actor});
+  }
+
+  advanceSquash(body, dt) {
+    if (!(body.shockwaveSquashTime > 0)) body.squash *= Math.exp(-dt * 13);
   }
   get arenaBounds() {
     const side = Math.min(this.width, this.height) - this.inset * 2;
@@ -236,19 +258,27 @@ export class World {
   set limit(value) { this._limitOverride = value; }
   get killTarget() { return Math.ceil((14 + 4 * (this.stage - 1)) * this.gamblerTargetMultiplier); }
   get floorCount() { return Math.ceil(Math.min(14, 6 + .5 * (this.stage - 1))); }
-  get waveSize() { return Math.min(8, 4 + Math.floor((this.stage - 1) / 3)) + (this.mode !== 'campaign' && this.buffs.frenzy ? 2 : 0); }
+  get waveSize() {
+    const stacks = this.mode !== 'campaign' ? this.buffs.frenzy || 0 : 0, effect = UPGRADES.frenzy.effect;
+    return Math.min(8, 4 + Math.floor((this.stage - 1) / 3))
+      + (stacks ? effect.waveSizeBonus + effect.extraWaveSizeBonus * Math.max(0, stacks - 1) : 0);
+  }
   get comboCap() { return this.mode !== 'campaign' && this.buffs.frenzy ? 12 : 8; }
   get rewardTiming() { return this.mode === 'campaign' ? LEGACY_REWARD_TIMING : REWARD_TIMING; }
   get rewardMoveProgress() { return (this.mode === 'campaign' ? ease : smoother)(this.phaseTime / this.rewardTiming.move); }
   get rewardTransitionEnd() { return Math.max(this.rewardTiming.transition, this.rollFrom?.end || 0); }
-  get launchCap() { return this.unit * (60 + (this.mode !== 'campaign' ? 8 * (this.buffs.overspeed || 0) : 0)); }
-  scoreValue(base) { return Math.round(base * (this.mode !== 'campaign' ? 1.5 ** (this.buffs.risk || 0) : 1)); }
+  get launchCap() { return this.unit * (60 + (this.mode !== 'campaign' ? upgradeStat('overspeed', this.buffs.overspeed || 0) : 0)); }
+  scoreValue(base) { return Math.round(base); }
   get liveCount() { return this.enemies.filter(body => body.hp > 0).length; }
   get resultMisses() { return this.shotHistory.filter(shot => this.feedbackTime - shot.time <= 20 && shot.hits === 0).length; }
   get maxPhysicsSpeed() { return (this.launchCap + this.readySpeed) * (this.mode !== 'campaign' && this.buffs.boomerang ? UPGRADES.boomerang.effect.speedMultiplier : 1); }
   get combatActive() { return ['battle', 'boss-entry', 'boss'].includes(this.phase); }
   get continuousControl() { return this.mode !== 'campaign' && this.combatActive; }
-  get waveInterval() { return this.waveSize * this.spawnInterval * (this.buffs.frenzy ? .7 : 1) + (this.mode !== 'campaign' && [3, 4].includes(this.stage % 5) ? 2 : 0); }
+  get waveInterval() {
+    const stacks = this.mode !== 'campaign' ? this.buffs.frenzy || 0 : 0, effect = UPGRADES.frenzy.effect;
+    const rest = stacks ? effect.restMultiplier * effect.extraRestMultiplier ** Math.max(0, stacks - 1) : 1;
+    return this.waveSize * this.spawnInterval * rest + (this.mode !== 'campaign' && [3, 4].includes(this.stage % 5) ? 2 : 0);
+  }
   get ready() { return this.continuousControl || (this.phase === 'battle' || this.phase === 'choose' || this.phase === 'boss') && (this.pullStartSpeed !== null || length(this.player) < this.readySpeed); }
   beginPull() {
     if (!this.ready || this.pullStartSpeed !== null) return false;
@@ -262,6 +292,12 @@ export class World {
   // Campaign rules retain their established mass/speed trade-off.
   get launchEnergyScale() { return Math.sqrt(this.energy / (this.mode === 'campaign' ? this.density : 1)); }
   get growthDamageScale() { return this.mode === 'campaign' ? 1 : 1 + UPGRADES.growth.effect.damageBonus * Math.min(2, this.buffs.growth || 0); }
+  get frenzyDamageScale() {
+    if (this.mode === 'campaign') return 1;
+    const effect = UPGRADES.frenzy.effect;
+    return 1 + (this.buffs.frenzy || 0) * Math.min(effect.comboDamageCap,
+      effect.comboDamagePerKill * Math.max(0, this.shotKills - effect.comboDamageThreshold));
+  }
   playerFriction(dt, body = this.player) {
     const speed = length(body), threshold = this.unit * 8;
     // Split a threshold crossing so the two drag rates do not depend on the
@@ -348,8 +384,7 @@ export class World {
     return {
       radiusScale: .62 + this.random() * .36,
       density: .65 + this.stage * .06 + this.time * .0004,
-      hp: (19 * (this.mode === 'campaign' ? 1.16 : 1.20) ** (this.stage - 1) + Math.floor(this.time / 45) * 2)
-        * (this.mode !== 'campaign' ? UPGRADES.risk.effect.enemyHpMultiplier ** (this.buffs.risk || 0) : 1),
+      hp: 19 * (this.mode === 'campaign' ? 1.16 : 1.20) ** (this.stage - 1) + Math.floor(this.time / 45) * 2,
       value: 10,
     };
   }
@@ -376,7 +411,7 @@ export class World {
       this.clampBodyToArena(body);
     }
     this.layoutChoices();
-    if (this.phase === 'choose' && this.choices.length === 5) {
+    if (this.phase === 'choose' && this.choices.length > 3) {
       Object.assign(this.player, {x: width / 2, y: this.choicePlayerY, vx: 0, vy: 0, pendingVx: 0, pendingVy: 0});
     }
     if (this.clearing) {
@@ -559,8 +594,13 @@ export class World {
     this.spawnTimer -= spawnDt;
     if (this.wave) this.wave.timer -= dt;
     if (this.spawnTimer <= 1e-10) {
-      this.wave = this.makePlannedCluster(this.waveSize); if (this.wave) this.wave.timer = this.spawnTimer;
-      this.spawnTimer += this.waveInterval;
+      // Stacked frenzy can bring the next wave due before this one finishes.
+      // Finish every scheduled slot, with no overdue waves saved for a burst.
+      if (this.wave) this.spawnTimer = 0;
+      else {
+        this.wave = this.makePlannedCluster(this.waveSize); if (this.wave) this.wave.timer = this.spawnTimer;
+        this.spawnTimer += this.waveInterval;
+      }
     }
     while (this.wave && this.wave.timer <= 1e-10) {
       // Full capacity consumes this scheduled slot; it does not accumulate an
@@ -666,6 +706,12 @@ export class World {
       : launchSpeed + carriedSpeed;
     this.player.vx = -dx / distance * speed * boost;
     this.player.vy = -dy / distance * speed * boost;
+    if (this.mode !== 'campaign') {
+      // Store the actual release, without its temporary boomerang multiplier.
+      // World units keep the same shot reference when the arena is resized.
+      this.shotRelease = {speedUnits: speed / this.unit, dx: -dx / distance, dy: -dy / distance};
+      this.shotRecoveryUsed = false;
+    }
     this.player.angle = Math.atan2(dy, dx);
     this.player.squash = -.33 * pull;
     const freezeDuration = this.freezeFeedback(this.player, .033, {scaled: false});
@@ -675,6 +721,19 @@ export class World {
   }
 
   clearAuxiliaries() { this.auxiliaries = []; }
+
+  recoverShotSpeed() {
+    if (this.mode === 'campaign' || !this.buffs.penetration || !this.shotRelease || this.shotKills !== 1 || this.shotRecoveryUsed) return;
+    this.shotRecoveryUsed = true;
+    const p = this.player, current = length(p);
+    const boost = p.boomerangTime > 0 ? UPGRADES.boomerang.effect.speedMultiplier : 1;
+    const target = this.shotRelease.speedUnits * this.unit * boost;
+    if (current >= target) return;
+    // Keep the resolved rebound direction; only a stopped ball uses release aim.
+    const dx = current > 1e-10 ? p.vx / current : this.shotRelease.dx;
+    const dy = current > 1e-10 ? p.vy / current : this.shotRelease.dy;
+    p.vx = dx * target; p.vy = dy * target;
+  }
 
   spawnAuxiliaries(contact = {}) {
     this.shotSplitUsed = true;
@@ -727,12 +786,12 @@ export class World {
   fullPullDamage(body) {
     const speed = Math.min(this.launchCap, this.baseSpeed * this.launchEnergyScale);
     const mass = body.isBoss ? this.player.mass : 1 / (1 / this.player.mass + 1 / body.mass);
-    return .5 * mass * (speed / this.unit) ** 2 * .31 * this.growthDamageScale;
+    return .5 * mass * (speed / this.unit) ** 2 * .31 * this.growthDamageScale * this.frenzyDamageScale;
   }
 
-  releaseShockwave(actor = this.player) {
+  releaseShockwave(actor = this.player, wallContact = {}) {
     const p = actor, radius = this.unit * UPGRADES.shockwave.effect.radius, damageRatio = UPGRADES.shockwave.effect.fullPullDamageRatio;
-    this.emit('shockwave', {x: p.x, y: p.y, r: radius, bodyId: p.id, auxiliary: !!p.isAuxiliary, walls: this.shotWallCount});
+    let hits = 0;
     if (['boss', 'boss-entry'].includes(this.phase)) {
       const boss = this.boss;
       if (boss?.solid && Math.hypot(boss.x - p.x, boss.y - p.y) - boss.r <= radius) {
@@ -740,13 +799,18 @@ export class World {
         // carries 75% kinetic energy; during stun its HP damage is exactly 75% of
         // the current full-pull reference (and consumes no bank charge).
         const speed = Math.min(this.launchCap, this.baseSpeed * this.launchEnergyScale);
-        this.damageBoss(speed * Math.sqrt(damageRatio), {source: 'shockwave', attacker: p, damageOverride: Math.max(1, Math.round(this.fullPullDamage(boss) * damageRatio)), preserveBank: true});
+        if (this.damageBoss(speed * Math.sqrt(damageRatio), {source: 'shockwave', attacker: p,
+          damageOverride: Math.max(1, Math.round(this.fullPullDamage(boss) * damageRatio)), preserveBank: true})) hits++;
       }
     }
     for (const body of this.enemies) {
       if (!body.solid || body.hp <= 0 || Math.hypot(body.x - p.x, body.y - p.y) > radius) continue;
-      this.damage(body, Math.max(1, Math.round(this.fullPullDamage(body) * damageRatio)), {source: 'shockwave', attacker: p});
+      const feedback = this.damage(body, Math.max(1, Math.round(this.fullPullDamage(body) * damageRatio)), {source: 'shockwave', attacker: p});
+      if (feedback && (!feedback.shielded || feedback.shieldBroken)) hits++;
     }
+    this.emit('shockwave', {x: p.x, y: p.y, r: radius, bodyId: p.id, auxiliary: !!p.isAuxiliary, walls: this.shotWallCount,
+      hits, contactX: wallContact.contactX ?? p.x, contactY: wallContact.contactY ?? p.y,
+      nx: wallContact.nx ?? 0, ny: wallContact.ny ?? 0});
     if (this.pendingClearing) this.beginClearing(); else this.flushFragments();
   }
 
@@ -764,10 +828,13 @@ export class World {
         if (!(b.boomerangTime > 0)) { b.vx *= UPGRADES.boomerang.effect.speedMultiplier; b.vy *= UPGRADES.boomerang.effect.speedMultiplier; }
         b.boomerangTime = UPGRADES.boomerang.effect.duration;
       }
-      if (this.buffs.shockwave && this.shotWallCount % UPGRADES.shockwave.effect.everyWalls === 0) this.releaseShockwave(b);
+      if (this.buffs.shockwave && this.shotWallCount % UPGRADES.shockwave.effect.everyWalls === 0) {
+        const normalLength = Math.hypot(nx, ny);
+        this.releaseShockwave(b, {contactX: b.x + nx * b.r, contactY: b.y + ny * b.r, nx: nx / normalLength, ny: ny / normalLength});
+      }
     }
     if (speed > this.unit * .8) {
-      b.squash = Math.min(.32, speed / this.baseSpeed * .4);
+      b.shockwaveSquashTime = 0; b.squash = Math.min(.32, speed / this.baseSpeed * .4);
       b.angle = Math.atan2(ny, nx);
       if (b.isPlayer) {
         if (this.buffs.bank) { if (b.isAuxiliary) b.bank = Math.min(2, (b.bank || 0) + 1); else this.bank = Math.min(2, this.bank + 1); }
@@ -805,6 +872,7 @@ export class World {
     const impulse = (1 + restitution) * closing / totalInv;
     a.vx -= impulse * nx * invA; a.vy -= impulse * ny * invA;
     b.vx += impulse * nx * invB; b.vy += impulse * ny * invB;
+    a.shockwaveSquashTime = b.shockwaveSquashTime = 0;
     a.squash = b.squash = Math.min(.3, closing / this.baseSpeed * .42);
     a.angle = b.angle = Math.atan2(ny, nx);
     if (a.isPlayer && this.continuousControl && oldSpeed > 0) {
@@ -825,28 +893,25 @@ export class World {
       const referenceClosing = a.isAuxiliary ? closing / .6 : closing;
       const impact = .5 * reducedMass * (referenceClosing / this.unit) ** 2;
       const bank = a.isAuxiliary ? a.bank || 0 : this.bank;
-      const damage = Math.max(1, Math.round(impact * .31 * this.growthDamageScale * (1 + bank * .6) * (a.isAuxiliary ? .6 : 1)));
+      const damage = Math.max(1, Math.round(impact * .31 * this.growthDamageScale * this.frenzyDamageScale * (1 + bank * .6) * (a.isAuxiliary ? .6 : 1)));
       if (a.isAuxiliary) a.bank = 0; else this.bank = 0;
       const firstKill = this.shotKills === 0;
       const contact = {attacker: a, nx, ny, contactX: b.x - nx * br, contactY: b.y - ny * br,
         impactVx: oldX, impactVy: oldY, impactSpeed: oldSpeed};
-      const feedback = this.damage(b, damage, contact);
+      const feedback = this.damage(b, damage, contact, {deferShotRecovery: true});
       if (feedback?.hitTier === 'light') { a.squash *= .5; b.squash *= .5; }
       if (this.continuousControl && feedback && !feedback.shielded && b.hp <= 0 && oldSpeed > 0) {
         // Classify the actual direct hit, after shields and damage. Collateral
         // pulse kills below must not grant a lethal rebound to a surviving hit.
         // Rubber adds four points per lethal layer; retention cannot create
-        // extra speed. Pierce/rings and first-kill penetration remain stronger
-        // whenever their own floor exceeds this one.
+        // extra speed. Pierce/rings remain stronger whenever their own floor
+        // exceeds this one; first-kill recovery resolves afterwards.
         const retention = Math.min(1, .85 + UPGRADES.rubber.effect.lethalRetentionBonus * Math.min(4, this.buffs.rubber || 0));
         const solved = length(a), retained = Math.max(solved, oldSpeed * retention);
         a.vx = (solved > 1e-10 ? a.vx / solved : oldX / oldSpeed) * retained;
         a.vy = (solved > 1e-10 ? a.vy / solved : oldY / oldSpeed) * retained;
       }
-      if (this.mode !== 'campaign' && this.buffs.penetration && firstKill && b.hp <= 0 && oldSpeed > 0) {
-        const solved = length(a), direction = solved > 1e-8 ? {x: a.vx / solved, y: a.vy / solved} : {x: oldX / oldSpeed, y: oldY / oldSpeed};
-        a.vx = direction.x * Math.max(oldSpeed, solved); a.vy = direction.y * Math.max(oldSpeed, solved);
-      }
+      if (firstKill && feedback && !feedback.shielded && b.hp <= 0) this.recoverShotSpeed();
       if (!feedback?.shielded) this.emit('hit', {x: contact.contactX, y: contact.contactY, power: closing / this.baseSpeed,
         ...this.impactFeedback(b, damage, contact), ...feedback, lethal: b.hp <= 0});
       if (this.combatActive && this.buffs.pulse && closing > this.unit * 9 && this.pulseCooldown <= 0) {
@@ -872,11 +937,12 @@ export class World {
     this.normalizeWalker(a); this.normalizeWalker(b);
   }
 
-  damage(b, damage, contact = {}) {
+  damage(b, damage, contact = {}, {deferShotRecovery = false} = {}) {
     if (!this.combatActive || b.hp <= 0 || damage <= 0 || !Number.isFinite(damage)) return;
     if (this.mode !== 'campaign' && (b.shield || ['pulse', 'shockwave'].includes(contact.source) && b.shieldBrokenStep === this.stepSerial)) {
-      const feedback = {...this.impactFeedback(b, 0, contact), shielded: true, freezeDuration: 0};
+      const feedback = {...this.impactFeedback(b, 0, contact), shielded: true, shieldBroken: !!b.shield, freezeDuration: 0};
       if (b.shield) {
+        if (contact.source === 'shockwave') feedback.freezeDuration = this.shockwaveFeedback(b, contact.attacker || this.player);
         b.shield = false; b.shieldBrokenStep = this.stepSerial;
         this.emit('shieldBreak', {x: b.x, y: b.y, r: b.r, ...feedback, shield: false, blockedDamage: damage});
         if (this.activeShot && this.feedbackTime - this.activeShot.time <= 20) this.activeShot.hits++;
@@ -900,6 +966,7 @@ export class World {
       this.enemyDeath(b);
       this.startMagnetPull();
       if (!this.pendingClearing && this.buffs.split && !this.shotSplitUsed) this.spawnAuxiliaries(contact);
+      if (combo === 1 && !deferShotRecovery) this.recoverShotSpeed();
     }
     return feedback;
   }
@@ -926,7 +993,7 @@ export class World {
       const bodyDt = this.feedbackStep(b, dt, timeScale);
       // The sweep holds positions still, but contact deformation and the hit
       // flash relax normally once each body's local hit-stop has finished.
-      b.squash *= Math.exp(-13 * bodyDt);
+      this.advanceSquash(b, bodyDt);
       b.hit = Math.max(0, b.hit - 5 * bodyDt);
     }
     const ordered = this.enemies.slice().sort((a, b) => Math.hypot(a.x - wave.x, a.y - wave.y) - Math.hypot(b.x - wave.x, b.y - wave.y));
@@ -983,7 +1050,9 @@ export class World {
     if (!['battle', 'clearing'].includes(this.phase) && !(bypassBoss && this.phase === 'boss-celebrate')) return;
     this.upgradeContext ||= this.captureUpgradeContext();
     if (!bypassBoss && this.mode !== 'campaign' && this.stage % 5 === 0) { this.beginBoss(); return; }
-    this.rewardSelectionsRemaining = bypassBoss && this.phase === 'boss-celebrate' && this.boss?.defeated ? 2 : 1;
+    const bossReward = bypassBoss && this.phase === 'boss-celebrate' && this.boss?.defeated;
+    this.rewardSelectionsRemaining = (bossReward ? 2 : 1) + (this.gamblerRewardPending ? UPGRADES.gambler.effect.extraRewardRounds : 0);
+    this.gamblerRewardPending = false;
     this.upgradeRoundTotal = this.rewardSelectionsRemaining; this.upgradeRound = 0;
     this.startingUpgrades = false;
     this.offerUpgradeRound();
@@ -1015,12 +1084,10 @@ export class World {
       const pool = eligibleUpgrades({counts: this.buffs, pool: 'regular'}); offers = [];
       while (offers.length < 3 && pool.length) offers.push(pool.splice(Math.min(pool.length - 1, Math.floor(this.random() * pool.length)), 1)[0]);
     } else {
-      const count = this.upgradeRound === 1 && this.gamblerRewardPending ? 5 : 3;
-      if (this.upgradeRound === 1) this.gamblerRewardPending = false;
-      const counts = this.nextGambler ? {...this.buffs, gambler: UPGRADES.gambler.maxStacks} : this.buffs;
-      offers = rollUpgrades({counts, context: this.upgradeContext, random: this.random, count});
+      offers = rollUpgrades({counts: this.buffs, context: this.upgradeContext, random: this.random, count: 3,
+        exclude: this.nextGambler ? ['gambler'] : []});
     }
-    this.choices = offers.map(buff => ({...buff, x: 0, y: 0, r: this.unit * 2, born: 0}));
+    this.choices = offers.map(buff => ({...upgradeOffer(buff, this.buffs), x: 0, y: 0, r: this.unit * 2, born: 0}));
     this.layoutChoices();
     if (!this.choices.length) { this.phase = 'reward'; this.phaseTime = 0; this.rewardArenaFrom = this.arenaBlend; this.emit('upgradeSkipped'); }
     this.emit('upgrade', {round: this.upgradeRound, rounds: this.upgradeRoundTotal, starting: this.startingUpgrades});
@@ -1119,6 +1186,7 @@ export class World {
     const impactVx = p.vx, impactVy = p.vy;
     p.vx += (1 + (p.isPlayer ? .985 : .9)) * closing * nx;
     p.vy += (1 + (p.isPlayer ? .985 : .9)) * closing * ny;
+    p.shockwaveSquashTime = b.shockwaveSquashTime = 0;
     p.squash = b.squash = Math.min(.3, closing / this.baseSpeed * .42); p.angle = b.angle = Math.atan2(ny, nx);
     if (!p.isPlayer || b.contacts.has(p.id) || closing <= this.unit * 2.4) return;
     b.contacts.add(p.id);
@@ -1139,18 +1207,19 @@ export class World {
       const mass = actor.isAuxiliary ? actor.sourceMass : actor.mass;
       const referenceClosing = actor.isAuxiliary ? closing / .6 : closing;
       const impact = .5 * mass * (referenceClosing / this.unit) ** 2;
-      damage = contact.damageOverride ?? Math.max(1, Math.round(impact * .31 * this.growthDamageScale * (1 + bank * .6) * (actor.isAuxiliary ? .6 : 1) * wallBoost));
+      damage = contact.damageOverride ?? Math.max(1, Math.round(impact * .31 * this.growthDamageScale * this.frenzyDamageScale * (1 + bank * .6) * (actor.isAuxiliary ? .6 : 1) * wallBoost));
       boss.hp -= damage;
     } else {
       const span = boss.initialRadius - boss.minRadius;
-      boss.r = Math.max(boss.minRadius, boss.r - span * (.0225 + .0225 * clamp(closing / this.baseSpeed, 0, 1)) / boss.shrinkDivisor * wallBoost);
+      boss.r = Math.max(boss.minRadius, boss.r - span * (.0225 + .0225 * clamp(closing / this.baseSpeed, 0, 1)) / boss.shrinkDivisor * wallBoost * this.frenzyDamageScale);
     }
     if (this.activeShot && this.feedbackTime - this.activeShot.time <= 20) this.activeShot.hits++;
     boss.hit = 1;
     if (!contact.preserveBank) { if (actor.isAuxiliary) actor.bank = 0; else this.bank = 0; }
     const enteringStun = !boss.stunned && boss.r <= boss.minRadius + 1e-9;
     const feedback = this.impactFeedback(boss, damage, contact);
-    feedback.freezeDuration = this.freezeFeedback(boss, enteringStun || boss.hp <= 0 ? .15 : .1, {actor});
+    feedback.freezeDuration = contact.source === 'shockwave' ? this.shockwaveFeedback(boss, actor)
+      : this.freezeFeedback(boss, enteringStun || boss.hp <= 0 ? .15 : .1, {actor});
     this.emit('bossHit', {x: contact.x ?? boss.x, y: contact.y ?? boss.y, r: boss.r, bossType: boss.bossType,
       power: closing / this.baseSpeed, ...feedback, enteringStun});
     const reached = boss.thresholds.filter(radius => boss.r <= radius + 1e-9).length;
@@ -1185,6 +1254,7 @@ export class World {
     boss.defeated = true; boss.solid = false; boss.hp = 0;
     const value = this.scoreValue(boss.killValue); this.score += value; this.target += value;
     this.totalKills++; this.bossKills++; this.shotKills++; this.maxCombo = Math.max(this.maxCombo, this.shotKills); this.cancelPull(); this.phase = 'boss-celebrate'; this.phaseTime = 0; p.roll = 0;
+    this.recoverShotSpeed();
     this.bossVictorySlowTime = .5;
     // Preserve the exact post-impact velocity. The brake integrates its smooth
     // envelope and real wall rebounds instead of lerping to a clamped endpoint.
@@ -1202,7 +1272,7 @@ export class World {
       p.x += p.vx * travel; p.y += p.vy * travel;
       const retention = from > 0 ? to * to / (from * from) : 0;
       p.vx *= retention; p.vy *= retention;
-      this.wall(p); p.squash *= Math.exp(-dt * 13);
+      this.wall(p); this.advanceSquash(p, dt);
     }
     if (this.phaseTime + 1e-9 >= duration) {
       p.vx = p.vy = 0;
@@ -1225,7 +1295,7 @@ export class World {
     else b.r = Math.min(b.maxRadius, b.r + b.inflationRate * bossDt);
     this.advanceBodies(dt, dragging, timeScale);
     if (!['boss-entry', 'boss'].includes(this.phase)) return;
-    b.hit = Math.max(0, b.hit - bossDt * 5); b.squash *= Math.exp(-bossDt * 13);
+    b.hit = Math.max(0, b.hit - bossDt * 5); this.advanceSquash(b, bossDt);
     if (!b.stunned && b.r >= b.maxRadius) this.endRun('boss');
   }
 
@@ -1238,7 +1308,7 @@ export class World {
       const active = this.feedbackStep(body, motionDt, timeScale);
       body.x += body.vx * active; body.y += body.vy * active;
       body.spin += body.vx * active / Math.max(1, body.r);
-      body.squash *= Math.exp(-13 * active); body.hit = Math.max(0, body.hit - 5 * active);
+      this.advanceSquash(body, active); body.hit = Math.max(0, body.hit - 5 * active);
       this.wall(body);
     }
     if (this.boss) this.feedbackStep(this.boss, motionDt, timeScale);
@@ -1247,8 +1317,8 @@ export class World {
   layoutChoices({top, bottom} = {}) {
     const bounds = this.arenaBounds, compact = this.height < 520;
     const availableWidth = bounds.width - this.unit;
-    if (this.choices.length === 5) {
-      // Five offers frame the player: three above and two below. Labels belong
+    if (this.choices.length > 3) {
+      // Four or five offers frame the player: three above, the rest below. Labels belong
       // to each row's footprint, so they cannot consume the player's gap.
       const outerFactor = 1.28, labelHeight = 31, preferredGap = Math.max(8, this.unit * .35);
       let areaTop = clamp(top ?? Math.max(bounds.top + 12, this.height * (compact ? .12 : .17)), bounds.top + 8, bounds.bottom - 8);
@@ -1261,13 +1331,13 @@ export class World {
       }
       const height = areaBottom - areaTop;
       // Extremely short landscapes reduce empty space before the targets.
-      // Both rarity rings and the full label footprint stay outside the player.
+      // The existing reward footprint and labels stay outside the player.
       const gap = Math.min(preferredGap, Math.max(0, (height - 2 * this.player.r - 2 * labelHeight - 4 * outerFactor * 5) / 2));
       const radius = Math.max(1, Math.min(this.unit * 2, availableWidth / 3 / 2.8,
         (height - 2 * this.player.r - 2 * labelHeight - 2 * gap) / (4 * outerFactor)));
       this.choicePlayerY = (areaTop + areaBottom) / 2;
       this.choices.forEach((c, i) => {
-        const lower = i >= 3, count = lower ? 2 : 3, index = lower ? i - 3 : i;
+        const lower = i >= 3, count = lower ? this.choices.length - 3 : 3, index = lower ? i - 3 : i;
         const spacing = Math.min(availableWidth / count, this.unit * 6.4);
         c.x = this.width / 2 + (index - (count - 1) / 2) * spacing;
         c.y = lower ? areaBottom - outerFactor * radius - labelHeight : areaTop + outerFactor * radius;
@@ -1295,7 +1365,7 @@ export class World {
 
   captureUpgradeContext() {
     const living = this.enemies.filter(b => b.hp > 0);
-    return {hardEnemyShare: living.length ? living.filter(b => ['ring', 'heavy'].includes(b.enemyType)).length / living.length : 0,
+    return {stage: this.stage, hardEnemyShare: living.length ? living.filter(b => ['ring', 'heavy'].includes(b.enemyType)).length / living.length : 0,
       nextBoss: (this.stage + 1) % 5 === 0, completedShots: this.stageShots,
       averageKillsPerShot: this.stageShots ? this.stageRealKills / this.stageShots : 0};
   }
@@ -1304,8 +1374,8 @@ export class World {
     if (this.mode === 'campaign' || id === 'gambler' && this.nextGambler || !canAcquireUpgrade(id, this.buffs)) return false;
     this.buffs[id] = (this.buffs[id] || 0) + 1;
     if (id === 'growth') this.player.r = this.unit * (1 + this.buffs.growth * .2);
-    if (id === 'density') { this.density *= 1.35; this.player.density = PLAYER_BASE_DENSITY * this.density; this.player.mass = this.player.density; }
-    if (id === 'energy') this.energy *= 1.3;
+    if (id === 'density') { this.density = upgradeStat(id, this.buffs[id]); this.player.density = PLAYER_BASE_DENSITY * this.density; this.player.mass = this.player.density; }
+    if (id === 'energy') this.energy = upgradeStat(id, this.buffs[id]);
     if (id === 'gambler') this.nextGambler = true;
     return true;
   }
@@ -1468,7 +1538,7 @@ export class World {
       if (drift) { b.x += drift.x * bodyDt; b.y += drift.y * bodyDt; }
       b.spin += b.vx * bodyDt / Math.max(1, b.r);
       b.hit = Math.max(0, b.hit - bodyDt * 5);
-      b.squash *= Math.exp(-bodyDt * 13);
+      this.advanceSquash(b, bodyDt);
       this.wall(b);
       if (['clearing', 'boss-celebrate', 'over'].includes(this.phase)) return;
       this.normalizeWalker(b);

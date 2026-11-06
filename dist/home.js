@@ -10,21 +10,15 @@ export function homeLayout(width, height) {
   const offsets = portrait ? [[1.65,-1.55,.66], [2.05,.75,.88], [-.8,-2.05,.43]] : [[1.5,-1.5,.66], [1.9,.95,.88], [-.55,-1.9,.43]];
   const orbitCenter={x:player.x+r*.4,y:player.y};
   const others=offsets.map(([x,y,size],i)=>({x:player.x+x*r,y:player.y+y*r,r:r*size,seed:i+1,born:1,angle:0,squash:0}));
-  const settings=others[0],mode=others[1],sound=others[2];
-  mode.x=lerp(orbitCenter.x,mode.x,1.08);mode.y=lerp(orbitCenter.y,mode.y,1.08);mode.r*=.9;
-  settings.r=lerp(sound.r,mode.r,1/3);
-  const modeAngle=Math.atan2(mode.y-player.y,mode.x-player.x),gap=50*Math.PI/180;
-  const distance=Math.hypot(mode.x-player.x,mode.y-player.y);
-  const wardrobe={r:lerp(sound.r,mode.r,2/3),seed:4,born:1,angle:0,squash:0};
-  // Keep mode fixed and diameters evenly increasing. Match settings' edge gap
-  // to wardrobe, with sound tucked a little closer along its existing direction.
-  const place=(body,angle,inset=0)=>{
-    const radialDistance=distance+body.r-wardrobe.r-inset;
-    Object.assign(body,{x:player.x+Math.cos(angle)*radialDistance,y:player.y+Math.sin(angle)*radialDistance});
-  };
-  place(settings,modeAngle-gap*2);
-  place(sound,modeAngle-gap*3+4*Math.PI/180,r*.05);
-  place(wardrobe,modeAngle-gap-3*Math.PI/180);others.push(wardrobe);
+  const settings=others[0],wardrobe=others[1],sound=others[2];
+  // The three-function layout from v4.2.2, with wardrobe in the largest slot.
+  const dx=settings.x-orbitCenter.x,dy=settings.y-orbitCenter.y,turn=-4*Math.PI/180;
+  settings.x=orbitCenter.x+dx*Math.cos(turn)-dy*Math.sin(turn);
+  settings.y=orbitCenter.y+dx*Math.sin(turn)+dy*Math.cos(turn);
+  wardrobe.x=lerp(orbitCenter.x,wardrobe.x,1.08);
+  wardrobe.y=lerp(orbitCenter.y,wardrobe.y,1.08);
+  wardrobe.r*=.9;
+  settings.r=(sound.r+wardrobe.r)/2;
   return {portrait, base:r, player, play, orbitCenter, others};
 }
 
@@ -38,18 +32,18 @@ export function contactDistance(player, target, nx, ny) {
 }
 
 export class HomeWorld {
-  constructor(width,height,mode='endless') {
-    this.mode=mode;
+  constructor(width,height) {
     this.width=width;this.height=height;this.layout=homeLayout(width,height);
     this.player={...this.layout.player,isPlayer:true,vx:0,vy:0,angle:0,squash:0,roll:0};
     this.phase='idle';this.phaseTime=0;this.clock=0;
     this.direction={x:0,y:1};this.power=0;this.action=null;this.animate=true;
   }
+  get mode(){return 'endless';}
   get targets(){
     const t=this.animate?this.clock:0,b=this.layout.base;
     return [
       {...this.layout.play,r:this.layout.play.r*(1+Math.sin(t*1.7)*.018),id:'play'},
-      ...this.layout.others.map((c,i)=>({...c,y:c.y+Math.sin(t*.85+c.seed)*b*.1,id:['settings','mode','sound','wardrobe'][i]}))
+      ...this.layout.others.map((c,i)=>({...c,y:c.y+Math.sin(t*.85+c.seed)*b*.1,id:['settings','wardrobe','sound'][i]}))
     ].map(c=>{
       const hit=this.contactAction===c.id&&this.phase==='returning'?Math.sin(this.phaseTime*15)*Math.exp(-this.phaseTime*7)*.10:0;
       return {...c,sx:1+hit,sy:1-hit};
@@ -85,7 +79,12 @@ export class HomeWorld {
     this.player.angle=Math.atan2(dy,dx);this.player.squash=-.25*this.power;
     return true;
   }
-  launchTo(id){const p=this.player,c=this.targets.find(c=>c.id===id),d=Math.hypot(c.x-p.x,c.y-p.y);return this.shoot((p.x-c.x)/d*this.maxPull,(p.y-c.y)/d*this.maxPull);}
+  launchTo(id){
+    const p=this.player,c=this.targets.find(c=>c.id===id);
+    if(!c)return false;
+    const d=Math.hypot(c.x-p.x,c.y-p.y);
+    return this.shoot((p.x-c.x)/d*this.maxPull,(p.y-c.y)/d*this.maxPull);
+  }
   launchToPlay(){return this.launchTo('play');}
   resize(width,height){
     const rx=width/this.width,ry=height/this.height,oldR=this.layout.player.r;
@@ -100,9 +99,9 @@ export class HomeWorld {
   }
   placeEntering(){
     const t=ease(this.phaseTime/1.45),p=this.player;
-    p.x=lerp(this.from.x,this.width*.5,t);p.y=lerp(this.from.y,this.height*(this.mode==='campaign'?.5:.62),t);
-    p.r=lerp(this.from.r,clamp(Math.min(this.width,this.height)*.047,18,34)*(this.mode==='campaign'?1.7:1),t);
-    p.angle=Math.atan2(this.height*(this.mode==='campaign'?.5:.62)-this.from.y,this.width*.5-this.from.x);
+    p.x=lerp(this.from.x,this.width*.5,t);p.y=lerp(this.from.y,this.height*.62,t);
+    p.r=lerp(this.from.r,clamp(Math.min(this.width,this.height)*.047,18,34),t);
+    p.angle=Math.atan2(this.height*.62-this.from.y,this.width*.5-this.from.x);
     p.squash=Math.sin(this.phaseTime*13)*.14*(1-t);p.roll=t*Math.PI*2;
   }
   step(dt,animate=true){
@@ -124,8 +123,7 @@ export class HomeWorld {
       if(this.remaining<=.001){
         this.contactAction=this.target.id;this.phaseTime=0;this.from={x:p.x,y:p.y,r:p.r};
         p.vx=p.vy=0;
-        this.phase=this.target.id==='play'?'entering':['sound','mode'].includes(this.target.id)?'returning':'external';
-        if(this.target.id==='mode')this.mode=this.mode==='campaign'?'endless':'campaign';
+        this.phase=this.target.id==='play'?'entering':this.target.id==='sound'?'returning':'external';
         if(this.target.id!=='play')this.action=this.target.id;
       }
       return;

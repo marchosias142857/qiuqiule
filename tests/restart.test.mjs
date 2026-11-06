@@ -2,15 +2,15 @@ import {createSvgNode,isSvgMount} from './fixtures/svg-dom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {CampaignWorld,LegacyCampaignWorld} from '../dist/campaign.js';
-import {levelRecord} from '../dist/campaign-progress.js';
-import {skinContour,contourArea} from '../dist/skins.js';
+import {skinContour} from '../dist/skins.js';
 import {UPGRADE_DEFINITIONS,UPGRADES} from '../dist/upgrades.js';
 import {impactShards} from '../dist/feedback.js';
-import {BOSS_TIMING} from '../dist/physics.js';
+import {World,BOSS_TIMING} from '../dist/physics.js';
 import {GameAudio} from '../dist/audio.js';
 import {companionGeometry,companionSvg} from '../dist/companions.js';
 import {crownOutline} from '../dist/boss-visuals.js';
+import {upgradeAppearance} from '../dist/upgrade-render.js';
+import {loadAppearance} from '../dist/wardrobe.js';
 
 // Run the real entry module and scene with DOM/audio/Phaser boundaries stubbed.
 const elements=new Map(),listeners=new Map(),windowListeners=new Map(),saved=new Map();
@@ -28,9 +28,10 @@ function element(selector){
         const {width,height}=this.testViewport||{width:window.innerWidth,height:window.innerHeight};
         return {x:width/2-52,y:height-60,left:width/2-52,right:width/2+52,top:height-60,bottom:height-20,width:104,height:40};
       }
-      const [x,y,width,height]=selector==='#over-ball'?[96,320,72,72]:selector==='#pause-ball'?[110,200,64,64]:selector==='#skin-unlock-ball'?[141,370,108,108]:[0,0,390,844];
+      const [x,y,width,height]=selector==='#over-ball'?[96,320,72,72]:selector==='#pause-ball'?[110,200,64,64]:selector==='#run-upgrades-ball'?[68,132,42,42]:selector==='#skin-unlock-ball'?[141,370,108,108]:[0,0,390,844];
       return {x,y,width,height,top:y,bottom:y+height,left:x,right:x+width};
     }};
+  if(selector==='#result-reason'){e.hidden=true;e.textContent='';}
   elements.set(selector,e);return e;
 }
 globalThis.window={innerWidth:390,innerHeight:844,devicePixelRatio:2,
@@ -55,18 +56,10 @@ const entry=new URL('../dist/game.js',import.meta.url);
 const source=(await readFile(entry,'utf8')).replace(/from '(\.\/[^']+)'/g,(_,path)=>`from '${new URL(path,entry).href}'`);
 // This adapter only exposes state to the test; it is not part of the shipped game.
 const adapter=`
-import {LegacyCampaignWorld as LegacyFixtureWorld} from '${new URL('../dist/classes/legacy.js',import.meta.url).href}';
-export function seedRestart(origin,mode='endless',level=1){
-  campaignOffer=null;pendingCampaignUpgrade=null;campaignAttemptId=null;campaignRecorded=false;
+export function seedRestart(origin){
   aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
-  endlessProgress=normalizeEndless(null,best);runDay=mode==='endless'?createEndlessRun('2030-01-01'):null;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';
-  selectedMode=mode;currentLevel=level;selector=null;trackPointer=null;levelPointer=null;
-  world=mode==='campaign'?new CampaignWorld(viewport.width,viewport.height,level):new World(viewport.width,viewport.height);
-  if(mode==='campaign'){
-    world.kills=12;world.spawned=20;world.completed=origin==='over';campaignProgress=normalizeProgress({completed:level,unlocked:Math.min(100,level+1)});
-    if(origin==='over')campaignRecorded=true;
-    else {campaignProgress=recordAttempt(campaignProgress,level);campaignAttemptId=levelRecord(campaignProgress,level).activeAttempt;}
-  }
+  endlessProgress=normalizeEndless(null,best);runDay=createEndlessRun('2030-01-01');runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';
+  world=new World(viewport.width,viewport.height);
   Object.assign(world,{stage:16,time:180,score:7650,stageKills:32,density:3,energy:4,breathTime:1,bank:2,pullStartSpeed:5});
   world.buffs={growth:2,energy:4,density:3,breath:1};world.player.r*=1.4;
   world.enemies.forEach(b=>{b.born=1;b.solid=true;});world.phase=origin==='over'?'over':'battle';
@@ -79,17 +72,16 @@ export function seedRestart(origin,mode='endless',level=1){
 }
 export const advanceUi=updateUiBall;
 export const sourcePose=currentPlayerPose;
-export function readRestart(){return {world,scene,screen,modal,paused,result,transfer,controlFlight,uiAnchor,releaseOverlay,pauseOnArrival,drag,selectedMode,currentLevel,campaignProgress,selector,levelPointer,choicePress,campaignOffer,campaignAttemptId,campaignRecorded};}
+export function readRestart(){return {world,scene,screen,modal,paused,result,transfer,controlFlight,uiAnchor,releaseOverlay,pauseOnArrival,drag,choicePress};}
 export function seedRenderer(graphics,width=390,height=844,arena=false){
-  companionState=normalizeCompanionState(null);companionTween=null;companionClock=0;resetCompanionTrails();
-  campaignOffer=null;pendingCampaignUpgrade=null;campaignAttemptId=null;campaignRecorded=false;$('#campaign-preflight').hidden=true;
+  companionState=normalizeCompanionState({unlocked:9});companionTween=null;companionOverride=null;companionClock=0;resetCompanionTrails();
   clearChoicePress();aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
   $('#feedback-demo').testViewport={width,height};
-  // Legacy rendering fixtures isolate record celebration; the explicit progress
-  // adapter below enables it for the new record and milestone scenarios.
+  // Generic rendering fixtures already own companions and isolate celebrations.
+  // Progression tests explicitly seed empty ownership and enable record effects.
   endlessProgress=normalizeEndless(null,best);runDay=createEndlessRun('2030-01-01');runBest=Number.MAX_SAFE_INTEGER;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';feedbackDemo=false;
-  selectedMode='endless';selector=null;trackPointer=null;levelPointer=null;menuTransition=null;
-  viewport=displayMetrics(width,height,1);home=new HomeWorld(width,height,'endless');
+  menuTransition=null;
+  viewport=displayMetrics(width,height,1);home=new HomeWorld(width,height);
   world=arena?new World(width,height):null;screen=arena?'play':'home';
   modal=null;paused=false;transfer=null;controlFlight=null;uiAnchor=null;result=null;drag=null;releaseOverlay=0;pauseOnArrival=false;homeReveal=1;
   settings.expressions=false;boot();scene=game.scene;scene.g=graphics;scene.testLabels=[];
@@ -104,40 +96,6 @@ export function seedRenderer(graphics,width=390,height=844,arena=false){
   }};
   return {home,world,scene};
 }
-export function seedLevelRenderer(graphics,width=390,height=844,unlocked=100){
-  seedRenderer(graphics,width,height);selectedMode='campaign';
-  campaignProgress=normalizeProgress({completed:unlocked-1,unlocked});currentLevel=1;
-  selector=new LevelSelector(width,height,unlocked);screen='levels';levelsReveal=1;
-  return {selector,scene};
-}
-export function seedCampaignRenderer(graphics,width=390,height=844,level=1){
-  seedRenderer(graphics,width,height,true);selectedMode='campaign';currentLevel=level;
-  world=new CampaignWorld(width,height,level);
-  campaignProgress=recordAttempt(normalizeProgress({completed:level-1,unlocked:level}),level);
-  campaignAttemptId=levelRecord(campaignProgress,level).activeAttempt;
-  return {world,scene};
-}
-// Exercise archived finite-enemy behavior explicitly; no registered level uses it.
-export function seedLegacyRenderer(graphics,width=390,height=844,level=25){
-  seedCampaignRenderer(graphics,width,height,level);world=new LegacyFixtureWorld(width,height,level);
-  return {world,scene};
-}
-export function seedCampaignAttempt(raw=campaignProgress){
-  campaignProgress=recordAttempt(normalizeProgress(raw),world.level);campaignAttemptId=levelRecord(campaignProgress,world.level).activeAttempt;campaignRecorded=false;
-}
-export function ensureCampaignScene(graphics){
-  if(typeof scene.update==='function')return scene;
-  boot();scene=game.scene;scene.g=graphics;
-  scene.add={text(){return new Proxy({destroy(){}},{get:(target,key)=>target[key]||function(){return this;}});}};
-  return scene;
-}
-export const showCampaignOffer=offerCampaign;
-export const closeCampaignPreflight=closeCampaignOffer;
-export const enterCampaign=enterLevel;
-export const runCampaignTrial=startCampaignDemo;
-export const installCampaignControls=installCampaignDemo;
-export function setCampaignProgress(raw){campaignProgress=normalizeProgress(raw);return campaignProgress;}
-export const saveCampaignCheckpoint=checkpointCampaign;
 export function enterFromHome(){
   home.launchToPlay();while(home.phase==='flight')home.step(1/120);
   screen='entering';home.phaseTime=1.4;home.player.lookX=.1;home.player.lookY=-.08;
@@ -159,7 +117,7 @@ export function recordBossVictory(){
 }
 export function recordFeedbackAudio(){
   const calls=[],originals={};
-  for(const name of ['setCharge','stopCharge','impact','launch','wall','bossDefeat','rewardHit']){
+  for(const name of ['setCharge','stopCharge','impact','launch','wall','bossDefeat','rewardHit','shockwave']){
     originals[name]=sound[name];sound[name]=(...args)=>calls.push({name,args});
   }
   return {calls,restore(){Object.assign(sound,originals);}};
@@ -183,21 +141,12 @@ export function seedBest(value){const previous=best;best=value;endlessProgress=n
 export function seedEndless(raw=null,{date='2030-01-01',recordEffects=true}={}){endlessProgress=normalizeEndless(raw);best=endlessProgress.best;runBest=recordEffects?best:Number.MAX_SAFE_INTEGER;runDay=createEndlessRun(date);runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';}
 export function readEndless(){return {progress:endlessProgress,runDay,runBest,runNewRecord,recordPulse,recordCue};}
 export const saveEndless=saveEndlessProgress;
-export function openUnlockedSelection(unlocked,current=1){
-  campaignProgress={completed:unlocked-1,unlocked};currentLevel=current;
-  openLevels({...home.player});
-  return selector;
-}
-export function seedSkins(raw=null,completed=0){
-  skins=normalizeSkins(raw,completed);playerContour=skinContour(skins.enabled?{sides:skins.sides,variant:skins.variant}:0);
-  skinTween=null;skinOverride=null;skinUnlock=null;lastUiPose=null;appearance=null;appearanceUrl=null;
+export function seedCircle(){
+  playerContour=skinContour(0);skinOverride=null;skinUnlock=null;lastUiPose=null;appearance=null;appearanceUrl=null;appearanceLoading=false;
   appearanceState=normalizeAppearanceState(null);appearanceTween=null;appearanceOverride=null;
-  companionState=normalizeCompanionState(null);companionTween=null;companionClock=0;resetCompanionTrails();
-  campaignProgress=normalizeProgress({completed});
+  companionState=normalizeCompanionState({unlocked:9});companionTween=null;companionOverride=null;companionClock=0;resetCompanionTrails();
 }
-export function readSkins(){return {skins,playerContour,skinOverride,skinTween,skinUnlock,lastUiPose,active:activeContour()};}
-export function changeSkinEnabled(enabled){setSkinState(toggleSkins(skins,enabled));}
-export function changeSkinSides(sides){setSkinState(selectSkin(skins,sides));}
+export function readPlayerShape(){return {playerContour,skinOverride,skinUnlock,lastUiPose,active:activeContour()};}
 export const advanceSkin=updateSkin;
 export function bindPhotoRenderer(renderer){photoRenderer=renderer;}
 export function recordPlayerPhoto(){
@@ -229,10 +178,12 @@ export function mountInitialScene(canvas,graphics){
   return {world,home,scene};
 }
 export const applyAppearance=setAppearance;
+export function hydrateAppearanceForTest(url){appearanceLoading=true;return setAppearance(url,false,appearanceRevision);}
+export const imageIsLoadingForTest=()=>appearanceLoading;
 export const hidePhotoForFrame=clearPhoto;
 export function readAppearance(){return {appearance,appearanceUrl};}
 export function seedAppearanceState(raw=null,{hasImage}={}){
-  appearanceState=normalizeAppearanceState(raw,{hasImage});appearanceTween=null;appearanceOverride=null;
+  appearanceLoading=false;appearanceState=normalizeAppearanceState(raw,{hasImage});appearanceTween=null;appearanceOverride=null;
   return appearanceState;
 }
 export function readAppearancePresentation(){return {state:appearanceState,tween:appearanceTween,override:appearanceOverride,layers:appearanceLayers(),wardrobeTime};}
@@ -246,8 +197,8 @@ export function seedWardrobePresentation(time=.75){
 export function bindWardrobeControls(controls){const previous=wardrobeUi;wardrobeUi=controls;return ()=>{wardrobeUi=previous;};}
 export const paintUiForTest=paintUiBall;
 export const drawPlayerForTest=drawBall;
-export function seedCompanions(raw=null,{best=0}={}){
-  companionState=normalizeCompanionState(raw,{best});companionTween=null;companionClock=0;resetCompanionTrails();return companionState;
+export function seedCompanions(raw=null,{highestStage=0}={}){
+  companionState=normalizeCompanionState(raw,{highestStage});companionTween=null;companionOverride=null;companionClock=0;resetCompanionTrails();return companionState;
 }
 export function readCompanions(){return {state:companionState,tween:companionTween,clock:companionClock,layers:companionLayers()};}
 export const readCompanionHistory=()=>structuredClone([...companionTrails.entries]);
@@ -265,8 +216,6 @@ export function recordCompanionDraws(){
 
 
 export const startWithFont=bootWithFont;
-export const renderLevelNumber=levelNumberPosition;
-export function setNumberMeasureContext(context){numberMeasureContext=context;numberCenters.clear();}
 `;
 const app=await import('data:text/javascript;base64,'+Buffer.from(source+adapter).toString('base64'));
 
@@ -314,7 +263,7 @@ test('cold home bootstrap renders its first frames before any gameplay world or 
         const {world,home,scene}=fresh.mountInitialScene(canvas,graphics);
         assert.equal(world,undefined,'startup must not be replaced by a null-world renderer fixture');
         assert.equal(scene.rewardVisuals,undefined);
-        assert.equal(home.mode,mode);
+        assert.equal(home.mode,'endless');assert.deepEqual(home.targets.map(target=>target.id),['play','settings','wardrobe','sound']);
         for(const stamp of [0,1000/60,2000/60]){
           assert.doesNotThrow(()=>scene.update(stamp,1000/60));
           assert.ok(bodyShapes(graphics).length>0,'the player must be drawn on the fresh homepage');
@@ -329,22 +278,25 @@ test('cold home bootstrap renders its first frames before any gameplay world or 
   }
 });
 
-test('level labels measure the normal UI face and remain centered by its actual glyph bounds',t=>{
-  const context={measureText(text){
-    assert.equal(this.font,'400 1000px GameSans, sans-serif');assert.equal(this.textAlign,'left');assert.equal(this.textBaseline,'alphabetic');
-    assert.equal(text,'100');
-    return {actualBoundingBoxLeft:7,actualBoundingBoxRight:1407,actualBoundingBoxAscent:710,actualBoundingBoxDescent:10};
-  }};
-  app.setNumberMeasureContext(context);t.after(()=>app.setNumberMeasureContext(null));
-  const position=app.renderLevelNumber(100);
-  near(position.x,-.7*.83);near(position.y,.35*.83);
+test('the public home exposes only play, settings, wardrobe and sound, and its play route always starts endless',async()=>{
+  const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
+  assert.doesNotMatch(html,/id="home-mode"|data-action="(?:mode|home-mode)"|id="levels-view"|id="campaign-preflight"/);
+  for(const [width,height] of [[390,844],[844,390],[320,568]]){
+    const {scene,home}=app.seedRenderer(graphicsRecorder(),width,height);
+    assert.deepEqual(home.targets.map(target=>target.id),['play','settings','wardrobe','sound']);
+    assert.equal(home.layout.others.length,3);assert.equal(home.launchTo('mode'),false);
+    home.launchToPlay();advanceScene(scene,3);
+    const {world,screen}=app.readRestart();assert.equal(screen,'play');assert.ok(world instanceof World);
+    assert.equal(world.stage,1);assert.equal(world.startingUpgrades,true);assert.equal(world.choices.length,3);
+  }
 });
+
 test('appearance replacement and removal invalidate cached images while ordinary frames only hide them',async t=>{
   const originalImage=globalThis.Image,calls=[];
   globalThis.Image=class{async decode(){}};
   const renderer={setImage:image=>calls.push(['image',image]),hide:()=>calls.push(['hide'])};
   app.bindPhotoRenderer(renderer);
-  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedSkins();});
+  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedCircle();});
   await app.applyAppearance('data:image/png;base64,b2xk');
   const first=app.readAppearance().appearance;
   app.hidePhotoForFrame();app.hidePhotoForFrame();
@@ -360,13 +312,41 @@ test('an older image decode cannot recreate the photo cache or saved image after
   const originalImage=globalThis.Image,calls=[];let decoded;
   globalThis.Image=class{decode(){return new Promise(resolve=>decoded=resolve);}};
   app.bindPhotoRenderer({setImage:image=>calls.push(image),hide(){}});
-  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedSkins();saved.delete('qiuqiule-appearance');});
+  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedCircle();saved.delete('qiuqiule-appearance');});
   const pending=app.applyAppearance('data:image/png;base64,b2xk',true);
   await app.applyAppearance(null,true);decoded();await pending;
   assert.deepEqual(calls,[null]);
   assert.deepEqual(app.readAppearance(),{appearance:null,appearanceUrl:null});
   assert.equal(JSON.parse(saved.get('qiuqiule-appearance')).image,null);
 });
+test('a failed replacement cannot cancel startup decoding of the existing saved custom image',async t=>{
+  const originalImage=globalThis.Image,stored=new Map(saved),setItem=localStorage.setItem;
+  t.after(()=>{globalThis.Image=originalImage;localStorage.setItem=setItem;app.bindPhotoRenderer(null);app.seedCircle();saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  for(const failure of ['decode','storage']){
+    const oldUrl='data:image/png;base64,b2xk',replacement='data:image/png;base64,bmV3';let finishOld;
+    globalThis.Image=class{decode(){if(this.src===oldUrl)return new Promise(resolve=>finishOld=resolve);if(failure==='decode')return Promise.reject(Error('invalid image'));return Promise.resolve();}};
+    app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedAppearanceState({selected:'custom'},{hasImage:true});app.bindPhotoRenderer({setImage(){},hide(){}});
+    saved.set('qiuqiule-appearance',JSON.stringify({version:1,image:oldUrl}));const pending=app.hydrateAppearanceForTest(oldUrl);
+    if(failure==='storage')localStorage.setItem=()=>{throw Error('quota full');};
+    await assert.rejects(app.applyAppearance(replacement,true));localStorage.setItem=setItem;
+    finishOld();await pending;
+    assert.equal(app.readAppearance().appearanceUrl,oldUrl);assert.ok(app.readAppearance().appearance);
+    assert.equal(app.readAppearancePresentation().state.selected,'custom');assert.equal(await loadAppearance(),oldUrl);assert.equal(app.imageIsLoadingForTest(),false);
+  }
+});
+
+test('an explicit original choice during startup image loading survives its late decode and keeps the custom image available',async t=>{
+  const originalImage=globalThis.Image,stored=new Map(saved);let finish,decodes=0;
+  globalThis.Image=class{decode(){decodes++;return new Promise(resolve=>finish=resolve);}};
+  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedCircle();saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedAppearanceState({selected:'custom'},{hasImage:true});app.bindPhotoRenderer({setImage(){},hide(){}});
+  const url='data:image/png;base64,b2xk',pending=app.hydrateAppearanceForTest(url);
+  assert.equal(app.chooseAppearanceForTest('original'),true);finish();await pending;app.advanceSkin(.3);
+  assert.equal(app.readAppearancePresentation().state.selected,'original');assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).selected,'original');
+  const image=app.readAppearance().appearance;assert.ok(image);assert.equal(app.readAppearance().appearanceUrl,url);assert.equal(app.imageIsLoadingForTest(),false);
+  assert.equal(app.chooseAppearanceForTest('custom'),true);assert.equal(app.readAppearance().appearance,image);assert.equal(decodes,1);
+});
+
 for(const origin of ['over','pause'])test(`${origin} restart animates only the player while a fresh world waits`,()=>{
   const previous=app.seedRestart(origin),from=app.sourcePose();
   clickRestart();
@@ -433,16 +413,6 @@ function graphicsRecorder(){
 const bodyShapes=g=>g.shapes.filter(s=>s.type==='path'&&s.color===0x252720&&s.alpha===1);
 const eyeShapes=g=>g.shapes.filter(s=>s.color===0xf4f3eb&&s.alpha===.9);
 function clickAction(action,dataset={}){
-  const campaign=app.readRestart().campaignOffer;
-  if(campaign&&['campaign-upgrade','campaign-cancel','campaign-skip'].includes(action)){
-    const scene=app.ensureCampaignScene(graphicsRecorder());
-    for(let n=0;n<360&&(app.readRestart().transfer||app.readRestart().world?.phase!=='choose');n++)scene.update(0,1000/120);
-    assert.equal(app.readRestart().world?.phase,'choose','wait for the real offer arrival and reward birth');
-    for(const fn of listeners.get('click'))fn({target:{closest:()=>({dataset:{action,...dataset}})},detail:action==='campaign-upgrade'?0:1});
-    for(let n=0;n<720&&(app.readRestart().world?.isCampaignOffer||action!=='campaign-upgrade'&&app.readRestart().transfer);n++)scene.update(0,1000/120);
-    if(action==='campaign-upgrade')assert.ok(app.readRestart().world instanceof CampaignWorld,'keyboard selection launches, collides, confirms, then creates the campaign');
-    return;
-  }
   for(const fn of listeners.get('click'))fn({target:{closest:()=>({dataset:{action,...dataset}})},detail:1});
 }
 function inputCanvas(width=390,height=844,module=app){
@@ -458,40 +428,15 @@ function inputCanvas(width=390,height=844,module=app){
   return Object.assign(pointer,{canvas,captured,captures,releases});
 }
 
-test('entering selection focuses the highest unlocked level even after replaying an earlier level',()=>{
-  for(const [width,height] of [[390,844],[844,390],[1363,936]]){
-    app.seedRenderer(graphicsRecorder(),width,height);
-    const selector=app.openUnlockedSelection(50,2),l=selector.layout;
-    const balls=selector.visibleBalls.filter(b=>b.fullyVisible);
-    const highest=balls.find(b=>b.level===50);
-    assert.ok(highest,'highest unlocked level must be visible on entry');
-    assert.ok(highest.x<=l.cx+1e-7);
-    const distance=b=>Math.hypot(b.x-l.cx,b.y-(l.cy-l.radius));
-    assert.ok(balls.every(b=>distance(highest)<=distance(b)+1e-7));
-    assert.equal(selector.offset,selector.snapTarget);
-  }
+test('endless aiming retains seven guide dots, its drag line and endpoint rings',()=>{
+  const g=graphicsRecorder(),strokes=[],dots=[],lines=[],rings=[];let width;
+  g.lineStyle=w=>{width=w;};g.strokePath=()=>strokes.push(width);
+  g.fillCircle=(x,y,r)=>dots.push({x,y,r});g.lineBetween=(...points)=>lines.push(points);g.arc=(x,y,r)=>rings.push(r);
+  const {world,scene}=app.seedRenderer(g,390,844,true),p=world.player,pointer=inputCanvas();
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+80,p.y+20);scene.update(0,0);
+  assert.equal(dots.filter(d=>d.r===1.7).length,7);assert.equal(strokes.filter(w=>w===1.4).length,1);
+  assert.equal(lines.length,1);assert.equal(rings.filter(r=>r===4||r===8).length,2);pointer('pointercancel');
 });
-
-test('selection hides guides, endless retains seven dots, and campaign draws its class guide with pull markers',()=>{
-  for(const mode of ['levels','endless','campaign']){
-    const g=graphicsRecorder(),strokes=[],dots=[],lines=[],rings=[];
-    let width;
-    g.lineStyle=w=>{width=w;};g.strokePath=()=>strokes.push(width);
-    g.fillCircle=(x,y,r)=>dots.push({x,y,r});
-    g.lineBetween=(...points)=>lines.push(points);g.arc=(x,y,r)=>rings.push(r);
-    const state=mode==='levels'?app.seedLevelRenderer(g):mode==='campaign'?app.seedCampaignRenderer(g):app.seedRenderer(g,390,844,true);
-    const p=mode==='levels'?state.selector.player:state.world.player;
-    const pointer=inputCanvas();
-    pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+80,p.y+20);
-    state.scene.update(0,0);
-    assert.equal(dots.filter(d=>d.r===1.7).length,mode==='endless'?7:0);
-    assert.equal(strokes.filter(w=>w===1.4).length,mode==='endless'?1:0);
-    assert.equal(lines.length,mode==='levels'?0:1,'both battle modes retain the pointer-to-drag line');
-    assert.equal(rings.filter(r=>r===4||r===8).length,mode==='levels'?0:2,'both battle modes retain the endpoint rings');
-    pointer('pointercancel');
-  }
-});
-
 function assertSmoothPulledBody(g,body,pull,maxPull){
   const shapes=bodyShapes(g);
   assert.equal(shapes.length,1,'the actual scene must draw exactly one player outline');
@@ -521,16 +466,13 @@ function assertSmoothPulledBody(g,body,pull,maxPull){
 }
 
 function pullScene(mode,g,width=390,height=844){
-  const state=mode==='levels'?app.seedLevelRenderer(g,width,height):
-    mode==='campaign'?app.seedCampaignRenderer(g,width,height):
-    app.seedRenderer(g,width,height,mode==='endless');
-  const active=mode==='levels'?state.selector:mode==='home'?state.home:state.world;
-  if(mode==='campaign')assert.ok(active instanceof CampaignWorld||active instanceof LegacyCampaignWorld,'exercise real campaign rules and renderer');
+  const state=app.seedRenderer(g,width,height,mode==='endless');
+  const active=mode==='home'?state.home:state.world;
   return {scene:state.scene,active,player:active.player,pointer:inputCanvas(width,height)};
 }
 
-test('real drag input draws smooth hemisphere joins in home, selection, endless and campaign at every direction',()=>{
-  for(const mode of ['home','levels','endless','campaign']){
+test('real drag input draws smooth hemisphere joins in home and endless at every direction',()=>{
+  for(const mode of ['home','endless']){
     for(const [width,height] of [[390,844],[844,390]]){
       for(let direction=0;direction<8;direction++)for(const amount of [.3,1]){
         const g=graphicsRecorder(),{scene,active,player,pointer}=pullScene(mode,g,width,height);
@@ -545,10 +487,10 @@ test('real drag input draws smooth hemisphere joins in home, selection, endless 
   }
 });
 
-test('home and selection rebounds preserve smooth joins when the pulled hemisphere reverses direction',()=>{
+test('home rebounds preserve smooth joins when the pulled hemisphere reverses direction',()=>{
   // These weak horizontal/vertical shots cannot reach a control. Each real
   // rebound reverses its pull, so the samples cover all four cardinal sides.
-  for(const mode of ['home','levels'])for(const direction of [0,6]){
+  for(const mode of ['home'])for(const direction of [0,6]){
     const g=graphicsRecorder(),{scene,active,player,pointer}=pullScene(mode,g);
     const angle=direction*Math.PI/4,dx=Math.cos(angle)*7,dy=Math.sin(angle)*7;
     pointer('pointerdown',player.x,player.y);
@@ -680,63 +622,6 @@ test('expression preference survives reloading the entry module',async()=>{
 });
 
 
-for(const origin of ['over','pause'])test(`campaign ${origin} restart preserves migrated progress and waits for a new local upgrade`,()=>{
-  const previous=app.seedRestart(origin,'campaign',21),from=app.sourcePose();
-  const progressBefore={...app.readRestart().campaignProgress};
-  clickRestart();
-  let state=app.readRestart();
-  assert.equal(state.drag,null);assert.equal(state.world,null);assert.equal(state.screen,'levels');
-  assert.equal(state.selectedMode,'campaign');assert.equal(state.currentLevel,21);
-  assert.deepEqual(state.transfer.from,from);assert.equal(state.transfer.target,'levels');
-  assert.equal(state.controlFlight,null);
-  app.advanceUi(.65);state=app.readRestart();assert.equal(state.campaignOffer.choices.length,2);
-  assert.equal(levelRecord(state.campaignProgress,21).attempts,origin==='pause'?1:0,'preflight itself starts no new attempt');
-  const chosen=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:chosen.id});
-  state=app.readRestart();const w=state.world;
-  assert.equal(element('#control-transfers').children.length,0);
-  assert.notEqual(w,previous);assert.equal(w.mode,'campaign');assert.equal(w.level,21);assert.equal(w.config.classId,'wall');
-  assert.equal(w.kills,0);assert.equal(w.completed,false);assert.equal(w.time,0);assert.equal(w.score,0);assert.equal(w.stage,1);
-  assert.equal(w.shotsUsed,0);assert.equal(w.remaining,w.budget);assert.equal(w.upgradeId,chosen.id);
-  assert.equal(w.player.r,w.unit*w.config.playerRadius);assert.equal(w.player.vx,0);assert.equal(w.player.vy,0);
-  assert.deepEqual(w.buffs,{[chosen.id]:1});assert.deepEqual(w.choices,[]);
-  assert.equal(state.campaignProgress.completed,progressBefore.completed,'retries retain confirmed historical completion');
-  assert.equal(state.campaignProgress.unlocked,progressBefore.unlocked,'retries retain available levels');
-  const record=levelRecord(state.campaignProgress,21);
-  assert.equal(record.attempts,origin==='pause'?2:1);assert.equal(record.abandoned,origin==='pause'?1:0);
-  assert.equal(record.rating,0,'historical clears cannot manufacture new scoring dots');
-  assert.equal(state.controlFlight,null);assert.equal(state.paused,true);assert.equal(state.transfer.target,'arena');
-  assert.equal(element('#hud').classList.contains('campaign'),true);
-  const startTransform=element('#ui-ball').style.transform,geometry=w.statics.map(b=>({x:b.x,y:b.y,hp:b.hp}));
-  app.advanceUi(.325);assert.notEqual(element('#ui-ball').style.transform,startTransform);
-  assert.equal(w.time,0);assert.deepEqual(w.statics.map(b=>({x:b.x,y:b.y,hp:b.hp})),geometry);
-  app.advanceUi(.325);state=app.readRestart();
-  assert.equal(state.paused,false);assert.equal(state.transfer,null);assert.equal(state.controlFlight,null);
-  assert.equal(w.time,0);w.step(1/120);assert.ok(w.time>0);
-});
-
-test('selection miss stays at its anchor and uses the same uninterrupted rebound expression as home',()=>{
-  const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g),pointer=inputCanvas();
-  const p=selector.player,anchor={x:p.x,y:p.y};
-  const b=selector.visibleBalls[0],d=Math.hypot(b.x-p.x,b.y-p.y);
-  const end={x:p.x+(p.x-b.x)/d*7,y:p.y+(p.y-b.y)/d*7};
-  clickAction('expressions');
-  pointer('pointerdown',p.x,p.y);pointer('pointermove',end.x,end.y);scene.update(0,1);
-  assert.equal(eyeShapes(g).length,2);assert.ok(eyeShapes(g).every(e=>e.type==='path'));
-  pointer('pointerup',end.x,end.y);
-  assert.equal(selector.phase,'wobble');
-  scene.update(0,0);assert.equal(eyeShapes(g).length,2);
-  assert.ok(eyeShapes(g).every(e=>e.type==='path'),'expression persists at initial zero displacement');
-  for(let i=0;i<120;i++){
-    scene.update(0,1000/120);
-    near(p.x,anchor.x);near(p.y,anchor.y);
-    assert.equal(app.readRestart().screen,'levels');
-    assert.equal(eyeShapes(g).length,2);
-    if(selector.phase==='wobble')assert.ok(eyeShapes(g).every(e=>e.type==='path'));
-  }
-  assert.equal(selector.phase,'idle');assert.equal(selector.action,null);
-  assert.ok(eyeShapes(g).every(e=>e.type==='ellipse'),'normal ellipses return after the short relaxation');
-});
-
 function advanceScene(scene,seconds){
   while(seconds>.05){scene.update(0,50);seconds-=.05;}
   if(seconds>1e-12)scene.update(0,seconds*1000);
@@ -750,15 +635,15 @@ function assertStageProgress(world){
 test('stable HUD frames make no DOM writes and progress updates on the same frame',t=>{
   const {world}=app.seedRenderer(graphicsRecorder(),390,844,true);
   world.phase='battle';world.score=73;world.stageKills=0;app.resetScoreHud();
-  const progress=element('#stage-progress'),score=element('#score'),goal=element('#campaign-goal'),rating=element('#campaign-rating-status');
+  const progress=element('#stage-progress'),score=element('#score');
   const dots=[...progress.children],writes=[];
   const watch=(node,property)=>{
     let value=node[property];
     Object.defineProperty(node,property,{configurable:true,get:()=>value,set(next){value=next;writes.push(property);}});
     t.after(()=>{delete node[property];node[property]=value;});
   };
-  for(const [node,props] of [[score,['textContent']],[score.style,['transform','color']],[goal,['textContent','hidden']],
-    [progress,['hidden','innerHTML']],[rating,['hidden','textContent']],[element('#hud').style,['opacity']]]){
+  for(const [node,props] of [[score,['textContent']],[score.style,['transform','color']],
+    [progress,['hidden','innerHTML']],[element('#hud').style,['opacity']]]){
     for(const property of props)watch(node,property);
   }
   for(const dot of dots)watch(dot,'className');
@@ -772,17 +657,7 @@ test('stable HUD frames make no DOM writes and progress updates on the same fram
   dots.forEach((dot,i)=>{assert.equal(dot,progress.children[i]);assert.equal(dot.attributes['aria-hidden'],'true');});
   score.textContent='0000';score.style.color='red';score.style.transform='scale(2)';app.updateScoreHud();
   assert.equal(score.textContent,'0073');assert.equal(score.style.color,'');assert.equal(score.style.transform,'scale(1)');
-  const campaign=app.seedCampaignRenderer(graphicsRecorder()).world;app.updateScoreHud();
-  const campaignDots=[...progress.children];assert.equal(campaignDots.length,3);assert.match(progress.attributes['aria-label'],/通关可得 3 点/);
-  for(const dot of campaignDots)watch(dot,'className');
-  const title=t.mock.method(rating,'setAttribute');
-  writes.length=0;attribute.mock.resetCalls();replace.mock.resetCalls();
-  for(let frame=0;frame<60;frame++)app.updateScoreHud(1/60);
-  assert.deepEqual(writes,[]);assert.equal(attribute.mock.callCount()+title.mock.callCount()+replace.mock.callCount(),0);
-  campaign.shotsUsed=campaign.config.threePointShots+1;app.updateScoreHud();
-  assert.deepEqual(progress.children,campaignDots);assert.equal(campaignDots[2].className,'stage-dot');assert.match(progress.attributes['aria-label'],/通关可得 2 点/);
-  const endless=app.seedRenderer(graphicsRecorder(),390,844,true).world;endless.phase='battle';app.updateScoreHud();
-  assertStageProgress(endless);assert.equal(progress.attributes.title,undefined);assert.equal(rating.hidden,true);
+  assertStageProgress(world);
 });
 function outlineBounds(shape){
   if(shape.type==='ellipse')return {cx:shape.x,cy:shape.y,width:shape.width,height:shape.height};
@@ -813,7 +688,7 @@ function assertBreathingRestarts(g,home,scene){
 }
 
 test('real rebound handoff keeps its final eye shape, then relaxes without delaying readiness or changing the player',()=>{
-  for(const mode of ['home','levels'])for(const expressions of [false,true]){
+  for(const mode of ['home'])for(const expressions of [false,true]){
     const g=graphicsRecorder(),{scene,active,player,pointer}=pullScene(mode,g);
     if(mode==='home')active.clock=Math.PI/(2*1.3)-.82;
     if(expressions)clickAction('expressions');
@@ -867,7 +742,8 @@ test('real rebound handoff keeps its final eye shape, then relaxes without delay
   }
 });
 
-test('home breathing restarts a complete independent cycle after cancellation and a functional-ball return',()=>{
+test('home breathing restarts a complete independent cycle after cancellation and a functional-ball return',t=>{
+  const soundBefore=app.readFeedbackSettings().sound;t.after(()=>{if(app.readFeedbackSettings().sound!==soundBefore)clickAction('sound');});
   for(const origin of ['cancel','return']){
     const g=graphicsRecorder(),{scene,home}=app.seedRenderer(g),pointer=inputCanvas();
     home.clock=Math.PI/(2*1.3);const anchor={...home.layout.player};
@@ -876,7 +752,7 @@ test('home breathing restarts a complete independent cycle after cancellation an
       pointer('pointercancel');scene.update(0,0);
       assert.equal(home.phase,'idle');assert.equal(home.ready,true);
     }else{
-      const target=home.targets.find(b=>b.id==='mode'),p=home.player;
+      const target=home.targets.find(b=>b.id==='sound'),p=home.player;
       const d=Math.hypot(target.x-p.x,target.y-p.y);
       const dx=(p.x-target.x)/d*home.maxPull,dy=(p.y-target.y)/d*home.maxPull;
       pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+dx,p.y+dy);pointer('pointerup',p.x+dx,p.y+dy);
@@ -938,209 +814,6 @@ test('different previous home clocks produce the same breathing cycle and a seco
   }
 });
 
-test('selection requires a body-start drag and only rebounds on release while cancellation restores normal eyes',()=>{
-  for(const release of ['pointerup','pointercancel','lostpointercapture']){
-    const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g),pointer=inputCanvas();
-    const p=selector.player,anchor={x:p.x,y:p.y};
-    clickAction('expressions');
-    pointer('pointerdown',25,100);pointer('pointermove',25,200);pointer('pointerup',25,200);scene.update(0,0);
-    assert.equal(selector.phase,'idle');near(p.x,anchor.x);near(p.y,anchor.y);
-    assert.equal(app.readRestart().drag,null,'blank space cannot start selection aiming');
-    const b=selector.visibleBalls[0],d=Math.hypot(b.x-p.x,b.y-p.y);
-    const end={x:p.x+(p.x-b.x)/d*selector.maxPull,y:p.y+(p.y-b.y)/d*selector.maxPull};
-    pointer('pointerdown',p.x,p.y);pointer('pointermove',end.x,end.y);scene.update(0,1);
-    assert.equal(eyeShapes(g).length,2);assert.ok(eyeShapes(g).every(e=>e.type==='path'));
-    pointer(release,end.x,end.y);scene.update(0,0);
-    assert.equal(selector.phase,release==='pointerup'?'wobble':'idle');
-    assert.equal(eyeShapes(g).length,2);assert.ok(eyeShapes(g).every(e=>e.type===(release==='pointerup'?'path':'ellipse')));
-    near(p.x,anchor.x);near(p.y,anchor.y);
-    assert.equal(selector.action,null);assert.equal(app.readRestart().screen,'levels');
-  }
-});
-
-test('tapping a modern level offers two local upgrades before the unchanged player arrival animation',()=>{
-  for(const [width,height] of [[390,844],[844,390]]){
-    const {selector,scene}=app.seedLevelRenderer(graphicsRecorder(),width,height,50),pointer=inputCanvas(width,height);
-    const target=selector.visibleBalls.find(b=>b.level===50),from={...selector.player};
-    pointer('pointerdown',target.x,target.y);
-    assert.equal(app.readRestart().screen,'levels');assert.equal(selector.action,null,'pressing alone never enters a level');
-    pointer('pointerup',target.x,target.y);
-    assert.deepEqual(selector.action,{type:'level',level:50});
-    scene.update(0,0);
-    let state=app.readRestart();
-    assert.equal(state.screen,'play');assert.equal(state.world.isCampaignOffer,true);
-    assert.deepEqual(state.transfer.from,from);
-    assert.equal(state.campaignOffer.level,50);assert.equal(state.campaignOffer.choices.length,2);
-    assert.equal(new Set(state.campaignOffer.choices.map(choice=>choice.id)).size,2);
-    assert.equal(element('#campaign-preflight').hidden,false);
-    assert.equal(levelRecord(state.campaignProgress,50).attempts,0,'viewing the choices is not a formal attempt');
-    const upgrade=state.campaignOffer.choices[0];
-    clickAction('campaign-upgrade',{upgrade:upgrade.id});
-    state=app.readRestart();const world=state.world;
-    assert.ok(world instanceof CampaignWorld);assert.equal(world.level,50);
-    assert.equal(state.screen,'play');assert.equal(state.currentLevel,50);assert.equal(state.selectedMode,'campaign');
-    assert.equal(state.paused,true);assert.equal(state.transfer.target,'arena');assert.equal(state.transfer.duration,.65);
-    assert.equal(state.transfer.from.r,state.world.unit);assert.equal(state.drag,null);assert.equal(state.levelPointer,null);
-    assert.equal(world.time,0);assert.equal(world.config.r,0);assert.equal(world.shotsUsed,0);
-    assert.equal(state.campaignOffer,null);assert.equal(element('#campaign-preflight').hidden,true);
-    app.advanceUi(.325);
-    assert.equal(app.readRestart().paused,true);assert.equal(world.time,0);
-    assert.equal(world.shotsUsed,0);
-    app.advanceUi(.325);state=app.readRestart();
-    assert.equal(state.transfer,null);assert.equal(state.paused,false);assert.equal(world.time,0);
-    assert.equal(state.campaignProgress.completed,49);assert.equal(state.campaignProgress.unlocked,50);
-    assert.equal(levelRecord(state.campaignProgress,50).attempts,1);
-    assert.equal(levelRecord(state.campaignProgress,50).upgradeChoices[upgrade.id],1);
-    world.step(1/120);assert.ok(world.time>0);
-  }
-});
-
-test('tapping the return ball carries the selector player home, including during a rebound',()=>{
-  for(const rebound of [false,true]){
-    const {selector,scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,50),pointer=inputCanvas();
-    const p=selector.player,target=selector.returnBall;
-    if(rebound){
-      pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+80,p.y);pointer('pointerup',p.x+80,p.y);
-      scene.update(0,100);assert.equal(selector.phase,'wobble');
-    }
-    const from={...p};
-    pointer('pointerdown',target.x,target.y);pointer('pointerup',target.x,target.y);
-    assert.deepEqual(selector.action,{type:'home'});scene.update(0,0);
-    let state=app.readRestart();
-    assert.equal(state.screen,'home');assert.equal(state.world,null);assert.equal(state.levelPointer,null);
-    assert.equal(state.transfer.target,'home');assert.equal(state.transfer.duration,.65);
-    for(const key of ['x','y','r'])near(state.transfer.from[key],from[key]);
-    app.advanceUi(.65);state=app.readRestart();
-    assert.equal(state.transfer,null);assert.equal(state.paused,false);assert.equal(app.readHome().ready,true);
-  }
-});
-
-test('selection taps preserve the visible breathing peak through the first transfer frame and smoothly release it',()=>{
-  for(const destination of ['level','home']){
-    const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,49),pointer=inputCanvas();
-    scene.update(0,0);advanceScene(scene,Math.PI/(2*1.3));
-    const p=selector.player,before=outlineBounds(bodyShapes(g)[0]);
-    near(renderedHomeSquash(g,p),.035);near(p.squash,0,'breathing remains a render-only state');
-    const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===49);
-    pointer('pointerdown',target.x,target.y);pointer('pointerup',target.x,target.y);scene.update(0,0);
-    if(destination==='level')assert.equal(app.readRestart().campaignOffer.level,49);
-    const state=app.readRestart();assert.ok(state.transfer);
-    assert.equal(state.transfer.target,destination==='home'?'home':'arena');assert.equal(state.transfer.duration,.65);
-    near(state.transfer.from.squash,.035);near(state.transfer.from.visualSquash,.035);
-    const uiShape=()=>{
-      const ball=element('#ui-ball'),match=/scale\(([^,]+),([^\)]+)\)/.exec(ball.style.transform);
-      assert.ok(match);const diameter=parseFloat(ball.style.width);
-      return {width:diameter*Number(match[1]),height:diameter*Number(match[2]),squash:1-Number(match[1])};
-    };
-    const first=uiShape();near(first.width,before.width);near(first.height,before.height);near(first.squash,.035);
-    app.advanceUi(0);near(uiShape().squash,.035,'the first animation update must not snap the body round');
-    let previous=first.squash,previousCarry=.035;
-    for(let frame=1;frame<=650;frame++){
-      app.advanceUi(.001);
-      const visible=uiShape().squash,progress=frame/650;
-      const eased=progress**3*(10-15*progress+6*progress**2);
-      const inherited=visible-Math.sin(Math.PI*eased)*.12;
-      assert.ok(Math.abs(visible-previous)<.002,'every transfer frame remains continuous');
-      assert.ok(inherited>=-1e-9&&inherited<=previousCarry+1e-9,'the inherited breathing shape gently decays');
-      if(frame===325){near(visible,.1375);near(inherited,.0175);}
-      previous=visible;previousCarry=inherited;
-    }
-    near(uiShape().squash,0);assert.equal(app.readRestart().transfer,null);
-    assert.equal(app.readRestart().screen,destination==='home'?'home':'play');
-    near(p.squash,0);
-  }
-});
-
-test('locked ball taps provide feedback without creating a campaign or leaving selection',()=>{
-  const {selector,scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,50),pointer=inputCanvas();
-  const locked=selector.visibleBalls.find(b=>b.fullyVisible&&!b.unlocked);
-  assert.ok(locked);pointer('pointerdown',locked.x,locked.y);pointer('pointerup',locked.x,locked.y);
-  assert.equal(selector.hitTimes.get(locked.level),selector.clock);
-  assert.deepEqual(selector.events,[{type:'locked',level:locked.level}]);
-  scene.update(0,0);const state=app.readRestart();
-  assert.equal(state.screen,'levels');assert.equal(state.world,null);assert.equal(state.transfer,null);
-  assert.equal(selector.action,null);assert.equal(selector.phase,'idle');assert.equal(selector.ready,true);
-  assert.equal(element('#level-announcement').textContent,'先通过前一关，即可解锁。');
-});
-
-test('selection dispatches the intended tap, entry and locked sounds while orbit swipes never play a tap',()=>{
-  for(const interaction of ['level','home','locked','swipe']){
-    const {selector,scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,50),pointer=inputCanvas();
-    const target=interaction==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===(interaction==='locked'?51:50));
-    const audio=app.recordTones();
-    try{
-      pointer('pointerdown',target.x,target.y,{timeStamp:100});
-      if(interaction==='swipe'){
-        const other=selector.visibleBalls.find(b=>b.level===49);
-        pointer('pointermove',other.x,other.y,{timeStamp:200});pointer('pointerup',other.x,other.y,{timeStamp:250});
-      }else pointer('pointerup',target.x,target.y,{timeStamp:150});
-      scene.update(0,0);
-      const frequencies=audio.calls.map(args=>args[0]);
-      if(interaction==='swipe'){
-        assert.ok(frequencies.length>0,'the real orbit movement emits its scrolling feedback');
-        assert.ok(!frequencies.includes(680),'scrolling never emits the activation sound');
-      }else {
-        assert.deepEqual(frequencies,interaction==='locked'?[150]:[680]);
-        if(interaction==='level'){
-          clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});
-          assert.deepEqual(audio.calls.map(args=>args[0]),[680,480,660,680,420],'offer birth/readiness precede collision-confirmed entry');
-        }
-      }
-    }finally{audio.restore();}
-  }
-});
-
-test('selection taps require one target and at most eight pixels of movement throughout the gesture',()=>{
-  for(const gesture of ['exact-eight','over-eight','excursion','different-target','blank-start','cancel','lost-capture','track-swipe']){
-    const {selector,scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,50),pointer=inputCanvas();
-    const target=selector.visibleBalls.find(b=>b.level===50),other=selector.visibleBalls.find(b=>b.level===49);
-    const offset=selector.offset;
-    const start=gesture==='blank-start'?{x:target.x,y:target.y+target.r+12}:target;
-    pointer('pointerdown',start.x,start.y,{timeStamp:100});
-    if(gesture==='excursion'){
-      pointer('pointermove',target.x+12,target.y,{timeStamp:150});
-      pointer('pointermove',target.x,target.y,{timeStamp:200});
-    }
-    if(gesture==='track-swipe'){
-      pointer('pointermove',other.x,other.y,{timeStamp:200});
-      assert.notEqual(selector.offset,offset,'the gesture genuinely scrolls the orbit');
-    }
-    const end=gesture==='different-target'?other:gesture==='exact-eight'?{x:target.x+8,y:target.y}:
-      gesture==='over-eight'?{x:target.x+8.01,y:target.y}:target;
-    const release=gesture==='cancel'?'pointercancel':gesture==='lost-capture'?'lostpointercapture':'pointerup';
-    pointer(release,end.x,end.y,{timeStamp:250});scene.update(0,0);
-    const state=app.readRestart();
-    assert.equal(state.levelPointer,null);assert.equal(state.drag,null);
-    if(gesture==='exact-eight'){
-      assert.equal(state.screen,'play');assert.equal(state.world.isCampaignOffer,true);assert.equal(state.campaignOffer?.level,50);
-    }else{
-      assert.equal(state.screen,'levels',gesture);assert.equal(state.world,null,gesture);assert.equal(state.transfer,null,gesture);
-      assert.equal(selector.action,null,gesture);assert.equal(selector.trackDrag,null,gesture);
-      advanceScene(scene,.3);assert.equal(app.readRestart().screen,'levels','inertia or snap never activates a ball');
-    }
-  }
-});
-
-test('every central-ball pull direction and strength rebounds in place without activating a target',()=>{
-  for(let direction=0;direction<8;direction++)for(const strength of [7,45,250]){
-    const {selector,scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,50),pointer=inputCanvas();
-    const p=selector.player,anchor={x:p.x,y:p.y,r:p.r},angle=direction*Math.PI/4;
-    const end={x:p.x+Math.cos(angle)*strength,y:p.y+Math.sin(angle)*strength};
-    pointer('pointerdown',p.x,p.y);pointer('pointermove',end.x,end.y);pointer('pointerup',end.x,end.y);
-    assert.equal(selector.phase,'wobble');assert.equal(selector.ready,false);
-    advanceScene(scene,.819);assert.equal(selector.phase,'wobble');
-    scene.update(0,1.0000001);assert.equal(selector.phase,'idle');assert.equal(selector.ready,true);
-    for(const key of ['x','y','r'])near(p[key],anchor[key]);
-    assert.equal(selector.action,null);assert.equal(app.readRestart().screen,'levels');assert.equal(app.readRestart().world,null);
-  }
-});
-
-function renderedGaze(g,player){
-  const eyes=eyeShapes(g);assert.equal(eyes.length,2);assert.ok(eyes.every(e=>e.type==='ellipse'));
-  return {x:((eyes[0].x+eyes[1].x)/2-player.x)/player.r,
-    y:((eyes[0].y+eyes[1].y)/2-player.y)/player.r+.07};
-}
-
 function uiNode(className){
   const node=[...elements].find(([selector])=>selector.startsWith('#ui-ball ')&&selector.endsWith(' '+className))?.[1];
   assert.ok(node,`the rendered UI ball includes ${className}`);return node;
@@ -1182,17 +855,12 @@ function uiContours(){
     :['.ui-eye-left','.ui-eye-right'].map(className=>svgPolyline(uiNode(className)).map(transformEye));
   return {body,eyes,center,r,eyePathsVisible:eyePaths.style.display!=='none',pullVisible:pull.style.display!=='none'};
 }
-function normalizedContours(shape){
-  const normalize=points=>points.map(p=>({x:(p.x-shape.center.x)/shape.r,y:(p.y-shape.center.y)/shape.r}));
-  return {body:normalize(shape.body),eyes:shape.eyes.map(normalize),eyePathsVisible:shape.eyePathsVisible,pullVisible:shape.pullVisible};
-}
-
 test('all returns home keep the final overlay eyes identical to the resumed canvas face',()=>{
   try{
-    for(const origin of ['settings','wardrobe','over','levels'])for(const sides of [0,6])for(const [width,height] of [[390,844],[844,390]]){
+    for(const origin of ['settings','wardrobe','over'])for(const [width,height] of [[390,844],[844,390]]){
       const g=graphicsRecorder();
-      const state=origin==='levels'?app.seedLevelRenderer(g,width,height):app.seedRenderer(g,width,height,origin==='over');
-      app.seedSkins(sides?{enabled:true,sides:6,unlocked:6}:null,sides?10:0);
+      const state=app.seedRenderer(g,width,height,origin==='over');
+      app.seedCircle();
       const {scene}=state;
       if(origin==='settings'||origin==='wardrobe'){
         state.home.launchTo(origin);
@@ -1204,9 +872,6 @@ test('all returns home keep the final overlay eyes identical to the resumed canv
         clickAction('pause');app.advanceUi(.42);
         clickAction('home');app.advanceUi(.82);
         assert.equal(app.readRestart().modal,'over');clickAction('home');
-      }else{
-        state.selector.player.lookX=.07;state.selector.player.lookY=-.05;
-        clickAction('home');
       }
       assert.equal(app.readRestart().transfer.target,'home');
       app.advanceUi(app.readRestart().transfer.duration);
@@ -1223,119 +888,23 @@ test('all returns home keep the final overlay eyes identical to the resumed canv
       assert.equal(element('#ui-ball').hidden,true,'only the resumed canvas is visible');
       near(app.readHome().player.lookX,0);near(app.readHome().player.lookY,0);
     }
-  }finally{app.seedSkins();}
+  }finally{app.seedCircle();}
 });
 function assertSameContour(actual,expected,tolerance=1e-5){
   assert.equal(actual.length,expected.length,'retain corresponding contour points');
   for(let i=0;i<actual.length;i++)assert.ok(Math.hypot(actual[i].x-expected[i].x,actual[i].y-expected[i].y)<tolerance,`contour point ${i} changed at the handoff`);
 }
 
-test('selection clicks preserve rebound contours and relaxing eyes at the canvas-to-SVG handoff in both destinations',()=>{
-  for(const destination of ['level','home'])for(const phase of ['positive','negative','relaxing']){
-    const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,49),pointer=inputCanvas();
-    const p=selector.player;clickAction('expressions');scene.update(0,0);
-    pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+selector.maxPull,p.y);scene.update(0,0);
-    pointer('pointerup',p.x+selector.maxPull,p.y);
-    if(phase==='relaxing'){
-      advanceScene(scene,.819);scene.update(0,1.0000001);advanceScene(scene,.06);
-      assert.equal(selector.phase,'idle');
-    }else{
-      advanceScene(scene,phase==='positive'?.82/4:.82/12);
-      assert.equal(selector.phase,'wobble');assert.equal(Math.sign(selector.pull.dx),phase==='positive'?1:-1);
-    }
-    const body=bodyShapes(g)[0].points,eyes=eyeShapes(g);
-    assert.equal(eyes.length,2);assert.ok(eyes.every(e=>e.type==='path'));
-    const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===49);
-    pointer('pointerdown',target.x,target.y);pointer('pointerup',target.x,target.y);scene.update(0,0);
-    if(destination==='level')assert.equal(app.readRestart().campaignOffer.level,49);
-    const transfer=app.readRestart().transfer;assert.ok(transfer);assert.equal(transfer.duration,.65);
-    if(phase==='relaxing')assert.ok(transfer.from.visualEyeMix>0&&transfer.from.visualEyeMix<1);
-    else{
-      near(transfer.from.visualEyeMix,1);assert.ok(transfer.from.visualPull.amount>0);
-      assert.equal(Math.sign(Math.cos(transfer.from.visualPull.angle)),phase==='positive'?1:-1);
-    }
-    let ui=uiContours();assertSameContour(ui.body,body);
-    ui.eyes.forEach((eye,i)=>assertSameContour(eye,eyes[i].points));
-    app.advanceUi(0);ui=uiContours();assertSameContour(ui.body,body);
-    ui.eyes.forEach((eye,i)=>assertSameContour(eye,eyes[i].points));
-    let previous=normalizedContours(ui);
-    for(let frame=1;frame<=130;frame++){
-      app.advanceUi(.005);ui=uiContours();const next=normalizedContours(ui);
-      if(previous.pullVisible&&!next.pullVisible)previous.body.forEach(point=>assert.ok(Math.abs(Math.hypot(point.x,point.y)-1)<.001));
-      else assertSameContour(next.body,previous.body,.035);
-      if(previous.eyePathsVisible&&next.eyePathsVisible)next.eyes.forEach((eye,i)=>assertSameContour(eye,previous.eyes[i],.06));
-      else if(previous.eyePathsVisible){
-        // Changing the final path back to the original ellipse must happen
-        // only once the sampled outline already lies on that ellipse.
-        previous.eyes.forEach((eye,i)=>eye.forEach(point=>{
-          const x=(point.x-(i? .17:-.17))/.0525,y=(point.y+.07)/.095;
-          assert.ok(Math.abs(x*x+y*y-1)<.01);
-        }));
-      }
-      previous=next;
-    }
-    assert.equal(app.readRestart().transfer,null);assert.equal(app.readRestart().screen,destination==='home'?'home':'play');
-    const final=normalizedContours(ui);
-    final.body.forEach(point=>near(Math.hypot(point.x,point.y),1));
-    final.eyes.forEach((eye,i)=>eye.forEach(point=>{
-      const x=(point.x-(i? .17:-.17))/.0525,y=(point.y+.07)/.095;
-      near(x*x+y*y,1);
-    }));
-  }
-});
-
-test('selection eyes follow only a held screen pointer and smoothly change direction, enter the body and recenter',()=>{
-  for(const release of ['pointerup','pointercancel','lostpointercapture']){
-    const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g),pointer=inputCanvas();
-    const p=selector.player,right={x:p.x+p.r*2,y:p.y},left={x:p.x-p.r*2,y:p.y};
-    scene.update(0,0);
-    pointer('pointermove',right.x,right.y);advanceScene(scene,.2);
-    near(renderedGaze(g,p).x,0);near(renderedGaze(g,p).y,0);assert.equal(app.readRestart().levelPointer,null);
-    pointer('pointerdown',right.x,right.y);
-    near(renderedGaze(g,p).x,0,'pointer events do not jump the rendered face');
-    scene.update(0,16);const first=renderedGaze(g,p).x;assert.ok(first>0&&first<.02);
-    advanceScene(scene,.3);const following=renderedGaze(g,p).x;assert.ok(following>first&&following<.08);
-    pointer('pointermove',left.x,left.y);near(renderedGaze(g,p).x,following);
-    scene.update(0,16);const changing=renderedGaze(g,p).x;assert.ok(changing<following&&changing>-following);
-    advanceScene(scene,.3);assert.ok(renderedGaze(g,p).x<0);
-    pointer('pointermove',p.x,p.y);const beforeInside=renderedGaze(g,p).x;
-    scene.update(0,16);const inside=renderedGaze(g,p).x;
-    assert.ok(inside<0&&inside>beforeInside,'entering the ball eases toward neutral instead of snapping');
-    advanceScene(scene,.6);assert.ok(Math.abs(renderedGaze(g,p).x)<.0001);
-    pointer('pointermove',right.x,right.y);advanceScene(scene,.3);
-    const beforeRelease=renderedGaze(g,p).x;assert.ok(beforeRelease>.01);
-    pointer(release,right.x,right.y);near(renderedGaze(g,p).x,beforeRelease);
-    assert.equal(app.readRestart().levelPointer,null);scene.update(0,16);
-    const returning=renderedGaze(g,p).x;assert.ok(returning>0&&returning<beforeRelease);
-    advanceScene(scene,.6);assert.ok(Math.abs(renderedGaze(g,p).x)<.0001);
-    pointer('pointermove',left.x,left.y);advanceScene(scene,.2);assert.ok(Math.abs(renderedGaze(g,p).x)<.0001);
-    assert.equal(app.readRestart().screen,'levels');assert.equal(selector.action,null);
-  }
-});
-
-test('selection gaze stays within the radial limit, follows the finger during a body pull and ignores unrelated cancellation',()=>{
-  const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g),pointer=inputCanvas();
-  const p=selector.player;
-  pointer('pointerdown',p.x,p.y);pointer('pointermove',385,5);advanceScene(scene,.5);
-  let gaze=renderedGaze(g,p);assert.ok(gaze.x>0&&gaze.y<0,'body pulls look toward the finger rather than opposite the pull');
-  assert.ok(Math.hypot(gaze.x,gaze.y)<=.08);near(gaze.x,p.lookX);near(gaze.y,p.lookY);
-  pointer('pointercancel',0,0,{pointerId:2});assert.ok(app.readRestart().levelPointer);assert.ok(app.readRestart().drag);
-  pointer('pointermove',400,5);const before=Math.hypot(gaze.x,gaze.y);scene.update(0,16);
-  gaze=renderedGaze(g,p);assert.ok(Math.hypot(gaze.x,gaze.y)<before,'a captured pointer outside the screen eases back');
-  pointer('pointercancel');assert.equal(app.readRestart().levelPointer,null);assert.equal(app.readRestart().drag,null);
-  advanceScene(scene,.7);gaze=renderedGaze(g,p);assert.ok(Math.hypot(gaze.x,gaze.y)<.0001);
-});
-
-test('home and selection share the same complete independent breathing cycle and selection restarts it after every rebound',()=>{
+test('home keeps its complete independent breathing cycle and restarts it after every rebound',()=>{
   let reference;
-  for(const mode of ['home','levels']){
+  for(const mode of ['home']){
     const g=graphicsRecorder(),{active,player,scene,pointer}=pullScene(mode,g);
     active.clock=3.4;scene.update(0,0);
     const anchor={x:player.x,y:player.y,r:player.r},samples=[];let elapsed=0;
     for(const time of [0,.16,.5,1.3,2.7,Math.PI*2/1.3]){
       advanceScene(scene,time-elapsed);elapsed=time;
       const squash=renderedHomeSquash(g,player);samples.push(squash);near(squash,Math.sin(time*1.3)*.035);
-      if(mode==='levels')near(player.squash,0);
+
     }
     if(reference)samples.forEach((value,i)=>near(value,reference[i]));else reference=samples;
     for(let repeat=0;repeat<2;repeat++){
@@ -1345,7 +914,7 @@ test('home and selection share the same complete independent breathing cycle and
       near(renderedHomeSquash(g,player),0);assert.equal(active.ready,true);
       advanceScene(scene,.3);near(renderedHomeSquash(g,player),Math.sin(.3*1.3)*.035);
       for(const key of ['x','y','r'])near(player[key],anchor[key]);
-      if(mode==='levels')near(player.squash,0);
+
     }
   }
 });
@@ -1650,196 +1219,19 @@ test('boss celebration renders an upright crown and player spin, with one fanfar
   }finally{audio.restore();}
 });
 
-test('archived LegacyCampaignWorld retains finite enemies and direct attribute upgrades without boss or crown scenes',()=>{
-  for(const level of [5,9,49]){
-    const g=graphicsRecorder(),{world,scene}=app.seedLegacyRenderer(g,390,844,level);
-    world.stage=5;
-    for(let kill=0;kill<world.config.upgradeEvery;kill++){
-      let enemy=world.enemies.find(body=>body.hp>0);
-      if(!enemy){world.spawnEnemy();enemy=world.enemies.find(body=>body.hp>0);}
-      world.damage(enemy,1e6);scene.update(0,0);
-    }
-    assert.equal(world.mode,'campaign');assert.equal(world.phase,'battle');assert.equal(world.boss,null);
-    assert.equal(world.kills,world.config.upgradeEvery);assert.equal(world.upgrades,1);assert.equal(world.score,0);
-    assert.equal(world.totalEnemies,world.config.totalEnemies);assert.deepEqual(world.choices,[]);
-    assert.equal(crownShapes(g).length,0);assert.equal(element('#choice-labels').children.length,0);
-    assert.deepEqual(scene.testLabels.map(label=>label.text),['弹力 +14%']);
-  }
-});
-
-function finishCampaign(world,scene){
-  if(world.config.implemented){
-    assert.equal(world.config.r,0,'this milestone helper exercises the real Peggle flow');
-    assert.equal(world.shoot(-world.maxPull,0),true);
-    const targets=world.statics.filter(pin=>pin.target),last=targets.at(-1);
-    for(const target of targets.slice(0,-1))world.rules.onStaticHit(target,{normalSpeed:world.baseSpeed});
-    Object.assign(world.player,{x:last.x,y:last.y+last.r+world.player.r+.5,vx:0,vy:-world.unit*20,feedbackFreeze:0});
-    world.step(1/120);scene.update(0,0);
-    assert.equal(world.phase,'campaign-celebrate','last target collision starts frenzy before any settlement');
-    assert.equal(app.readRestart().result,null);assert.equal(app.readSkins().skinUnlock,null);
-    advanceScene(scene,1);
-    assert.equal(world.phase,'campaign-celebrate');assert.equal(app.readSkins().skinUnlock,null,'skin must wait for the full frenzy and remaining-ball count');
-    for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
-    assert.equal(world.phase,'over');assert.equal(world.targetsRemaining,0);
-    assert.equal(world.celebration.bonusRemaining,0);return;
-  }
-  while(!world.completed){
-    let enemy=world.enemies.find(body=>body.hp>0);
-    if(!enemy){world.spawnEnemy();enemy=world.enemies.find(body=>body.hp>0);}
-    assert.ok(enemy,'a real finite campaign enemy remains to be defeated');
-    world.damage(enemy,1e6);
-    scene.update(0,0);
-    world.enemies=world.enemies.filter(body=>body.hp>0);
-  }
-  assert.equal(world.phase,'over');assert.equal(world.kills,world.totalEnemies);
-}
-
-test('real milestone wins save progress before the unlock scene, gate dismissal, restore the old skin and never reward a replay',()=>{
+test('the actual home and endless renderer keeps the default circular player without changing collision radii or mass',()=>{
   try{
-    let g=graphicsRecorder(),run=app.seedCampaignRenderer(g,390,844,10);
-    app.seedSkins(null,9);
-    app.seedCampaignAttempt();
-    const original=app.readSkins().playerContour;
-    finishCampaign(run.world,run.scene);
-    let state=app.readRestart(),skin=app.readSkins();
-    assert.equal(state.result,null,'settlement does not appear before the reward animation');
-    assert.equal(state.modal,'skin-unlock');assert.equal(state.paused,true);
-    assert.equal(skin.skinUnlock.sides,6);assert.equal(skin.skinUnlock.ready,false);
-    assert.equal(skin.skinUnlock.phase,'enter');assert.equal(element('#skin-unlock-continue').disabled,true);
-    let storedCampaign=JSON.parse(saved.get('qiuqiule-campaign'));
-    assert.equal(storedCampaign.completed,10);assert.equal(storedCampaign.unlocked,11);
-    assert.equal(levelRecord(storedCampaign,10).rating,3);assert.equal(levelRecord(storedCampaign,10).wins,1);
-    assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:false,sides:6,unlocked:6});
-    assertSameContour(skin.active,original);
-    clickAction('close');assert.equal(app.readSkins().skinUnlock.phase,'enter');assert.equal(app.readRestart().result,null);
-    app.advanceUi(.8);
-    assert.equal(app.readSkins().skinUnlock.ready,false);
-    assert.notDeepEqual(app.readSkins().active,original,'the real animation reaches an intermediate skin');
-    clickAction('close');assert.equal(app.readRestart().result,null,'an early tap cannot skip the reveal');
-    app.advanceUi(.86);skin=app.readSkins();
-    assert.equal(skin.skinUnlock.ready,true);assert.equal(element('#skin-unlock-continue').disabled,false);
-    assertSameContour(skin.active,skinContour(6));
-    assert.equal(element('#skin-unlock-title').style.opacity,1);
-    const revealed=uiContours();
-    clickAction('close');state=app.readRestart();skin=app.readSkins();
-    assert.ok(state.result?.completed);assert.equal(state.result.percent,100);
-    assert.equal(skin.skinUnlock.phase,'leave');assert.equal(state.transfer,null);
-    assert.equal(skin.skins.enabled,false,'showing a reward never equips it');
-    assert.equal(state.result.clock,0);
-    app.advanceUi(0);assertSameContour(uiContours().body,revealed.body);
-    app.advanceUi(.31);
-    assert.notDeepEqual(app.readSkins().active,original);
-    assert.notDeepEqual(app.readSkins().active,skinContour(6),'departure morphs back while moving');
-    app.advanceUi(.31);state=app.readRestart();skin=app.readSkins();
-    assert.equal(skin.skinUnlock,null);assert.equal(skin.skinOverride,null);
-    assert.equal(state.uiAnchor,'over');assert.equal(state.controlFlight,null);
-    assert.equal(element('#skin-unlock-panel').hidden,true);
-    assertSameContour(skin.playerContour,original);
-    assert.equal(element('#ui-ball .ui-body').style.display,'');
-    near(uiContours().center.x,132);near(uiContours().center.y,356);
-
-    // A retry uses the skin state earned above and routes directly to result.
-    g=graphicsRecorder();run=app.seedCampaignRenderer(g,390,844,10);
-    finishCampaign(run.world,run.scene);
-    assert.equal(app.readSkins().skinUnlock,null);assert.ok(app.readRestart().result?.completed);
-    assert.equal(app.readRestart().transfer.target,'over');
-    storedCampaign=JSON.parse(saved.get('qiuqiule-campaign'));
-    assert.equal(storedCampaign.completed,10);assert.equal(storedCampaign.unlocked,11);
-    assert.equal(levelRecord(storedCampaign,10).rating,3);
-
-    // Milestone 20 previews seven sides but keeps an equipped six-sided skin.
-    run=app.seedCampaignRenderer(graphicsRecorder(),390,844,20);
-    app.seedSkins({enabled:true,sides:6,unlocked:6},19);
-    app.seedCampaignAttempt();
-    const equipped=app.readSkins().playerContour;
-    finishCampaign(run.world,run.scene);
-    assert.equal(app.readSkins().skinUnlock.sides,7);assert.equal(app.readRestart().result,null);
-    storedCampaign=JSON.parse(saved.get('qiuqiule-campaign'));
-    assert.equal(storedCampaign.completed,20);assert.equal(storedCampaign.unlocked,21);
-    assert.equal(levelRecord(storedCampaign,20).rating,3);
-    assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:true,sides:6,unlocked:7});
-    app.advanceUi(1.66);assertSameContour(app.readSkins().active,skinContour(7));
-    clickAction('close');app.advanceUi(.62);
-    assert.equal(app.readSkins().skinUnlock,null);
-    assert.deepEqual(app.readSkins().skins,{enabled:true,sides:6,unlocked:7});
-    assertSameContour(app.readSkins().active,equipped);
-    assert.equal(element('#ui-ball .ui-body').style.display,'none');
-  }finally{app.seedSkins();}
-});
-
-test('the actual renderer uses six-sided skins everywhere without changing collision radii or mass',()=>{
-  try{
-    for(const mode of ['home','levels','endless','campaign']){
-      const g=graphicsRecorder(),{scene,player}=pullScene(mode,g);
-      app.seedSkins({enabled:false,sides:6,unlocked:6},10);
+    for(const mode of ['home','endless']){
+      const g=graphicsRecorder(),{scene,player}=pullScene(mode,g);app.seedCircle();
       const physical={r:player.r,mass:player.mass,density:player.density};
-      scene.update(0,0);
-      const circle=bodyShapes(g)[0].points;
-      app.changeSkinEnabled(true);
-      assertSameContour(app.readSkins().playerContour,skinContour(0));
-      app.advanceSkin(.15);scene.update(0,0);
-      const middle=bodyShapes(g)[0].points;
-      app.advanceSkin(.15);scene.update(0,0);
-      const polygon=bodyShapes(g)[0].points;
-      assert.notDeepEqual(polygon,circle);assert.notDeepEqual(middle,circle);assert.notDeepEqual(middle,polygon);
-      near(contourArea(polygon),Math.PI*player.r*player.r);
-      assert.equal(polygon.length,193);assert.equal(eyeShapes(g).length,2);
+      Object.assign(player,{squash:0,angle:0,roll:0,vx:0,vy:0});scene.update(0,0);
+      assertSameContour(app.readPlayerShape().playerContour,skinContour(0));
+      const shape=bodyShapes(g)[0];assert.equal(shape.points.length,193);assert.equal(eyeShapes(g).length,2);
+      const bounds=outlineBounds(shape);near(bounds.width,2*player.r);near(bounds.height,2*player.r);
       assert.deepEqual({r:player.r,mass:player.mass,density:player.density},physical);
-      assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:true,sides:6,unlocked:6});
     }
-  }finally{app.seedSkins();}
+  }finally{app.seedCircle();}
 });
-
-test('six-sided selection skin and rebound deformation stay continuous across the canvas-to-SVG transfer',()=>{
-  try{
-    for(const destination of ['level','home'])for(const rebound of [false,true]){
-      const g=graphicsRecorder(),{selector,scene}=app.seedLevelRenderer(g,390,844,49),pointer=inputCanvas();
-      app.seedSkins({enabled:true,sides:6,unlocked:6},49);
-      const p=selector.player,physical={r:p.r,mass:p.mass};scene.update(0,0);
-      if(rebound){
-        pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+selector.maxPull,p.y);
-        pointer('pointerup',p.x+selector.maxPull,p.y);advanceScene(scene,.82/12);
-        assert.equal(selector.phase,'wobble');
-      }else advanceScene(scene,.2);
-      const rendered=bodyShapes(g)[0].points.slice(0,-1);
-      const target=destination==='home'?selector.returnBall:selector.visibleBalls.find(b=>b.level===49);
-      pointer('pointerdown',target.x,target.y);pointer('pointerup',target.x,target.y);scene.update(0,0);
-    if(destination==='level')assert.equal(app.readRestart().campaignOffer.level,49);
-      assert.ok(app.readRestart().transfer);
-      assertSameContour(uiContours().body,rendered);
-      app.advanceUi(0);assertSameContour(uiContours().body,rendered);
-      let previous=normalizedContours(uiContours()).body;
-      for(let frame=0;frame<130;frame++){
-        app.advanceUi(.005);
-        const next=normalizedContours(uiContours()).body;
-        // The existing transfer performs a full turn: corresponding polygon
-        // vertices move with that turn, unlike the old rotation-invariant ball.
-        assertSameContour(next,previous,.14);previous=next;
-      }
-      assert.equal(app.readRestart().transfer,null);
-      assert.deepEqual({r:p.r,mass:p.mass},physical,'visual transfers never resize the source collision body');
-      assertSameContour(app.readSkins().active,skinContour(6));
-    }
-  }finally{app.seedSkins();}
-});
-
-test('actual wardrobe state changes preserve the selected side count while switched off and restore it when enabled',()=>{
-  try{
-    app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:6,unlocked:10},50);
-    app.changeSkinSides(8);app.advanceSkin(.3);
-    assertSameContour(app.readSkins().playerContour,skinContour(8));
-    app.changeSkinEnabled(false);app.advanceSkin(.15);
-    const intermediate=app.readSkins().playerContour;
-    assert.notDeepEqual(intermediate,skinContour(8));assert.notDeepEqual(intermediate,skinContour(0));
-    app.advanceSkin(.15);
-    assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:false,sides:8,unlocked:10});
-    assertSameContour(app.readSkins().playerContour,skinContour(0));
-    app.changeSkinEnabled(true);app.advanceSkin(.3);
-    assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),{enabled:true,sides:8,unlocked:10});
-    assertSameContour(app.readSkins().playerContour,skinContour(8));
-  }finally{app.seedSkins();}
-});
-
 function feedbackRun(module=app,strength=1){
   const g=graphicsRecorder(),run=module.seedRenderer(g,390,844,true);
   module.setFeedbackStrength(strength);module.resetScoreHud();
@@ -1861,6 +1253,45 @@ function gradedFeedbackContact(world,{maxHp=10000,hp=maxHp}={}){
   world.collide(p,b);
   return {enemy:b,hit:world.events.find(e=>e.type==='hit'),kill:world.events.find(e=>e.type==='kill')};
 }
+
+test('a real shockwave dispatches one hit-aware cue and two fronts without a border highlight or dotted afterimage',t=>{
+  const {g,world,scene}=feedbackRun(),audio=app.recordFeedbackAudio(),p=world.player;
+  t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
+  const target=world.makeBody(world.arenaBounds.left+p.r+world.unit*2,400,world.unit,.8);
+  Object.assign(target,{hp:10000,maxHp:10000,born:1,solid:true,enemyType:'normal'});world.enemies=[target];world.events=[];
+  Object.assign(p,{x:world.arenaBounds.left+p.r,y:400,vx:0,vy:0});
+  world.releaseShockwave(p,{contactX:world.arenaBounds.left,contactY:p.y,nx:-1,ny:0});scene.handleEvents();
+  assert.ok(target.hp<10000);assert.deepEqual(audio.calls.filter(call=>call.name==='shockwave').map(call=>call.args[0]),[{hit:true,strength:1}]);
+  assert.equal(audio.calls.filter(call=>call.name==='impact').length,0);assert.equal(scene.zoomPulse,null);
+  const wave=scene.effects.find(effect=>effect.type==='shockwave');assert.ok(wave);near(wave.r,world.unit*4);near(wave.total,.39);assert.equal(wave.color,app.playerInk());
+  assert.equal(scene.wallFlashes.length,0);
+  g.clear();scene.drawBorder(world.arenaBounds);
+  assert.equal(g.borders.length,1,'the ordinary outline is drawn once, never flashed as a whole');
+  assert.equal(g.shapes.filter(shape=>shape.type==='stroke'&&shape.color===app.playerInk()).length,0);
+  near(g.borders[0].strokeWidth,1);near(g.borders[0].strokeAlpha,.65);
+  const arcs=[];g.arc=(x,y,r)=>arcs.push({x,y,r});
+  for(const [age,count] of [[0,1],[.069,1],[.07,2],[.2,2],[.32,1],[.389,1],[.39,0],[.4,0],[.59,0]]){
+    wave.life=age;arcs.length=0;g.clear();scene.drawArena();
+    const fronts=arcs.filter(arc=>arc.x===wave.x&&arc.y===wave.y&&arc.r>=wave.r*.35);
+    assert.equal(fronts.length,count,`the wave draws ${count} fronts at ${age} s`);
+    assert.equal(g.shapes.filter(shape=>shape.type==='circle'&&shape.color===wave.color&&shape.r===1.5).length,0,'no range dots are drawn at any age');
+    assert.equal(scene.wallFlashes.length,0);
+  }
+  scene.handleEvents();assert.equal(audio.calls.filter(call=>call.name==='shockwave').length,1,'redrawing cannot replay the wave');
+  scene.resetFeedback();assert.equal(scene.effects.filter(effect=>effect.type==='shockwave').length,0);
+});
+
+test('reduced-motion shockwave has one fixed fade and no border flash',async()=>{
+  await withReloadedEntry({juice:1},true,fresh=>{
+    const {world,scene}=feedbackRun(fresh),audio=fresh.recordFeedbackAudio();
+    try{
+      world.enemies=[];world.events=[];world.releaseShockwave(world.player,{contactX:world.arenaBounds.left,contactY:400,nx:-1,ny:0});scene.handleEvents();
+      const wave=scene.effects.find(effect=>effect.type==='shockwave');assert.ok(wave);near(wave.total,.32);
+      assert.equal(scene.wallFlashes.length,0);assert.equal(world.player.feedbackFreeze||0,0);assert.equal(scene.zoomPulse,null);
+      assert.deepEqual(audio.calls.filter(call=>call.name==='shockwave').map(call=>call.args[0]),[{hit:false,strength:1}]);
+    }finally{audio.restore();}
+  });
+});
 
 test('real ordinary hits dispatch their graded sound while light hits paint no flash',t=>{
   const audio=app.recordFeedbackAudio();
@@ -1920,24 +1351,6 @@ test('v7.2 direct kills keep old squash blink and default hold while passing the
   }
 });
 
-test('campaign impacts keep their audio context while exterior walls use the shared low-speed gate',t=>{
-  const g=graphicsRecorder(),{world,scene}=app.seedLegacyRenderer(g,390,844,1),audio=app.recordFeedbackAudio();
-  app.setFeedbackStrength(.6);scene.clock=1;scene.hitSoundAt=0;
-  t.after(()=>{audio.restore();app.setFeedbackStrength(.6);});
-  const {enemy,hit}=gradedFeedbackContact(world,{maxHp:10000});
-  assert.ok(hit.damage/hit.maxHp<.1);assert.ok(enemy.hitAlpha>0);
-  scene.update(0,0);
-  const impact=audio.calls.find(call=>call.name==='impact');assert.ok(impact);
-  assert.equal(impact.args[0].kind,'hit');assert.notEqual(impact.args[0].endless,true);
-  scene.clock+=.1;world.events=[];const p=world.player;
-  Object.assign(p,{x:world.arenaBounds.left+p.r-.1,y:400,vx:-world.baseSpeed*.1,vy:0});
-  world.wall(p);scene.update(0,0);
-  assert.equal(audio.calls.filter(call=>call.name==='wall').length,0,'quiet campaign exterior contacts are silent');
-  Object.assign(p,{x:world.arenaBounds.left+p.r-.1,y:400,vx:-world.baseSpeed*.5,vy:0});
-  world.wall(p);scene.update(0,0);
-  const wall=audio.calls.find(call=>call.name==='wall');assert.ok(wall);
-  assert.notEqual(wall.args[1]?.endless,true);
-});
 function fireElementInput(selector,value){
   const target=element(selector);target.value=value;
   for(const handler of target.listeners.get('input')||[])handler({target});
@@ -2091,11 +1504,11 @@ test('completed real aiming samples persist locally and median calibration appli
   pointer('pointercancel');assert.equal(app.readAimStats().sampleCount,20,'cancelled calibration checks are not recorded');
 });
 
-test('tap, cancel, interruption, campaign and acceptance-demo gestures do not contaminate local aim calibration',t=>{
+test('tap, cancel, interruption and acceptance-demo gestures do not contaminate local aim calibration',t=>{
   const before=saved.get('qiuqiule-aim'),baseline={version:1,completedCount:3,samples:[.3,.4,.5]};
   t.after(()=>{if(before===undefined)saved.delete('qiuqiule-aim');else saved.set('qiuqiule-aim',before);document.hidden=false;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
-  for(const kind of ['tap','cancel','pause','background','demo','campaign']){
-    const run=kind==='campaign'?app.seedCampaignRenderer(graphicsRecorder()):controlRun();
+  for(const kind of ['tap','cancel','pause','background','demo']){
+    const run=controlRun();
     app.seedAimStats(baseline);saved.set('qiuqiule-aim',JSON.stringify(baseline));
     if(kind==='demo')app.runFeedbackDemo('steer');
     const {world,scene}=app.readRestart(),pointer=inputCanvas(),p=world.player;world.enemies=[];world.spawnTimer=world.floorTimer=world.introTimer=Infinity;world.wave=null;
@@ -2142,13 +1555,13 @@ test('v7.11 restore defaults synchronizes preferences and persistence while pres
   const prior=new Map(saved);
   try{
     for(const appearance of ['original','custom','big-eye'])await withReloadedEntry({player:'#8040a0',enemy:'#806040',bg:'#111111',sound:false,expressions:false,bgmVolume:.12,sfxVolume:.23,juice:.2},false,fresh=>{
-      fresh.seedRenderer(graphicsRecorder());fresh.seedSkins({enabled:true,sides:8,unlocked:11},50);
+      fresh.seedRenderer(graphicsRecorder());fresh.seedCircle();
       fresh.seedEndless({best:72000,maxStage:25,maxCombo:12});fresh.seedCompanions({selected:'moon-3',unlocked:9});
       fresh.seedAimStats({completedCount:30,samples:Array(30).fill(1.05)});
       const photos=fresh.recordCompositePhotos(true),image=fresh.readAppearance().appearance;
       fresh.seedAppearanceState({selected:appearance==='big-eye'?'custom':appearance,bigEyeUnlocked:true},{hasImage:true});
       if(appearance==='big-eye'){assert.equal(fresh.chooseAppearanceForTest('big-eye'),true);fresh.advanceSkin(.14);}
-      const progress=structuredClone(fresh.readRestart().campaignProgress),skins=structuredClone(fresh.readSkins().skins),companions=structuredClone(fresh.readCompanions().state),endless=structuredClone(fresh.readEndless().progress),aim=structuredClone(fresh.readAimStats());
+      const companions=structuredClone(fresh.readCompanions().state),endless=structuredClone(fresh.readEndless().progress),aim=structuredClone(fresh.readAimStats());
       saved.set('qiuqiule-appearance','data:image/png;base64,test-existing-photo');
       const preserved=new Map([...saved].filter(([key])=>!['qiuqiule-settings','qiuqiule-appearance-state'].includes(key)));
       let refreshed=0;const restoreWardrobe=fresh.bindWardrobeControls({refresh(){refreshed++;}});
@@ -2162,7 +1575,6 @@ test('v7.11 restore defaults synchronizes preferences and persistence while pres
         assert.equal(element('html').style['--ink'],'#252720');assert.equal(refreshed,1);
         assert.equal(fresh.readAppearancePresentation().tween,null,'an old color fade cannot resurrect a pre-reset preference');
         assert.equal(fresh.readAppearancePresentation().state.selected,appearance);assert.equal(fresh.readAppearance().appearance,image);
-        assert.deepEqual(fresh.readRestart().campaignProgress,progress);assert.deepEqual(fresh.readSkins().skins,skins);
         assert.deepEqual(fresh.readCompanions().state,companions);assert.deepEqual(fresh.readEndless().progress,endless);assert.deepEqual(fresh.readAimStats(),aim);
         assert.deepEqual(new Map([...saved].filter(([key])=>!['qiuqiule-settings','qiuqiule-appearance-state'].includes(key))),preserved);
         if(appearance==='big-eye'){
@@ -2225,18 +1637,6 @@ test('a real viewport resize cancels endless aim while a pixel-density-only upda
   window.innerWidth=844;window.innerHeight=390;resize();
   assert.equal(app.readRestart().drag,null);near(scene.timeScale,1);assert.equal(world.width,844);assert.equal(world.height,390);
   pointer('pointerup',p.x+40,p.y);assert.equal(world.events.filter(e=>e.type==='shoot').length,0);
-});
-
-test('archived campaign retains its readiness gate, captured-speed shot and full-speed simulation during drag',()=>{
-  const g=graphicsRecorder(),{world,scene}=app.seedLegacyRenderer(g),pointer=inputCanvas(),p=world.player;
-  world.enemies=[];world.spawnTimer=Infinity;app.setFeedbackStrength(1);
-  p.vx=world.readySpeed*1.5;p.vy=0;pointer('pointerdown',p.x,p.y);assert.equal(app.readRestart().drag,null);
-  p.vx=world.unit*4;const carried=p.vx,start={x:p.x,y:p.y};
-  pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x,start.y+world.maxPull*.5);advanceScene(scene,.2);
-  near(scene.timeScale,1);near(world.time,.2);assert.ok(p.vx<carried*.2,'campaign keeps its original drag brake');
-  pointer('pointerup',start.x,start.y+world.maxPull*.5);
-  const launch=Math.min(world.unit*60,world.baseSpeed*.5*Math.sqrt(world.energy/world.density));
-  near(p.vx,0);near(p.vy,-launch-carried);app.setFeedbackStrength(.6);
 });
 
 test('endless battle and Boss guides turn all seven dots with rapid input at every travel speed',t=>{
@@ -2597,9 +1997,11 @@ test('a complete real kill batch carries its surplus through ordered fixed-score
   assert.deepEqual(cleared.map(event=>event.feedbackLevel),[16,17,18]);
   assert.equal(events.filter(event=>event.type==='clearingStart').length,1);assert.equal(events.filter(event=>event.type==='clearingEnd').length,1);
   assert.equal(events.filter(event=>event.type==='upgrade').length,1);assert.equal(audio.calls.filter(call=>call.name==='clearStart').length,1);
-  assert.equal(element('#stage-progress').hidden,true);near(scene.timeScale,1);
+  assert.equal(element('#stage-progress').hidden,false,'the completed stage dots begin a continuous fade at the reward boundary');
+  assert.ok(Number(element('#stage-progress').style.opacity)>0&&Number(element('#stage-progress').style.opacity)<=1);near(scene.timeScale,1);
   advanceScene(scene,world.rewardTiming.transition-.01-world.phaseTime);assert.equal(world.phase,'transition');
   advanceScene(scene,.02);assert.equal(world.phase,'choose');assert.equal(world.choices.length,3);assert.equal(element('#score').textContent,'1395');
+  assert.equal(element('#stage-progress').hidden,true);assert.equal(element('#stage-caption').hidden,true);
   const choice=world.choices[0];Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);
   assert.equal(world.phase,'reward');advanceScene(scene,world.rewardTiming.rest-.01);assert.equal(world.phase,'reward');advanceScene(scene,.02);
   assert.equal(world.phase,'battle');assert.equal(world.stage,2);assert.equal(world.killTarget,18);assert.equal(world.stageKills,1);assert.equal(world.stageKillCarry,0);
@@ -2640,9 +2042,7 @@ test('red warning breathes out continuously across real phase, menu and World re
     pause:()=>clickAction('pause'),
     settings:()=>{clickAction('pause');app.advanceUi(.42);clickAction('settings');},
     home:()=>clickAction('home'),
-    levels:()=>app.openUnlockedSelection(100),
     restart:()=>clickRestart(),
-    campaign:()=>app.runCampaignTrial(1,'density'),
     ending:({world})=>world.endRun('capacity'),
     background:()=>{document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();}
   };
@@ -2730,21 +2130,19 @@ test('resizing during clearing maps the wave and clears stale feedback without c
   assert.equal(world.phase,'transition');assert.equal(world.score,score+10);
 });
 
-test('injured endless bodies keep their display size through death and result transfers while campaign radii stay original',()=>{
-  for(const mode of ['endless','campaign']){
-    let g=graphicsRecorder(),run=mode==='campaign'?app.seedCampaignRenderer(g):app.seedRenderer(g,390,844,true),{world,scene}=run;
+test('injured endless bodies keep their display size through death and result transfers',()=>{
+  for(const mode of ['endless']){
+    let g=graphicsRecorder(),run=app.seedRenderer(g,390,844,true),{world,scene}=run;
     app.setFeedbackStrength(1);world.enemies=[];world.spawnTimer=Infinity;world.floorTimer=Infinity;
     const enemy=rhythmEnemy(world,90,240),r=enemy.r;enemy.hp=enemy.maxHp*.5;scene.update(0,0);
     const ink=parseInt(app.readFeedbackSettings().enemy.slice(1),16),body=()=>g.shapes.find(shape=>shape.type==='path'&&shape.color===ink&&shape.points.length===193);
-    near(outlineBounds(body()).width,2*r*(mode==='campaign'?1:.91));near(enemy.r,r);
-    if(mode==='campaign')assert.equal(world.shoot(-7,0),true);
+    near(outlineBounds(body()).width,2*r*.91);near(enemy.r,r);
     world.damage(enemy,enemy.hp);world.enemies=[];scene.update(0,0);
-    assert.equal(scene.impactGhosts.length,1);near(outlineBounds(body()).width,2*r*(mode==='campaign'?1:.82));near(enemy.r,r);
-    g=graphicsRecorder();run=mode==='campaign'?app.seedCampaignRenderer(g):app.seedRenderer(g,390,844,true);({world,scene}=run);world.enemies=[];
+    assert.equal(scene.impactGhosts.length,1);near(outlineBounds(body()).width,2*r*.82);near(enemy.r,r);
+    g=graphicsRecorder();run=app.seedRenderer(g,390,844,true);({world,scene}=run);world.enemies=[];
     const source=rhythmEnemy(world,90,240);source.hp=source.maxHp*.5;
     world.phase='over';world.emit('over');scene.update(0,0);if(mode==='endless')scene.advanceEnding(.6);
-    near(app.readRestart().controlFlight.items[0].from.r,source.r*(mode==='campaign'?1:.91));
-    if(mode==='campaign'){assert.equal(element('#hud').hidden,true);assert.equal(element('#result-reason').hidden,false);}
+    near(app.readRestart().controlFlight.items[0].from.r,source.r*.91);
   }
   app.setFeedbackStrength(.6);
 });
@@ -2829,18 +2227,6 @@ test('a 50 ms frame paints the frozen target before shattering and pause keeps i
   advanceScene(scene,.5);assert.equal(ghost.life,age);assert.equal(scene.shakenBody(body),body);
   clickAction('resume');app.advanceUi(.42);advanceScene(scene,.02);
   assert.equal(scene.impactGhosts.length,0);assert.ok(scene.effects.some(e=>e.type==='shard'));
-});
-
-test('the final legacy campaign kill clears its frozen target and zoom before the result transfer',()=>{
-  const {world,scene}=app.seedLegacyRenderer(graphicsRecorder(),390,844,5);
-  app.setFeedbackStrength(1);world.spawnTimer=Infinity;world.spawned=world.totalEnemies;world.kills=world.totalEnemies-1;
-  const event=collideFeedbackEnemy(world);assert.ok(event.freezeDuration>0);
-  assert.ok(world.events.some(e=>e.type==='over'),'the actual final kill emits the campaign completion event');
-  scene.update(0,0);
-  assert.ok(app.readRestart().result?.completed);assert.equal(app.readRestart().transfer.target,'over');
-  assert.equal(scene.impactGhosts.length,0);assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);
-  assert.equal(element('#game').style.transform,'none');
-  app.advanceUi(.82);app.setFeedbackStrength(.6);
 });
 
 test('impact zoom peaks after 80 ms and clears on pause, resume, restart and its normal 280 ms expiry',()=>{
@@ -2943,12 +2329,12 @@ function typedEnemyRun(type,module=app,strength=1){
   return {...run,enemy};
 }
 
-function upgradeRun(module=app,{width=390,height=844,strength=1,random=null,count=3}={}){
+function upgradeRun(module=app,{width=390,height=844,strength=1,random=null,rounds=1}={}){
   const g=graphicsRecorder(),run=module.seedRenderer(g,width,height,true),{world,scene}=run;
   module.setFeedbackStrength(strength);world.enemies=[];world.events=[];
   if(random)world.random=random;
   world.spawnTimer=world.floorTimer=world.introTimer=Infinity;world.wave=null;world.fragmentQueue=[];
-  world.gamblerRewardPending=count===5;
+  world.gamblerRewardPending=rounds===2;
   world.beginUpgrade();scene.update(0,0);advanceScene(scene,world.rewardTiming.transition+.01);
   assert.equal(world.phase,'choose');
   return {g,...run,pointer:inputCanvas(width,height,module)};
@@ -2958,7 +2344,8 @@ test('a real reward long press shows its diagram after 300 ms while residual mot
   const {world,scene,g,pointer}=upgradeRun(),choice=world.choices[0],p=world.player,events=observeWorldEvents(world);
   t.after(()=>{pointer('pointercancel');app.setFeedbackStrength(.6);});
   Object.assign(p,{x:choice.x-choice.r-p.r-8,y:choice.y,vx:200,vy:0});
-  const original={x:p.x,y:p.y,vx:p.vx,time:world.feedbackTime},insideDiagram=shape=>shape.points?.length===96&&shape.color===0x252720&&Math.hypot(outlineBounds(shape).cx-choice.x,outlineBounds(shape).cy-choice.y)<choice.r;
+  const ink=upgradeAppearance(choice,parseInt(app.readFeedbackSettings().bg.slice(1),16)).ink;
+  const original={x:p.x,y:p.y,vx:p.vx,time:world.feedbackTime},insideDiagram=shape=>shape.points?.length===96&&shape.color===ink&&Math.hypot(outlineBounds(shape).cx-choice.x,outlineBounds(shape).cy-choice.y)<choice.r;
   pointer('pointerdown',choice.x,choice.y);assert.ok(app.readRestart().choicePress);assert.equal(app.readRestart().drag,null);assert.equal(world.pullStartSpeed,null);
   advanceScene(scene,.299);assert.equal(app.readRestart().choicePress.active,false);assert.equal(g.shapes.filter(insideDiagram).length,0);
   advanceScene(scene,.002);assert.equal(app.readRestart().choicePress.active,true);assert.ok(g.shapes.some(insideDiagram));
@@ -2997,11 +2384,12 @@ test('reward preview cancellation swallows delayed releases and preserves the pr
 test('reward previews remain available and static at zero strength and with reduced motion',async()=>{
   for(const [strength,reduced] of [[0,false],[1,true]])await withReloadedEntry({juice:strength,expressions:true},reduced,fresh=>{
     const {world,scene,g,pointer}=upgradeRun(fresh,{strength}),choice=world.choices[0];
+    const ink=upgradeAppearance(choice,parseInt(fresh.readFeedbackSettings().bg.slice(1),16)).ink;
     pointer('pointerdown',choice.x,choice.y);advanceScene(scene,.31);assert.equal(fresh.readRestart().choicePress.active,true);
     const diagram=()=>{
       const body=g.shapes.find(shape=>shape.type==='path'&&shape.points?.length===96&&Math.abs(outlineBounds(shape).cx-choice.x)<1&&outlineBounds(shape).width>choice.r*1.9);
       const cy=outlineBounds(body).cy;
-      return g.shapes.filter(shape=>shape.points?.length===96&&shape.color===0x252720&&Math.hypot(outlineBounds(shape).cx-choice.x,outlineBounds(shape).cy-choice.y)<choice.r).map(shape=>shape.points.map(point=>({x:point.x-choice.x,y:point.y-cy})));
+      return g.shapes.filter(shape=>shape.points?.length===96&&shape.color===ink&&Math.hypot(outlineBounds(shape).cx-choice.x,outlineBounds(shape).cy-choice.y)<choice.r).map(shape=>shape.points.map(point=>({x:point.x-choice.x,y:point.y-cy})));
     };
     const original=diagram();assert.ok(original.length>0);advanceScene(scene,.4);const later=diagram();assert.equal(later.length,original.length);
     later.forEach((contour,index)=>assertSameContour(contour,original[index]));
@@ -3026,31 +2414,32 @@ test('resizing clears a held reward preview and its capture without selecting, s
   }
 });
 
-test('three and five real reward offers keep distinct eligible balls and select exactly one through physical contact',t=>{
+test('ordinary and gambler rewards keep distinct eligible three-ball offers and select once in each round',t=>{
   t.after(()=>{app.prepareNormalGame();app.setFeedbackStrength(.6);});
-  for(const count of [3,5]){
-    const g=graphicsRecorder();app.seedRenderer(g);app.runFeedbackDemo('choices-'+count);
-    const {world,scene}=app.readRestart(),events=observeWorldEvents(world);scene.update(0,0);
-    assert.equal(world.phase,'choose');assert.equal(world.choices.length,count);assert.equal(new Set(world.choices.map(choice=>choice.id)).size,count);
-    if(count===5){
-      assert.equal(world.choices.filter(choice=>choice.y<world.player.y).length,3,'gambler puts three offers above the actual player');
-      assert.equal(world.choices.filter(choice=>choice.y>world.player.y).length,2,'gambler puts two offers below the actual player');
+  for(const [kind,rounds] of [['choices-3',1],['choices-double',2]]){
+    const g=graphicsRecorder();app.seedRenderer(g);app.runFeedbackDemo(kind);
+    const {world,scene}=app.readRestart(),events=observeWorldEvents(world),stage=world.stage;scene.update(0,0);
+    assert.equal(world.upgradeRoundTotal,rounds);
+    for(let round=1;round<=rounds;round++){
+      waitForChoose(world,scene);scene.update(0,0);
+      assert.equal(world.choices.length,3);assert.equal(new Set(world.choices.map(choice=>choice.id)).size,3);
+      assert.equal(element('#choice-labels').children.filter(node=>node.className==='choice-label').length,3);
+      assert.ok(world.choices.every(choice=>UPGRADES[choice.id]&&choice.id!=='risk'));
+      const faces=world.choices.map(choice=>g.shapes.find(shape=>shape.type==='path'&&shape.points?.length===96&&Math.abs(outlineBounds(shape).cx-choice.x)<1&&Math.abs(outlineBounds(shape).cy-choice.y)<3&&outlineBounds(shape).width>choice.r*1.9));
+      assert.ok(faces.every(Boolean));assert.equal(new Set(faces.map(shape=>shape.color)).size,new Set(world.choices.map(choice=>choice.kind)).size);
+      const choice=world.choices.find(item=>item.id!=='gambler'),before=world.buffs[choice.id]||0;
+      Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);
+      assert.equal(world.phase,'reward');assert.equal(world.buffs[choice.id],before+1);assert.equal(world.choices.length,0);
+      assert.equal(events.filter(event=>event.type==='buff').length,round);assert.equal(world.pendingUpgradeBoost,true);
+      advanceScene(scene,world.rewardTiming.rest+.01);
+      if(round<rounds){assert.equal(world.phase,'transition');assert.equal(world.stage,stage);assert.equal(world.enemies.length,0);}
     }
-    assert.equal(element('#choice-labels').children.filter(node=>node.className==='choice-label').length,count);
-    assert.ok(world.choices.every(choice=>UPGRADES[choice.id]&&choice.rings==={regular:0,special:1,risk:2}[choice.kind]));
-    const faces=world.choices.map(choice=>g.shapes.find(shape=>shape.type==='path'&&shape.points?.length===96&&Math.abs(outlineBounds(shape).cx-choice.x)<1&&Math.abs(outlineBounds(shape).cy-choice.y)<3&&outlineBounds(shape).width>choice.r*1.9));
-    assert.ok(faces.every(Boolean));assert.equal(new Set(faces.map(shape=>shape.color)).size,1,'rarity uses outlines, not different reward colors');
-    const choice=world.choices[0],before=world.buffs[choice.id]||0;
-    Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);
-    assert.equal(world.phase,'reward');assert.equal(world.buffs[choice.id],before+1);assert.equal(world.choices.length,0);
-    assert.equal(events.filter(event=>event.type==='buff').length,1);assert.equal(world.pendingUpgradeBoost,true);
-    advanceScene(scene,world.rewardTiming.rest+.01);assert.equal(world.phase,'battle');assert.equal(events.filter(event=>event.type==='buff').length,1);
-    assert.equal(world.choices.length,0,'task 5 does not introduce a second reward round');
+    assert.equal(world.phase,'battle');assert.equal(world.stage,stage+1);assert.equal(world.choices.length,0);
   }
 });
 
-test('gambler offers keep a three-above two-below formation around the player through actual viewport resize',t=>{
-  const {world,scene,g,pointer}=upgradeRun(app,{count:5}),previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+test('gambler keeps its three-ball offer and two pending rounds through actual viewport resize',t=>{
+  const {world,scene,g,pointer}=upgradeRun(app,{rounds:2}),previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
   window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
   t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;app.setFeedbackStrength(.6);});
   app.mountSceneBoundary(pointer.canvas,g);const ids=world.choices.map(choice=>choice.id),events=observeWorldEvents(world);
@@ -3058,7 +2447,7 @@ test('gambler offers keep a three-above two-below formation around the player th
     window.innerWidth=width;window.innerHeight=height;resize();scene.update(0,0);
     const p=world.player,bounds=world.arenaBounds;
     near(p.x,width/2);near(p.y,world.choicePlayerY);assert.equal(world.phase,'choose');assert.deepEqual(world.choices.map(choice=>choice.id),ids);
-    assert.equal(world.choices.filter(choice=>choice.y<p.y).length,3);assert.equal(world.choices.filter(choice=>choice.y>p.y).length,2);
+    assert.equal(world.choices.length,3);assert.equal(world.rewardSelectionsRemaining,2);assert.equal(world.upgradeRound,1);
     for(const choice of world.choices){
       assert.ok(choice.x-choice.r>=bounds.left&&choice.x+choice.r<=bounds.right);
       assert.ok(choice.y-choice.r>=bounds.top&&choice.y+choice.r+24<=bounds.bottom);
@@ -3088,8 +2477,9 @@ test('every physical reward route produces one crisp hit and directional enemy-s
     scene.update(0,0);assert.equal(audio.calls.filter(call=>call.name==='rewardHit').length,1,'redrawing cannot replay the reward');
     return choice;
   };
-  for(const count of [3,5]){
-    const {world,scene}=upgradeRun(app,{count});contact(world,scene,`normal ${count}-offer reward`);
+  for(const rounds of [1,2]){
+    const {world,scene}=upgradeRun(app,{rounds});
+    for(let round=1;round<=rounds;round++){waitForChoose(world,scene);contact(world,scene,`reward ${round} of ${rounds}`);advanceScene(scene,world.rewardTiming.rest+.01);}
   }
   app.seedRenderer(graphicsRecorder(),390,844,true);app.seedEndless({maxStage:10,best:0});app.prepareNormalGame();app.setFeedbackStrength(1);
   {
@@ -3098,31 +2488,33 @@ test('every physical reward route produces one crisp hit and directional enemy-s
   }
   {
     const {world,scene}=bossScene(10);app.setFeedbackStrength(1);advanceToBoss(world,scene);world.gamblerRewardPending=true;defeatBoss(world,scene);
-    for(let round=1;round<=2;round++){waitForChoose(world,scene);contact(world,scene,`Boss round ${round}`);advanceScene(scene,world.rewardTiming.rest+.01);}
+    for(let round=1;round<=3;round++){waitForChoose(world,scene);contact(world,scene,`Boss round ${round}`);advanceScene(scene,world.rewardTiming.rest+.01);}
   }
-  for(const kind of ['choices-3','choices-5']){
+  for(const kind of ['choices-3','choices-double']){
     app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(1);app.runFeedbackDemo(kind);
     const {world,scene}=app.readRestart();contact(world,scene,kind);
   }
 });
 
-test('a fully acquired upgrade pool skips the empty offer, keeps caps intact and starts the next ordinary stage',t=>{
+test('late builds still receive a visible, selectable basic reward after finite upgrades are complete',t=>{
   const {world,scene}=controlRun();t.after(()=>app.setFeedbackStrength(.6));
-  for(const definition of UPGRADE_DEFINITIONS)for(let layer=0;layer<definition.maxStacks;layer++){
+  for(const definition of UPGRADE_DEFINITIONS)for(let layer=0;layer<Math.min(definition.maxStacks,12);layer++){
     if(definition.id==='gambler'&&world.nextGambler){
-      // Consecutive Boss rewards cannot consume the second gambler stack;
-      // finish a genuine stage boundary before acquiring that final layer.
       world.phase='reward';world.rewardSelectionsRemaining=1;world.finishRewardRound();
     }
     assert.equal(world.applyUpgrade(definition.id),true);
   }
-  // All upgrade applications above are setup; there is no pending gambler reward
-  // or score/visual bonus manufactured by inspecting the exhausted pool.
   world.nextGambler=false;world.gamblerRewardPending=false;
-  const before=JSON.stringify(world.buffs),stage=world.stage;world.beginUpgrade();scene.update(0,0);
-  assert.equal(world.phase,'reward');assert.deepEqual(world.choices,[]);assert.equal(element('#choice-labels').children.length,0);
-  assert.equal(world.pendingUpgradeBoost,false);advanceScene(scene,world.rewardTiming.rest+.01);
-  assert.equal(world.phase,'battle');assert.equal(world.stage,stage+1);assert.equal(JSON.stringify(world.buffs),before);
+  world.stage=26;world.upgradeContext=null;world.beginUpgrade();scene.update(0,0);
+  assert.equal(world.phase,'transition');assert.equal(world.choices.length,3);
+  assert.equal(element('#choice-labels').children.length,3);
+  const choice=world.choices.find(item=>item.kind==='regular'),before=world.buffs[choice.id];
+  assert.ok(['energy','density','overspeed'].includes(choice.id));
+  waitForChoose(world,scene);
+  Object.assign(world.player,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);
+  assert.equal(world.buffs[choice.id],before+1);assert.equal(world.phase,'reward');
+  advanceScene(scene,world.rewardTiming.rest+.01);
+  assert.equal(world.phase,'battle');assert.equal(world.stage,27);
   assert.ok(world.enemies.length>=world.floorCount);assert.ok(world.enemies.length<=28);
 });
 
@@ -3184,10 +2576,10 @@ test('real split auxiliaries render without extra eyes, share kill credit, pause
   assert.equal(world.auxiliaries.length,0);assert.equal(world.shotUpgradeBoost,false);
 });
 
-test('all upgrade and three/five-choice playgrounds keep initial bodies and reward labels above their visible controls',t=>{
+test('all upgrade and single/double-round playgrounds keep initial bodies and reward labels above their visible controls',t=>{
   const panel=element('#feedback-demo'),previousRect=panel.getBoundingClientRect,previousHidden=panel.hidden;
   t.after(()=>{panel.getBoundingClientRect=previousRect;panel.hidden=previousHidden;app.seedRenderer(graphicsRecorder());app.prepareNormalGame();app.setFeedbackStrength(.6);});
-  const kinds=['choices-3','choices-5',...UPGRADE_DEFINITIONS.map(definition=>'upgrade-'+definition.id)];
+  const kinds=['choices-3','choices-double',...UPGRADE_DEFINITIONS.map(definition=>'upgrade-'+definition.id)];
   for(const [width,height,top] of [[390,844,470],[320,667,290],[844,390,135],[320,568,180]])for(const kind of kinds){
     const g=graphicsRecorder();app.seedRenderer(g,width,height);panel.hidden=false;
     panel.getBoundingClientRect=()=>panel.classList.contains('demo-compact')
@@ -3195,7 +2587,7 @@ test('all upgrade and three/five-choice playgrounds keep initial bodies and rewa
       :{left:0,right:width,top,bottom:height,width,height:height-top};
     app.runFeedbackDemo(kind);const {world,scene}=app.readRestart(),bounds=world.arenaBounds,bodies=[world.player,...world.enemies,...world.choices];
     const visibleTop=panel.getBoundingClientRect().top;
-    if(kind==='choices-5'||kind==='upgrade-gambler')assert.equal(panel.classList.contains('demo-compact'),true,'five offers expose only the compact menu button');
+    if(kind==='choices-double'||kind==='upgrade-gambler')assert.equal(panel.classList.contains('demo-compact'),true,'successive rewards expose only the compact menu button');
     else assert.equal(visibleTop,top,'other playgrounds retain the original full-control panel bounds');
     for(let index=0;index<bodies.length;index++){
       const body=bodies[index],label=`${kind} ${width}x${height}`;
@@ -3204,9 +2596,9 @@ test('all upgrade and three/five-choice playgrounds keep initial bodies and rewa
       for(const other of bodies.slice(index+1))assert.ok(Math.hypot(body.x-other.x,body.y-other.y)>=body.r+other.r-1e-8,label);
     }
     for(const choice of world.choices){
-      const outer=choice.r*(choice.rings===2?1.27:choice.rings===1?1.14:1),font=Math.max(9,Math.min(17,Math.floor(choice.labelWidth/choice.name.length*.9)));
+      const outer=choice.r,font=Math.max(9,Math.min(17,Math.floor(choice.labelWidth/choice.name.length*.9)));
       assert.ok(choice.x-outer>=bounds.left&&choice.x+outer<=bounds.right);
-      assert.ok(choice.y-outer>=bounds.top&&choice.y+choice.r*(1+.14*choice.rings)+14+font<=visibleTop,`${kind} ${width}x${height}: rarity rings and one-line names stay above the visible controls (${choice.id}, top=${choice.y-outer}, bottom=${choice.y+choice.r*(1+.14*choice.rings)+14+font}, panel=${visibleTop})`);
+      assert.ok(choice.y-outer>=bounds.top&&choice.y+choice.r+14+font<=visibleTop,`${kind} ${width}x${height}: reward bodies and one-line names stay above the visible controls (${choice.id}, top=${choice.y-outer}, bottom=${choice.y+choice.r+14+font}, panel=${visibleTop})`);
       assert.ok(choice.x-choice.labelWidth/2>=bounds.left&&choice.x+choice.labelWidth/2<=bounds.right);
     }
     scene.update(0,0);assertFiniteDemoFrame(world,scene,g);
@@ -3221,10 +2613,10 @@ test('the gambler playground compacts its controls and its menu button restores 
   document.body={append(node){assert.equal(node,panel);}};
   t.after(()=>{document.querySelector=originalQuery;document.createElement=originalCreate;if(originalBody===undefined)delete document.body;else document.body=originalBody;panel.listeners=originalListeners;panel.classList.remove('demo-flow','demo-compact');app.seedRenderer(graphicsRecorder());app.prepareNormalGame();});
   app.installDemoControls();assert.equal(created,true);assert.match(panel.innerHTML,/data-demo="all-demos">试玩菜单/);
-  app.runFeedbackDemo('choices-5');assert.equal(panel.classList.contains('demo-compact'),true);near(panel.getBoundingClientRect().height,40);
+  app.runFeedbackDemo('choices-double');assert.equal(panel.classList.contains('demo-compact'),true);near(panel.getBoundingClientRect().height,40);
   for(const handler of panel.listeners.get('click')||[])handler({target:{closest:()=>({dataset:{demo:'all-demos'}})}});
   assert.equal(panel.classList.contains('demo-compact'),false);assert.equal(panel.classList.contains('demo-flow'),false);
-  const world=app.readRestart().world;assert.equal(world.phase,'choose');assert.equal(world.choices.length,5,'opening the menu does not replace the current offer');
+  const world=app.readRestart().world;assert.equal(world.phase,'choose');assert.equal(world.choices.length,3,'opening the menu does not replace the current offer');assert.equal(world.upgradeRoundTotal,2);
 });
 
 for(const definition of UPGRADE_DEFINITIONS)test(`the real ${definition.id} upgrade playground exercises its effect and keeps score and progression isolated`,t=>{
@@ -3239,7 +2631,7 @@ for(const definition of UPGRADE_DEFINITIONS)test(`the real ${definition.id} upgr
   if(definition.id==='density')near(world.density,1.35);
   if(definition.id==='growth')near(p.r,world.unit*1.2);
   if(definition.id==='frenzy'){assert.equal(world.waveSize,6);assert.equal(world.comboCap,12);}
-  if(definition.id==='gambler'){assert.equal(world.choices.length,5);near(world.gamblerTargetMultiplier,1.5);assert.equal(world.gamblerRewardPending,false);}
+  if(definition.id==='gambler'){assert.equal(world.choices.length,3);assert.equal(world.upgradeRoundTotal,2);near(world.gamblerTargetMultiplier,1.5);assert.equal(world.gamblerRewardPending,false);}
   const target=world.enemies[0],startDistance=target?Math.hypot(target.x-p.x,target.y-p.y):Infinity;
   let minDistance=startDistance,maxAuxiliaries=0,magnetSeen=false,breathSeen=false,boomerangSeen=false;
   for(let frame=0;frame<720;frame++){
@@ -3258,10 +2650,9 @@ for(const definition of UPGRADE_DEFINITIONS)test(`the real ${definition.id} upgr
   if(definition.id==='split'){assert.equal(maxAuxiliaries,2);assert.equal(events.filter(event=>event.type==='playerSplit').length,1);}
   if(definition.id==='boomerang')assert.equal(boomerangSeen,true);
   if(definition.id==='shockwave')assert.ok(events.some(event=>event.type==='shockwave'));
-  if(definition.id==='risk')assert.ok(kills.every(event=>event.value===Math.round(10*Math.min(event.combo,8)*(event.combo>=3?1.5:1)*(event.banked?1.5:1)*1.5)));
   if(kills.length){assert.ok(kills.every(event=>event.upgradeBoost===true));assert.ok(audio.calls.some(call=>call.name==='impact'&&call.args[0].kind==='kill'&&call.args[0].upgradeBoost));}
-  if(world.phase==='choose'){
-    const choice=world.choices[0];Object.assign(p,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);advanceScene(scene,world.rewardTiming.rest+.01);
+  for(let round=0;round<3&&['choose','transition'].includes(world.phase);round++){
+    waitForChoose(world,scene);const choice=world.choices.find(item=>item.id!=='gambler');Object.assign(p,{x:choice.x,y:choice.y,vx:0,vy:0});scene.update(0,1000/120);advanceScene(scene,world.rewardTiming.rest+.01);
   }
   if(world.score===0){collideFeedbackEnemy(world);scene.update(0,0);}
   assert.ok(world.score>0);assert.equal(saved.get('qiuqiule-best'),'0');assert.equal(saved.get('qiuqiule-campaign'),progressBefore);assert.equal(saved.get('qiuqiule-skins'),skinsBefore);
@@ -3732,32 +3123,31 @@ test('a new record compares against the starting best, celebrates once and persi
   assert.equal(app.readEndless().runBest,100);world.stageKills=7;scene.update(0,0);assertStageProgress(world);
 });
 
-test('endless records retain reached stages without unlocking skins or changing campaign progress',()=>{
-  const {world}=controlRun();app.seedEndless();app.seedSkins(null,0);
-  const before={...app.readRestart().campaignProgress},original={...app.readSkins().skins};
+test('endless records retain reached stages while the player keeps its circular geometry',()=>{
+  const {world}=controlRun();app.seedEndless();app.seedCircle();const original=app.readPlayerShape().playerContour;
   for(const stage of [5,10,15,20,25]){
     world.stage=world.maxStage=stage;app.updateScoreHud();assert.equal(JSON.parse(saved.get('qiuqiule-endless')).maxStage,stage);
-    assert.deepEqual(app.readSkins().skins,original);assert.deepEqual(app.readRestart().campaignProgress,before);
+    assert.equal(app.readPlayerShape().playerContour,original);assertSameContour(original,skinContour(0));
+    assert.equal(app.readRestart().modal,null,'milestones do not interrupt live play');
   }
-  app.changeSkinSides({sides:6,variant:true});assert.deepEqual(app.readSkins().skins,original);
-  assert.equal(app.readSkins().skins.unlocked,0);app.seedSkins();
+  app.seedCircle();
 });
-
-test('loading old endless variants removes them from storage and retains only owned campaign skins',async t=>{
-  const priorSkins=saved.get('qiuqiule-skins'),priorCampaign=saved.get('qiuqiule-campaign');
-  t.after(()=>{for(const [key,value] of [['qiuqiule-skins',priorSkins],['qiuqiule-campaign',priorCampaign]]){if(value===undefined)saved.delete(key);else saved.set(key,value);}});
-  for(const [completed,selection,expected] of [
-    [0,{enabled:true,sides:6,unlocked:0,variants:[6,7,8,9],variant:true},{enabled:false,sides:6,unlocked:0}],
-    [10,{enabled:true,sides:6,unlocked:6,variants:[6],variant:true},{enabled:true,sides:6,unlocked:6}],
-    [10,{enabled:true,sides:9,unlocked:6,variants:[9],variant:true},{enabled:true,sides:6,unlocked:6}],
-  ]){
-    saved.set('qiuqiule-skins',JSON.stringify(selection));saved.set('qiuqiule-campaign',JSON.stringify({completed,unlocked:completed+1}));
-    await withReloadedEntry(null,false,fresh=>{
-      assert.deepEqual(fresh.readSkins().skins,expected);assert.deepEqual(JSON.parse(saved.get('qiuqiule-skins')),expected);
-    });
-  }
+test('old campaign and polygon saves cannot replace the default circular player or restore a removed mode',async()=>{
+  const prior=new Map(saved);
+  try{
+    for(const sides of [6,9,15]){
+      saved.set('qiuqiule-skins',JSON.stringify({enabled:true,sides,unlocked:15,variants:[sides],variant:true}));
+      saved.set('qiuqiule-campaign',JSON.stringify({completed:100,unlocked:100}));saved.set('qiuqiule-mode',JSON.stringify('campaign'));
+      await withReloadedEntry(null,false,fresh=>{
+        assertSameContour(fresh.readPlayerShape().playerContour,skinContour(0));
+        const {scene}=fresh.seedRenderer(graphicsRecorder());fresh.prepareNormalGame();
+        const state=fresh.readRestart();assert.equal(state.screen,'play');assert.equal(state.world.stage,1);
+        assert.equal(state.world.startingUpgrades,true);assert.equal(state.world.choices.length,3);assert.ok(state.world instanceof World);
+        scene.update(0,0);assertSameContour(fresh.readPlayerShape().playerContour,skinContour(0));
+      });
+    }
+  }finally{saved.clear();for(const [key,value]of prior)saved.set(key,value);}
 });
-
 test('every normal fresh game offers exactly one regular starting choice regardless of its historical stage',()=>{
   for(const maxStage of [0,4,5,10,25,1000]){
     const rounds=1;
@@ -3778,16 +3168,18 @@ test('every normal fresh game offers exactly one regular starting choice regardl
   }
 });
 
-test('Boss victory offers two independent physical choices, with gambler affecting only round one and stage advance after round two',()=>{
+test('Boss victory gives two physical reward rounds, or three with gambler, and advances only after the last choice',()=>{
   for(const gambler of [false,true]){
     const {world,scene}=bossScene(10);advanceToBoss(world,scene);world.gamblerRewardPending=gambler;
     defeatBoss(world,scene);waitForChoose(world,scene);
-    assert.equal(world.upgradeRound,1);assert.equal(world.upgradeRoundTotal,2);assert.equal(world.choices.length,gambler?5:3);
-    const score=world.score,first=world.choices.find(choice=>choice.id!=='gambler');chooseByContact(world,scene,first);advanceScene(scene,world.rewardTiming.rest+.01);
-    assert.equal(world.stage,10);assert.equal(world.rewardSelectionsRemaining,1);waitForChoose(world,scene);
-    assert.equal(world.upgradeRound,2);assert.equal(world.choices.length,3);assert.equal(world.gamblerRewardPending,false);
-    assert.ok(world.choices.every(choice=>(world.buffs[choice.id]||0)<choice.maxStacks));
-    chooseByContact(world,scene);advanceScene(scene,world.rewardTiming.rest+.01);
+    const rounds=gambler?3:2,score=world.score;assert.equal(world.upgradeRoundTotal,rounds);
+    for(let round=1;round<=rounds;round++){
+      waitForChoose(world,scene);assert.equal(world.upgradeRound,round);assert.equal(world.choices.length,3);
+      assert.equal(world.rewardSelectionsRemaining,rounds-round+1);assert.equal(world.gamblerRewardPending,false);
+      assert.ok(world.choices.every(choice=>(world.buffs[choice.id]||0)<choice.maxStacks));
+      chooseByContact(world,scene,world.choices.find(choice=>choice.id!=='gambler'));advanceScene(scene,world.rewardTiming.rest+.01);
+      if(round<rounds){assert.equal(world.stage,10);assert.equal(world.phase,'transition');assert.equal(world.enemies.length,0);}
+    }
     assert.equal(world.stage,11);assert.equal(world.phase,'battle');assert.equal(world.rewardSelectionsRemaining,0);assert.equal(world.score,score);
     assert.equal(world.boss,null);assert.ok(world.enemies.length>=world.floorCount);assert.equal(world.pendingUpgradeBoost,true);
   }
@@ -3813,7 +3205,7 @@ test('same-time restarts randomize gameplay while records stay on the opening da
 });
 
 for(const kind of ['boss-inflation','boss-rewards','ending','starting-1'])test(`task-six playground ${kind} runs through the actual scene and isolates all records and unlocks`,()=>{
-  const g=graphicsRecorder();app.seedRenderer(g);app.seedEndless({best:777,maxStage:1,maxCombo:2});app.seedSkins();
+  const g=graphicsRecorder();app.seedRenderer(g);app.seedEndless({best:777,maxStage:1,maxCombo:2});app.seedCircle();
   const stored=new Map(saved);app.runFeedbackDemo(kind);const {world,scene}=app.readRestart(),events=observeWorldEvents(world);
   assert.equal(app.isFeedbackDemo(),true);assert.equal(app.readRestart().screen,'play');
   const originalEnemies=world.enemies.map(body=>body.id);
@@ -3835,15 +3227,15 @@ for(const kind of ['boss-inflation','boss-rewards','ending','starting-1'])test(`
 });
 
 
-test('real split balls inherit campaign polygons and migrated default circles while keeping only the main face',()=>{
+test('real split balls keep the circular player outline while only the main ball has a face',()=>{
   try{
-    for(const selection of [{enabled:true,sides:8,unlocked:8},{enabled:true,sides:6,unlocked:0,variants:[6],variant:true}]){
-      const g=graphicsRecorder();app.seedRenderer(g);app.seedSkins(selection);app.runFeedbackDemo('upgrade-split');
+    {
+      const g=graphicsRecorder();app.seedRenderer(g);app.seedCircle();app.runFeedbackDemo('upgrade-split');
       const {world,scene}=app.readRestart();
       for(let frame=0;!world.auxiliaries.length&&frame<180;frame++)scene.update(0,1000/120);
       assert.equal(world.auxiliaries.length,2);
       for(const [index,body] of [world.player,...world.auxiliaries].entries())Object.assign(body,{x:80+index*100,y:400,vx:0,vy:0,squash:0,angle:0,roll:0,feedbackFreeze:0});
-      scene.resetFeedback();scene.update(0,0);const active=app.readSkins().skins;const contour=active.enabled?skinContour(active.sides):Array.from({length:192},(_,i)=>({x:Math.cos(i/192*Math.PI*2),y:Math.sin(i/192*Math.PI*2)}));
+      scene.resetFeedback();scene.update(0,0);const contour=Array.from({length:192},(_,i)=>({x:Math.cos(i/192*Math.PI*2),y:Math.sin(i/192*Math.PI*2)}));
       for(const body of [world.player,...world.auxiliaries]){
         const shape=g.shapes.find(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points?.length===193&&Math.hypot(outlineBounds(shape).cx-body.x,outlineBounds(shape).cy-body.y)<body.r*.1&&Math.abs(outlineBounds(shape).width/body.r-(Math.max(...contour.map(p=>p.x))-Math.min(...contour.map(p=>p.x))))<1e-6);
         assert.ok(shape,'each physical player ball has its own visible skin');
@@ -3853,11 +3245,11 @@ test('real split balls inherit campaign polygons and migrated default circles wh
         assert.equal(playerEyes(g,body).length,body.isAuxiliary?0:2);
       }
     }
-  }finally{app.seedSkins();app.prepareNormalGame();}
+  }finally{app.seedCircle();app.prepareNormalGame();}
 });
 
 test('real split photos use independent slots with the main photo retained and removed auxiliaries hidden on the next frame',()=>{
-  const g=graphicsRecorder();app.seedRenderer(g);app.seedSkins({enabled:true,sides:6,unlocked:6});app.runFeedbackDemo('upgrade-split');
+  const g=graphicsRecorder();app.seedRenderer(g);app.seedCircle();app.runFeedbackDemo('upgrade-split');
   const {world,scene}=app.readRestart();for(let frame=0;!world.auxiliaries.length&&frame<180;frame++)scene.update(0,1000/120);
   assert.equal(world.auxiliaries.length,2);for(const body of [world.player,...world.auxiliaries])body.feedbackFreeze=0;scene.resetFeedback();const photos=app.recordCompositePhotos();
   try{
@@ -3872,7 +3264,7 @@ test('real split photos use independent slots with the main photo retained and r
     world.clearAuxiliaries();scene.update(0,0);
     assert.equal(photos.main.length,2,'the main photo still draws after split cleanup');assert.equal(photos.aux.length,2,'expired auxiliaries never draw again');
     assert.deepEqual([...photos.visible],['main']);assert.ok(photos.hidden.length>=2);
-  }finally{photos.restore();app.seedSkins();app.prepareNormalGame();}
+  }finally{photos.restore();app.seedCircle();app.prepareNormalGame();}
 });
 
 
@@ -3934,7 +3326,7 @@ test('a real Boss victory gives a low-combo result its crown and the next run cl
 
 test('successful photo rendering paints each main or fading auxiliary body once, while unavailable photo rendering keeps the graphics fallback',()=>{
   for(const success of [true,false,undefined]){
-    const g=graphicsRecorder();app.seedRenderer(g);app.seedSkins({enabled:true,sides:8,unlocked:8});app.runFeedbackDemo('upgrade-split');
+    const g=graphicsRecorder();app.seedRenderer(g);app.seedCircle();app.runFeedbackDemo('upgrade-split');
     const {world,scene}=app.readRestart();for(let frame=0;!world.auxiliaries.length&&frame<180;frame++)scene.update(0,1000/120);
     assert.equal(world.auxiliaries.length,2);for(const body of [world.player,...world.auxiliaries])body.feedbackFreeze=0;scene.resetFeedback();
     const photos=app.recordCompositePhotos(success),bodyFills=()=>g.shapes.filter(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points?.length===193);
@@ -3947,7 +3339,7 @@ test('successful photo rendering paints each main or fading auxiliary body once,
       photos.aux.length=0;g.clear();scene.drawArena();assert.equal(photos.aux.length,2);assert.ok(photos.aux.every(call=>Math.abs(call.options.alpha-.3)<1e-9));
       const fills=bodyFills();assert.equal(fills.length,success===true?0:2,'half-transparent photo auxiliaries must not receive a second colored fill below the photo');
       if(success!==true)assert.ok(fills.every(shape=>Math.abs(shape.alpha-.3)<1e-9));
-    }finally{photos.restore();app.seedSkins();}
+    }finally{photos.restore();app.seedCircle();}
   }
 });
 
@@ -4048,7 +3440,7 @@ function assertRewardEntry(world,scene,g,{fps=60,reduced=false}={}){
       if(shape){
         const bounds=outlineBounds(shape);near(shape.alpha,alpha);
         near(bounds.width,2*choice.r*alpha);circles.push(bounds);
-        near(parseFloat(nodes[i].style.top),bounds.cy+choice.r*(1+.14*(choice.rings||0))+14);
+        near(parseFloat(nodes[i].style.top),bounds.cy+choice.r+14);
         if(reduced)near(bounds.cy,choice.y);
       }
       previous[i]=alpha;
@@ -4069,10 +3461,12 @@ for(const [kind,fps] of [['starting',120],['ordinary',60],['gambler',30]])test(`
   world.events=[];
   if(kind==='starting')world.beginStartingUpgrades();
   else{world.gamblerRewardPending=kind==='gambler';world.beginUpgrade();}
-  assert.equal(world.choices.length,kind==='gambler'?5:3);
-  assertRewardEntry(world,scene,g,{fps});
-  chooseByContact(world,scene);assert.equal(element('#choice-labels').children.length,0);
-  advanceScene(scene,world.rewardTiming.rest+.01);assert.equal(world.phase,'battle');
+  const rounds=kind==='gambler'?2:1;assert.equal(world.upgradeRoundTotal,rounds);
+  for(let round=1;round<=rounds;round++){
+    assert.equal(world.choices.length,3);assertRewardEntry(world,scene,g,{fps});
+    chooseByContact(world,scene,world.choices.find(choice=>choice.id!=='gambler'));assert.equal(element('#choice-labels').children.length,0);
+    advanceScene(scene,world.rewardTiming.rest+.01);assert.equal(world.phase,round<rounds?'transition':'battle');
+  }
 });
 
 test('both real Boss reward rounds restart their entrance cleanly and stay continuous at selection time',()=>{
@@ -4114,7 +3508,7 @@ test('reduced motion retains a continuous reward fade with no idle floating',asy
 test('reward placement, full player turn and label poses meet both shortened boundaries without a visible jump',async()=>{
   for(const [strength,reduced] of [[.6,false],[0,false],[.6,true]])await withReloadedEntry({juice:strength},reduced,fresh=>{
     const g=graphicsRecorder(),{world,scene}=fresh.seedRenderer(g,390,844,true),p=world.player;
-    fresh.setFeedbackStrength(strength);fresh.seedSkins({enabled:true,sides:5,unlocked:8});
+    fresh.setFeedbackStrength(strength);fresh.seedCircle();
     Object.assign(p,{x:80,y:420,vx:0,vy:0,squash:.08,angle:1.1});
     world.beginUpgrade();scene.update(0,0);
     const nodes=[...element('#choice-labels').children],titles=nodes.map(node=>node.children[0]),fonts=titles.map(node=>node.style.fontSize);
@@ -4139,7 +3533,7 @@ test('reward placement, full player turn and label poses meet both shortened bou
       const before=sample(world.rewardTiming.transition-1e-6);assert.equal(world.phase,'transition');
       const after=sample(world.rewardTiming.transition+1e-6);assert.equal(world.phase,'choose');joined(before,after);
       assert.ok(after.labels.every(label=>label.alpha===1));near(after.squash,0);
-    }finally{photo.restore();fresh.seedSkins();}
+    }finally{photo.restore();fresh.seedCircle();}
   });
 });
 
@@ -4224,971 +3618,167 @@ test('the final Boss collision sprays proportionally more enemy shards from its 
     advanceScene(scene,.65);assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,0,'victory slow motion does not retain particles indefinitely');
   }
 });
-
-function modernCampaignRun(level=1,width=390,height=844){
-  const g=graphicsRecorder(),{scene}=app.seedLevelRenderer(g,width,height,level);
-  app.enterCampaign(level);
-  const offer=app.readRestart().campaignOffer,upgrade=offer.choices[0];
-  clickAction('campaign-upgrade',{upgrade:upgrade.id});app.advanceUi(.65);
-  return {g,scene,world:app.readRestart().world,upgrade};
-}
-
-test('task7 cancelling preflight never starts an attempt and its two choices exclude unrelated upgrades',()=>{
-  const {scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,1);
-  const before=JSON.stringify(app.readRestart().campaignProgress),stored=saved.get('qiuqiule-campaign');
-  app.enterCampaign(1);
-  const offer=app.readRestart().campaignOffer;
-  assert.equal(offer.choices.length,2);
-  assert.ok(offer.choices.every(choice=>['rubber','energy','bank','density'].includes(choice.id)));
-  assert.equal(element('#campaign-level-title').textContent,'1 · 破墙');
-  assert.equal(element('#campaign-level-goal').textContent,`清空砖墙 · ${app.readRestart().world.config.budget} 发`);
-  clickAction('campaign-cancel');scene.update(0,0);
-  const state=app.readRestart();
-  assert.equal(state.campaignOffer,null);assert.equal(state.selector.phase,'idle');
-  assert.equal(state.world,null);assert.equal(state.screen,'levels');
-  const record=levelRecord(state.campaignProgress,1);assert.equal(record.attempts,0);assert.deepEqual(record.offerChoices,offer.choices.map(c=>c.id));
-  app.enterCampaign(1);assert.deepEqual(app.readRestart().campaignOffer.choices.map(c=>c.id),record.offerChoices);clickAction('campaign-cancel');
-});
-
-test('task7 modern restart records abandonment and reopens a fresh single-use two-choice offer',()=>{
-  const {world,scene,upgrade}=modernCampaignRun(1);
-  assert.equal(world.upgradeId,upgrade.id);assert.equal(world.shoot(0,world.maxPull),true);
-  advanceScene(scene,.05);clickAction('pause');app.advanceUi(.42);
-  clickRestart();
-  let state=app.readRestart();assert.equal(state.screen,'levels');assert.equal(state.world,null);
-  assert.equal(levelRecord(state.campaignProgress,1).attempts,1);
-  assert.equal(levelRecord(state.campaignProgress,1).abandoned,1);
-  assert.equal(levelRecord(state.campaignProgress,1).losses,0);
-  app.advanceUi(.65);state=app.readRestart();assert.equal(state.campaignOffer.choices.length,2);
-  const chosen=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:chosen.id});
-  const next=app.readRestart().world;
-  assert.notEqual(next,world);assert.equal(next.level,1);assert.equal(next.shotsUsed,0);
-  assert.equal(next.remaining,next.budget);assert.equal(next.upgradeId,chosen.id);
-  assert.deepEqual(next.buffs,{[chosen.id]:1});assert.equal(levelRecord(app.readRestart().campaignProgress,1).attempts,2);
-  clickAction('campaign-upgrade',{upgrade:chosen.id});
-  assert.equal(app.readRestart().world,next,'a stale second click cannot reselect or start another attempt');
-  assert.equal(levelRecord(app.readRestart().campaignProgress,1).attempts,2);
-});
-
-test('task7 pause, background and orientation preserve a live shot and persist its abandonment checkpoint',t=>{
-  const {world,scene,g,upgrade}=modernCampaignRun(10),pointer=inputCanvas();
-  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
-  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
-  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;});
-  app.mountSceneBoundary(pointer.canvas,g);
-  assert.equal(world.shoot(world.maxPull,0),true);advanceScene(scene,.1);
-  const used=world.shotsUsed,remaining=world.remaining,shotTime=world.shotTime;
-  clickAction('pause');const elapsed=world.elapsed;app.advanceUi(.42);
-  const attempt=app.readRestart().campaignAttemptId;
-  advanceScene(scene,.3);near(world.elapsed,elapsed);near(world.shotTime,shotTime);
-  document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();
-  const checkpoint=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),10);
-  near(checkpoint.activeElapsed,elapsed);assert.equal(checkpoint.activeAttempt,attempt);
-  assert.equal(checkpoint.losses,0);assert.equal(checkpoint.abandoned,0);
-  window.innerWidth=844;window.innerHeight=390;resize();
-  assert.equal(world.width,844);assert.equal(world.height,390);
-  assert.equal(world.shotsUsed,used);assert.equal(world.remaining,remaining);assert.equal(world.upgradeId,upgrade.id);
-  document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();
-  clickAction('resume');app.advanceUi(.42);advanceScene(scene,.05);
-  assert.ok(world.elapsed>elapsed);assert.equal(app.readRestart().campaignAttemptId,attempt);
-  assert.equal(world.shotsUsed,used);assert.equal(world.remaining,remaining);
-});
-
-test('task7 actual last-brick impact wins on the last budgeted launch before exhaustion can overwrite it',()=>{
-  const {world,scene}=app.seedCampaignRenderer(graphicsRecorder(),390,844,1);
-  world.remaining=1;world.shotsUsed=world.budget-1;world.enemies=[];
-  assert.equal(world.shoot(0,world.maxPull),true);assert.equal(world.remaining,0);
-  const bricks=world.statics.filter(body=>body.kind==='brick'),last=bricks.at(-1);
-  for(const brick of bricks.slice(0,-1))while(brick.hp>0)world.rules.onStaticHit(brick,{normalSpeed:world.baseSpeed});
-  Object.assign(world.player,{x:last.x,y:last.y+last.height/2+world.player.r+.5,vx:0,vy:-world.unit*20,feedbackFreeze:0});
-  world.step(1/120);scene.update(0,0);
-  assert.equal(last.hp,0);assert.equal(world.phase,'campaign-celebrate');assert.equal(world.completed,true);
-  assert.equal(world.shotsUsed,world.budget);assert.equal(world.resultRating,1);
-  for(let frame=0;frame<240&&world.phase!=='over';frame++)scene.update(0,1000/120);
-  assert.equal(world.phase,'over');assert.equal(app.readRestart().result?.completed,true);
-  const record=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),1);
-  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,1);
-  assert.equal(element('#campaign-rating').attributes['aria-label'],'本关评分 1 点，共三点');
-  scene.update(0,0);assert.equal(levelRecord(app.readRestart().campaignProgress,1).wins,1);
-});
-
-test('task7 genuine missed launches create losses and reveal skip only after three completed failed attempts',()=>{
-  let {world,scene}=modernCampaignRun(1);
-  for(let attempt=1;attempt<=3;attempt++){
-    world.remaining=1;world.shotsUsed=world.budget-1;
-    assert.equal(world.shoot(-7,0),true);
-    // A low-power shot remains safely below the wall and settles naturally.
-    for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
-    assert.equal(world.phase,'over');assert.equal(world.completed,false);
-    assert.equal(levelRecord(app.readRestart().campaignProgress,1).failStreak,attempt);
-    app.advanceUi(.82);clickRestart();app.advanceUi(.65);
-    assert.equal(element('#campaign-skip').hidden,attempt<3);
-    if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
-  }
-  clickAction('campaign-skip');
-  const state=app.readRestart(),record=levelRecord(state.campaignProgress,1);
-  assert.equal(state.campaignProgress.completed,0);assert.equal(state.campaignProgress.unlocked,2);
-  assert.equal(record.skipped,true);assert.equal(record.rating,0);assert.equal(record.cleared,false);
-});
-
-test('task11 selection shows all new classes and migrated completions without inventing scoring dots',()=>{
-  const {scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,10);
-  scene.update(0,0);
-  const markup=element('#level-orbs').innerHTML;
-  assert.doesNotMatch(markup,/旧版/);
-  assert.equal(levelRecord(app.readRestart().campaignProgress,9).cleared,true);
-  assert.equal(levelRecord(app.readRestart().campaignProgress,9).rating,0);
-  assert.equal(levelRecord(app.readRestart().campaignProgress,10).cleared,false);
-  assert.equal(levelRecord(app.readRestart().campaignProgress,10).rating,0);
-});
-
-test('v770 teaching repeats before first clear, including retries and later difficulties',()=>{
-  const {world,scene}=modernCampaignRun(1);
-  assert.equal(world.tutorialVisible,true);assert.equal(!!app.readRestart().campaignProgress.tutorials.wall,false);
-  assert.equal(world.shoot(-7,0),true);assert.equal(world.tutorialVisible,false);
-  advanceScene(scene,.05);clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
-  clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);
-  assert.equal(app.readRestart().world.tutorialVisible,true,'an introduction is not a first clear');
-  assert.equal(levelRecord(app.readRestart().campaignProgress,1).attempts,2);
-  const later=modernCampaignRun(11);assert.equal(later.world.tutorialVisible,true,'a first clear remains necessary at higher difficulty');
-});
-
-test('task7 pause-home and pause-restart cannot bypass frenzy or its remaining-ball scoring before skin unlock',()=>{
-  for(const action of ['home','restart']){
-    app.seedSkins();
-    const {world,scene}=modernCampaignRun(10);app.seedSkins(null,9);app.seedCampaignAttempt();
-    world.shoot(-world.maxPull,0);
-    const targets=world.statics.filter(pin=>pin.target),last=targets.at(-1);
-    for(const pin of targets.slice(0,-1))world.rules.onStaticHit(pin,{normalSpeed:world.baseSpeed});
-    Object.assign(world.player,{x:last.x,y:last.y+last.r+world.player.r+.5,vx:0,vy:-world.unit*20,feedbackFreeze:0});
-    world.step(1/120);scene.update(0,0);assert.equal(world.phase,'campaign-celebrate');
-    const score=world.score,bonus=world.celebration.bonusRemaining,elapsed=world.celebration.elapsed;
-    clickAction('pause');app.advanceUi(.42);advanceScene(scene,.2);
-    near(world.celebration.elapsed,elapsed);assert.equal(app.readSkins().skinUnlock,null);
-    clickAction(action);assert.equal(app.readRestart().world,world);assert.equal(world.phase,'campaign-celebrate');
-    assert.equal(app.readRestart().result,null);assert.equal(app.readSkins().skinUnlock,null);
-    app.advanceUi(.42);
-    for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
-    assert.equal(world.phase,'over');assert.equal(world.score,score+bonus*10);
-    assert.equal(app.readSkins().skinUnlock.sides,6);
-    const record=levelRecord(app.readRestart().campaignProgress,10);
-    assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.abandoned,0);
-  }
-  app.seedSkins();
-});
-
-test('task7 trial uses the full frenzy/result/restart path without touching formal progress or skins',()=>{
-  app.seedRenderer(graphicsRecorder());app.seedSkins(null,0);
-  const beforeProgress=JSON.stringify(app.readRestart().campaignProgress),beforeSkins=JSON.stringify(app.readSkins().skins);
-  const savedProgress=saved.get('qiuqiule-campaign'),savedSkins=saved.get('qiuqiule-skins');
-  app.runCampaignTrial(10,'energy');
-  const state=app.readRestart(),world=state.world,scene=state.scene;
-  assert.equal(app.isFeedbackDemo(),true);assert.equal(world.level,10);assert.equal(world.upgradeId,'energy');
-  assert.equal(state.campaignAttemptId,null);assert.equal(element('#campaign-demo-panel').hidden,true);
-  finishCampaign(world,scene);
-  assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readRestart().result?.completed,true);
-  assert.equal(JSON.stringify(app.readRestart().campaignProgress),beforeProgress);
-  assert.equal(JSON.stringify(app.readSkins().skins),beforeSkins);
-  assert.equal(saved.get('qiuqiule-campaign'),savedProgress);assert.equal(saved.get('qiuqiule-skins'),savedSkins);
-  app.advanceUi(.82);clickRestart();
-  const retry=app.readRestart().world;
-  assert.notEqual(retry,world);assert.equal(retry.level,10);assert.equal(retry.upgradeId,'energy');
-  assert.equal(retry.shotsUsed,0);assert.equal(retry.remaining,retry.budget);assert.equal(app.isFeedbackDemo(),true);
-  assert.equal(saved.get('qiuqiule-campaign'),savedProgress);assert.equal(saved.get('qiuqiule-skins'),savedSkins);
-});
-
-test('task7 skipped milestone holes grant each exact base skin once when that milestone is truly won',()=>{
-  try{
-    app.seedSkins();let run=app.seedCampaignRenderer(graphicsRecorder(),390,844,20);
-    app.seedSkins(null,9);app.seedCampaignAttempt({completed:9,unlocked:20});
-    finishCampaign(run.world,run.scene);
-    assert.equal(app.readSkins().skinUnlock.sides,7);
-    const after20=app.readRestart().campaignProgress;
-    assert.equal(after20.completed,9);assert.equal(after20.unlocked,21);
-    assert.equal(levelRecord(after20,10).cleared,false);
-    assert.deepEqual(app.readSkins().skins.owned,[7],'winning 20 must not silently grant the skipped level-10 hexagon');
-    app.advanceUi(1.66);clickAction('close');app.advanceUi(.62);
-    run=app.seedCampaignRenderer(graphicsRecorder(),390,844,10);app.seedCampaignAttempt(after20);
-    finishCampaign(run.world,run.scene);
-    assert.equal(app.readSkins().skinUnlock.sides,6,'returning to skipped 10 still awards its previously unowned polygon');
-    assert.equal(levelRecord(app.readRestart().campaignProgress,10).cleared,true);
-    assert.equal(levelRecord(app.readRestart().campaignProgress,20).cleared,true);
-    assert.equal(app.readRestart().campaignProgress.completed,10,'the outstanding 11–19 gap stays incomplete');
-    app.advanceUi(1.66);clickAction('close');app.advanceUi(.62);
-    const retained=app.readRestart().campaignProgress;
-    run=app.seedCampaignRenderer(graphicsRecorder(),390,844,10);app.seedCampaignAttempt(retained);
-    finishCampaign(run.world,run.scene);
-    assert.equal(app.readSkins().skinUnlock,null,'the already owned hexagon never repeats its first-unlock popup');
-  }finally{app.seedSkins();}
-});
-
-const task8UpgradeIds=['density','rubber','bank','steady'];
-const optionValues=selector=>[...element(selector).innerHTML.matchAll(/<option value="([^"]+)"/g)].map(match=>match[1]);
-function changeCampaignDemoLevel(level){
-  const select=element('#campaign-demo-level');select.id='campaign-demo-level';select.value=String(level);
-  select.onchange?.({target:select});
-  for(const handler of listeners.get('change')||[])handler({target:select});
-}
-function assertFiniteScene(g){
-  for(const shape of g.shapes){
-    assert.ok(Number.isFinite(shape.alpha),'shape alpha must be finite');
-    if(shape.points)for(const point of shape.points)assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y),'no Infinity-HP body may produce NaN vertices');
-    else for(const key of ['x','y','width','height','r'])if(key in shape)assert.ok(Number.isFinite(shape[key]),key);
-  }
-}
-
-test('task8 all twenty pool/golf levels offer class-filtered upgrades, precise goals and usable budget HUDs',()=>{
-  for(const r of [4,8])for(let k=0;k<10;k++){
-    const level=10*k+r,{scene}=app.seedLevelRenderer(graphicsRecorder(),390,844,level);
-    app.enterCampaign(level);let state=app.readRestart();const choices=state.campaignOffer.choices;
-    assert.equal(choices.length,2);assert.equal(new Set(choices.map(choice=>choice.id)).size,2);
-    assert.ok(choices.every(choice=>task8UpgradeIds.includes(choice.id)));
-    assert.equal(element('#campaign-level-title').textContent,`${level} · ${r===4?'落袋':'推杆'}`);
-    const goal=element('#campaign-level-goal').textContent;
-    assert.match(goal,r===4?/清空目标球/:/标准杆/);
-    clickAction('campaign-upgrade',{upgrade:choices[0].id});app.advanceUi(.65);state=app.readRestart();
-    const world=state.world;assert.equal(world.config.r,r);assert.equal(world.config.k,k);
-    assert.ok(goal.includes(`${world.budget} 发`));
-    if(r===8)assert.ok(goal.includes(`标准杆 ${world.config.par}`));
-    scene.update(0,0);const hud=element('#campaign-goal').textContent;
-    assert.equal(element('#campaign-goal').hidden,false);assert.ok(hud.includes(`${world.remaining}/${world.budget}`));
-    assert.match(hud,r===4?/球/:/标准杆/);
-    assert.match(element('#stage-progress').attributes['aria-label'],/共三点/);assert.equal(element('#stage-progress').children.length,3);
-    assert.equal(levelRecord(state.campaignProgress,level).attempts,1);
-    assert.equal(levelRecord(state.campaignProgress,level).upgradeChoices[choices[0].id],1);
-  }
-});
-
-test('task11 acceptance menu exposes all one hundred implemented levels with filtered upgrades',()=>{
-  app.seedRenderer(graphicsRecorder());app.installCampaignControls();
-  const expected=Array.from({length:100},(_,i)=>String(i+1));
-  const actual=optionValues('#campaign-demo-level');
-  assert.equal(element('#campaign-demo-level').value,'1');
-  assert.equal(actual.length,100);assert.equal(new Set(actual).size,100);assert.deepEqual(actual,expected);
-  for(const level of [1,2,3,4,5,6,7,8,9,10,92,93,94,95,96,97,98,99]){
-    changeCampaignDemoLevel(level);
-    const ids=optionValues('#campaign-demo-upgrade');
-    assert.deepEqual(new Set(ids),new Set([5,6].includes(level%10)?['gravity','density','growth','pulse']:[3,4,7,8].includes(level%10)?task8UpgradeIds:[1,2].includes(level%10)?['rubber','energy','bank','density']:['rubber','energy','bank','pierce']));
-    assert.ok(ids.includes(element('#campaign-demo-upgrade').value),'a changed class has a valid selected upgrade');
-  }
-  clickAction('campaign-demo-close');
-});
-
-test('task8 infinite-health pool targets and solid golf rails keep finite geometry after real collisions',()=>{
-  for(const level of [4,94]){
-    const g=graphicsRecorder(),{world,scene}=app.seedCampaignRenderer(g,390,844,level);
-    app.setFeedbackStrength(1);scene.update(0,0);assertFiniteScene(g);
-    assert.ok(world.enemies.length>0);const enemy=world.enemies[0],player=world.player;
-    assert.equal(enemy.hp,Infinity);assert.equal(enemy.maxHp,Infinity);
-    assert.equal(world.shoot(-world.maxPull,0),true);
-    Object.assign(enemy,{x:player.x+player.r+enemy.r-.2,y:player.y,vx:0,vy:0,born:1,solid:true});
-    player.vx=world.baseSpeed;player.vy=0;scene.update(0,1000/120);
-    assert.equal(enemy.hp,Infinity,'ordinary collision cannot destroy a pocket ball or roaming obstacle');
-    assertFiniteScene(g);
-    assert.ok(g.shapes.some(shape=>shape.color===0xe88c72&&shape.alpha>0),'targets and obstacles remain visible');
-  }
-  for(const level of [18,98]){
-    const g=graphicsRecorder(),{world,scene}=app.seedCampaignRenderer(g,390,844,level);
-    assert.equal(world.enemies.length,0);assert.ok(world.statics.length>0);
-    const obstacle=world.statics[0],player=world.player,count=world.statics.length;
-    assert.ok(world.shoot(0,-world.maxPull));
-    Object.assign(player,{x:obstacle.x,y:obstacle.y+obstacle.height/2+player.r+.1,vx:0,vy:-world.baseSpeed,feedbackFreeze:0,pendingVx:0,pendingVy:0});
-    scene.update(0,1000/120);assertFiniteScene(g);assert.equal(world.statics.length,count);
-    assert.ok(g.shapes.some(shape=>shape.type==='stroke'&&shape.color===app.playerInk()),'golf rails remain visibly outlined');
-  }
-  app.setFeedbackStrength(.6);
-});
-
-test('task8 restarting either class records one abandonment then reapplies just its new per-level upgrade',()=>{
-  for(const level of [4,8]){
-    const {world,scene,upgrade}=modernCampaignRun(level);
-    assert.equal(world.upgradeId,upgrade.id);assert.equal(world.shoot(-7,0),true);
-    advanceScene(scene,.05);clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
-    let state=app.readRestart(),record=levelRecord(state.campaignProgress,level);
-    assert.equal(record.attempts,1);assert.equal(record.abandoned,1);assert.equal(record.losses,0);
-    assert.equal(state.campaignOffer.choices.length,2);
-    const nextUpgrade=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:nextUpgrade.id});app.advanceUi(.65);
-    state=app.readRestart();const next=state.world;
-    assert.notEqual(next,world);assert.equal(next.level,level);assert.equal(next.shotsUsed,0);
-    assert.equal(next.remaining,next.budget);assert.equal(next.upgradeId,nextUpgrade.id);
-    assert.deepEqual(next.buffs,{[nextUpgrade.id]:1});assert.equal(levelRecord(state.campaignProgress,level).attempts,2);
-  }
-});
-
-function placeAtZoneEntry(world,body,zone,speedUnits){
-  const toward={x:world.width/2-zone.x,y:world.height/2-zone.y};
-  const distance=Math.hypot(toward.x,toward.y),nx=distance>1e-8?toward.x/distance:1,ny=distance>1e-8?toward.y/distance:0;
-  Object.assign(body,{x:zone.x+nx*(zone.r+.05),y:zone.y+ny*(zone.r+.05),
-    vx:-nx*world.unit*speedUnits,vy:-ny*world.unit*speedUnits,feedbackFreeze:0,pendingVx:0,pendingVy:0});
-}
-function finishTask8Scene(world,scene){
-  for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
-  assert.equal(world.phase,'over');assert.equal(world.completed,true);
-}
-
-test('task8 actual pool pocket crossings update score once, remove captured targets and prioritize last-budget victory',()=>{
-  const {world,scene,g}=modernCampaignRun(4),audio=app.recordTones();
-  try{
-    world.remaining=1;world.shotsUsed=world.budget-1;
-    assert.equal(world.shoot(-world.maxPull*.2,0),true);world.player.vx=world.player.vy=0;
-    const pocket=world.zones.filter(zone=>zone.kind==='pocket').sort((a,b)=>Math.abs(a.y-world.height/2)-Math.abs(b.y-world.height/2))[0];
-    assert.ok(pocket);assert.equal(world.zones.filter(zone=>zone.kind==='pocket').length,6);
-    const targets=world.enemies.slice(),events=observeWorldEvents(world);
-    for(const target of targets){
-      placeAtZoneEntry(world,target,pocket,8);world.step(1/120);scene.update(0,0);
-      assert.ok(target.captured||target.active===false||target.hp<=0,'target leaves active collision after its real pocket entry');
-      assert.ok(!world.enemies.includes(target)||target.captured||target.active===false);
-      assertFiniteScene(g);
-    }
-    assert.equal(world.remaining,0);assert.equal(world.completed,true);assert.equal(world.phase,'campaign-celebrate');
-    assert.equal(events.filter(event=>event.type==='campaignPocket').length,targets.length);
-    const pocketSounds=audio.calls.filter(args=>args[1]===.12&&args[3]===.035);
-    assert.equal(pocketSounds.length,targets.length,'each real pocket emits one sound');
-    const before=world.score;scene.update(0,0);assert.equal(world.score,before,'painting a captured target never re-awards points');
-    finishTask8Scene(world,scene);assert.equal(app.readRestart().result?.completed,true);
-    assert.equal(world.resultRating,1);const record=levelRecord(app.readRestart().campaignProgress,4);
-    assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,1);
-    assert.equal(app.readSkins().skinUnlock,null,'r4 is not a skin milestone');
-  }finally{audio.restore();}
-});
-
-test('task8 real golf hole-in-one earns a result crown and one completion chord',()=>{
-  app.seedSkins();const {world,scene,g}=modernCampaignRun(8);
-  const audio=app.recordBossVictory();
-  try{
-    const hole=world.zones.find(zone=>zone.kind==='hole');assert.ok(hole);
-    world.enemies=[];world.statics=[];
-    assert.equal(world.shoot(-world.maxPull*.2,0),true);
-    placeAtZoneEntry(world,world.player,hole,8);world.step(1/120);scene.update(0,0);
-    assert.equal(world.phase,'campaign-celebrate');assert.equal(world.completed,true);
-    assert.equal(world.golfHoleInOne,true);assert.equal(world.player.captured,true);
-    assertFiniteScene(g);assert.equal(audio.calls.length,1);
-    advanceScene(scene,.24);assert.equal(crownShapes(g).length,1,'the hole-in-one peak keeps its crown after the captured player disappears');
-    finishTask8Scene(world,scene);app.advanceUi(.82);
-    const state=app.readRestart();assert.equal(state.result.golfHoleInOne,true);
-    assert.equal(element('#ui-ball .ui-result-crown').style.display,'');
-    assert.equal(world.resultRating,3);assert.equal(levelRecord(state.campaignProgress,8).rating,3);
-    scene.update(0,0);assert.equal(audio.calls.length,1,'the result does not play the peak chord again');
-  }finally{audio.restore();app.seedSkins();}
-});
-
-test('task8 over-speed golf entry produces one rim cue and no clear before a later slow entry',()=>{
-  const {world,scene,g}=modernCampaignRun(8),hole=world.zones.find(zone=>zone.kind==='hole');
-  world.enemies=[];world.statics=[];const audio=app.recordTones(),events=observeWorldEvents(world);
-  try{
-    world.shoot(-world.maxPull,0);placeAtZoneEntry(world,world.player,hole,20);
-    world.step(1/120);scene.update(0,0);
-    assert.equal(world.completed,false);assert.equal(world.phase,'battle');assert.equal(!!world.player.captured,false);
-    assert.equal(events.filter(event=>event.type==='campaignRim').length,1);
-    assert.equal(audio.calls.filter(args=>args[0]===880&&args[1]===.07).length,1);
-    scene.update(0,0);assert.equal(events.filter(event=>event.type==='campaignRim').length,1);
-    assertFiniteScene(g);
-    // Leave the zone before the next approach, then make a valid low-speed crossing.
-    Object.assign(world.player,{x:world.width/2,y:world.height*.72,vx:0,vy:0});world.step(1/120);
-    placeAtZoneEntry(world,world.player,hole,8);world.step(1/120);scene.update(0,0);
-    assert.equal(world.completed,true);assert.equal(world.phase,'campaign-celebrate');
-  }finally{audio.restore();}
-});
-
-test('task8 pause, background and both orientations preserve pool and moving-hole golf attempts',t=>{
-  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
-  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;});
-  for(const level of [94,98]){
-    const {world,scene,g,upgrade}=modernCampaignRun(level),pointer=inputCanvas();let resize;
-    window.innerWidth=390;window.innerHeight=844;
-    window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
-    app.mountSceneBoundary(pointer.canvas,g);
-    assert.equal(world.shoot(-world.maxPull*.5,0),true);advanceScene(scene,.08);
-    const remaining=world.remaining,used=world.shotsUsed,shotTime=world.shotTime,attempt=app.readRestart().campaignAttemptId;
-    clickAction('pause');app.advanceUi(.42);const elapsed=world.elapsed,hole=world.zones.find(zone=>zone.kind==='hole');
-    const par=world.config.par,holePosition=hole&&{x:hole.x,y:hole.y};advanceScene(scene,.4);
-    near(world.elapsed,elapsed);near(world.shotTime,shotTime);
-    if(hole)assert.deepEqual({x:hole.x,y:hole.y},holePosition,'moving hole freezes with pause');
-    document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();
-    const checkpoint=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),level);
-    near(checkpoint.activeElapsed,elapsed);assert.equal(checkpoint.activeAttempt,attempt);assert.equal(checkpoint.losses,0);
-    for(const [width,height] of [[844,390],[320,568],[390,844]]){
-      window.innerWidth=width;window.innerHeight=height;resize();scene.update(0,0);
-      assert.equal(world.width,width);assert.equal(world.height,height);assertFiniteScene(g);
-      assert.equal(world.remaining,remaining);assert.equal(world.shotsUsed,used);assert.equal(world.upgradeId,upgrade.id);
-      assert.ok(world.zones.every(zone=>Number.isFinite(zone.x)&&Number.isFinite(zone.y)&&zone.r>0));
-      if(hole)assert.equal(world.config.par,par);
-    }
-    document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();
-    clickAction('resume');app.advanceUi(.42);advanceScene(scene,.05);
-    assert.ok(world.elapsed>elapsed);assert.equal(app.readRestart().campaignAttemptId,attempt);
-    assert.equal(world.remaining,remaining);assert.equal(world.shotsUsed,used);
-  }
-});
-
-test('task8 pool and golf failed launches enable a zero-rating skip only after three real losses',()=>{
-  for(const level of [4,8]){
-    let {world,scene}=modernCampaignRun(level);
-    for(let attempt=1;attempt<=3;attempt++){
-      world.remaining=1;world.shotsUsed=world.budget-1;assert.equal(world.shoot(-7,0),true);
-      for(let frame=0;frame<600&&world.phase!=='over';frame++)scene.update(0,1000/120);
-      assert.equal(world.phase,'over');assert.equal(world.completed,false);
-      const record=levelRecord(app.readRestart().campaignProgress,level);
-      assert.equal(record.losses,attempt);assert.equal(record.failStreak,attempt);assert.equal(record.rating,0);
-      app.advanceUi(.82);clickRestart();app.advanceUi(.65);
-      assert.equal(element('#campaign-skip').hidden,attempt<3);
-      if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
-    }
-    clickAction('campaign-skip');const progress=app.readRestart().campaignProgress,record=levelRecord(progress,level);
-    assert.equal(record.skipped,true);assert.equal(record.cleared,false);assert.equal(record.rating,0);
-    assert.equal(progress.completed,level-1);assert.equal(progress.unlocked,level+1);
-    assert.equal(levelRecord(progress,level-1).rating,0,'migrated earlier completions retain unknown ratings');
-    app.advanceUi(.65);app.enterCampaign(level);
-    assert.equal(app.readRestart().campaignOffer?.level,level,'a skipped stage remains selectable');
-    clickAction('campaign-cancel');
-  }
-});
-
-test('task8 shrinking golf capture draws one matching skin/photo and hides its original physical body',()=>{
-  app.seedSkins({enabled:true,sides:8,unlocked:8});const {world,scene,g}=modernCampaignRun(8);
-  const photo=app.recordPlayerPhoto();
-  try{
-    const hole=world.zones.find(zone=>zone.kind==='hole'),physicalRadius=world.player.r;
-    world.enemies=[];world.statics=[];world.shoot(-world.maxPull*.2,0);
-    placeAtZoneEntry(world,world.player,hole,8);world.step(1/120);scene.update(0,0);
-    assert.equal(world.player.captured,true);assert.ok(world.golfCapture);
-    photo.calls.length=0;g.clear();scene.drawArena();
-    assert.equal(photo.calls.length,1,'the regular body is hidden while its capture snapshot is drawn once');
-    assert.deepEqual(photo.calls[0].contour,app.readSkins().active);
-    const first=photo.calls[0].pose;near(first.r,physicalRadius);
-    world.feedbackTime=world.golfCapture.at+.11;photo.calls.length=0;g.clear();scene.drawArena();
-    assert.equal(photo.calls.length,1);assert.ok(photo.calls[0].pose.r>0&&photo.calls[0].pose.r<first.r);
-    assert.ok(photo.calls[0].options.alpha>0&&photo.calls[0].options.alpha<1);
-    near(world.player.r,physicalRadius);assertFiniteScene(g);
-    world.feedbackTime=world.golfCapture.at+.23;photo.calls.length=0;g.clear();scene.drawArena();
-    assert.equal(photo.calls.length,0,'after the capture fade neither full-size nor duplicate photo survives');
-    near(world.player.r,physicalRadius);
-  }finally{photo.restore();app.seedSkins();}
-});
-
-test('task8 full pool and golf trial victories, result and restart leave formal records and skins untouched',()=>{
-  for(const level of [4,8]){
-    app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:6,unlocked:6},10);
-    const initialProgress=JSON.stringify(app.readRestart().campaignProgress),initialSkins=JSON.stringify(app.readSkins().skins);
-    const storedProgress=saved.get('qiuqiule-campaign'),storedSkins=saved.get('qiuqiule-skins');
-    app.runCampaignTrial(level,'steady');let {world,scene}=app.readRestart();
-    assert.equal(world.upgradeId,'steady');assert.equal(app.readRestart().campaignAttemptId,null);assert.equal(app.isFeedbackDemo(),true);
-    world.shoot(-world.maxPull*.2,0);
-    if(level===4){
-      world.player.vx=world.player.vy=0;const pocket=world.zones.find(zone=>zone.kind==='pocket');
-      for(const target of [...world.enemies]){placeAtZoneEntry(world,target,pocket,8);world.step(1/120);scene.update(0,0);}
-    }else{
-      world.enemies=[];world.statics=[];placeAtZoneEntry(world,world.player,world.zones.find(zone=>zone.kind==='hole'),8);
-      world.step(1/120);scene.update(0,0);
-    }
-    finishTask8Scene(world,scene);assert.equal(app.readRestart().result?.completed,true);assert.equal(app.readSkins().skinUnlock,null);
-    assert.equal(JSON.stringify(app.readRestart().campaignProgress),initialProgress);assert.equal(JSON.stringify(app.readSkins().skins),initialSkins);
-    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
-    app.advanceUi(.82);clickRestart();const retry=app.readRestart().world;
-    assert.notEqual(retry,world);assert.equal(retry.level,level);assert.equal(retry.upgradeId,'steady');assert.equal(retry.shotsUsed,0);
-    assert.equal(retry.remaining,retry.budget);assert.equal(app.isFeedbackDemo(),true);assert.equal(app.readRestart().campaignAttemptId,null);
-    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
-  }
-  app.seedSkins();
-});
-
-const task9UpgradeIds=level=>level%10===2?['density','rubber','bank','steady']:['rubber','energy','bank','pierce'];
-
-
-
-
-
-test('task11 remapping old unlocked stages to all new classes preserves historical clears without fabricated ratings',()=>{
-  for(const raw of [100,{completed:99,unlocked:100}]){
-    app.seedLevelRenderer(graphicsRecorder(),390,844,100);app.setCampaignProgress(raw);
-    const initial=app.readRestart().campaignProgress;
-    assert.equal(initial.completed,99);assert.equal(initial.unlocked,100);assert.equal(levelRecord(initial,100).cleared,false);
-    for(const level of [2,3,5,6,7,9,92,93,95,96,97,99]){
-      assert.equal(levelRecord(initial,level).cleared,true);assert.equal(levelRecord(initial,level).rating,0);
-      app.enterCampaign(level);assert.equal(app.readRestart().campaignOffer.level,level);
-      clickAction('campaign-cancel');
-    }
-    app.enterCampaign(6);clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);
-    const progress=app.readRestart().campaignProgress,record=levelRecord(progress,6);
-    assert.equal(progress.completed,99);assert.equal(progress.unlocked,100);assert.equal(record.attempts,1);
-    assert.equal(record.cleared,true);assert.equal(record.rating,0);assert.equal(record.firstClearTime,null);
-    assert.equal(levelRecord(progress,2).attempts,0);assert.equal(levelRecord(progress,96).rating,0);
-  }
-});
-
-test('task11 all one hundred implemented trials keep attempts, ratings, teaching and skins isolated through pause and restart',()=>{
-  app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:8,unlocked:8},30);
-  const progress=JSON.stringify(app.readRestart().campaignProgress),skins=JSON.stringify(app.readSkins().skins);
-  const storedProgress=saved.get('qiuqiule-campaign'),storedSkins=saved.get('qiuqiule-skins');
-  const levels=Array.from({length:100},(_,i)=>i+1);
-  for(const level of levels){
-    const upgrade=[5,6].includes(level%10)?'gravity':[3,4,7,8].includes(level%10)?'steady':'energy';
-    app.runCampaignTrial(level,upgrade);let state=app.readRestart();const world=state.world;
-    assert.equal(world.level,level);assert.equal(world.upgradeId,upgrade);assert.equal(state.campaignAttemptId,null);
-    assert.equal(app.isFeedbackDemo(),true);world.shoot(-7,0);advanceScene(state.scene,.025);
-    clickAction('pause');app.advanceUi(.42);app.saveCampaignCheckpoint();clickRestart();
-    state=app.readRestart();assert.notEqual(state.world,world);assert.equal(state.world.level,level);
-    assert.equal(state.world.shotsUsed,0);assert.equal(state.world.upgradeId,upgrade);assert.equal(state.campaignAttemptId,null);
-    assert.equal(JSON.stringify(state.campaignProgress),progress);assert.equal(JSON.stringify(app.readSkins().skins),skins);
-    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
-  }
-  app.seedSkins();
-});
-
-
-
-function nearestBowlingShot(world){
-  const p=world.player,target=world.enemies.filter(pin=>pin.pinHP>0).sort((a,b)=>Math.hypot(a.x-p.x,a.y-p.y)-Math.hypot(b.x-p.x,b.y-p.y))[0];
-  assert.ok(target);const dx=p.x-target.x,dy=p.y-target.y,d=Math.hypot(dx,dy);
-  assert.equal(world.shoot(dx/d*world.maxPull,dy/d*world.maxPull),true);
-}
-function finishBowlingScene(world,scene){
-  for(let frame=0;frame<7200&&world.phase!=='over';frame++){
-    if(world.ready)nearestBowlingShot(world);
-    scene.update(0,1000/120);
-  }
-  assert.equal(world.phase,'over');assert.equal(world.completed,true);
-}
-
-function hitCampaignStaticFromBelow(world,shape,actor=world.player){
-  const edge=shape.shape==='rect'?shape.height/2:shape.r;
-  Object.assign(actor,{x:shape.x,y:shape.y+edge+actor.r+.5,vx:0,vy:0,feedbackFreeze:0,pendingVx:0,pendingVy:0});
-  // A separate outside step ends the previous contact; the following impact
-  // goes through the actual swept/static collision loop.
-  world.step(1/120);Object.assign(actor,{vx:0,vy:-20*world.unit,feedbackFreeze:0});world.step(1/120);
-}
-function preparePinballLastJackpot(world){
-  const contact={normalSpeed:world.baseSpeed,nx:0,ny:1,impactVx:0,impactVy:-world.baseSpeed};
-  if(!world.shotActive)assert.equal(world.shoot(-world.maxPull*.2,0),true);
-  // This is an explicit last-object boundary fixture, not a playable route.
-  // Earlier groups enter through the class rule so its private counters agree.
-  for(let group=0;group<world.config.jackpotGoal;group++){
-    for(const target of world.statics.filter(shape=>shape.kind==='pinball-target'&&shape.active&&!shape.dead))world.rules.onStaticHit(target,contact,world.player);
-    const jackpot=world.statics.find(shape=>shape.kind==='jackpot');assert.ok(jackpot.active);
-    const hits=group===world.config.jackpotGoal-1?2:3;
-    for(let hit=0;hit<hits;hit++)world.rules.onStaticHit(jackpot,contact,world.player);
-    if(group<world.config.jackpotGoal-1)world.rules.onTick(world.config.respawnDelay);
-  }
-  const last=world.statics.find(shape=>shape.kind==='jackpot');assert.equal(last.hp,1);return last;
-}
-function drainPinballBody(world,body=world.player){
-  const drain=world.zones.find(zone=>zone.kind==='drain');assert.ok(drain);
-  Object.assign(body,{x:drain.x,y:drain.y-drain.height/2-.25,vx:0,vy:world.unit*20,
-    feedbackFreeze:0,pendingVx:0,pendingVy:0});
-  world.step(1/120);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-const task10Upgrades=['split','energy','breath','pulse'];
-
-
-
-
-
-
-
-function lastBrickBoundary(world){
-  // Prepare the last brick and final budgeted round only. The terminal hit is
-  // still performed by a real emitted small ball through the collision loop.
-  world.bricksBroken=world.config.goal-1;world.remaining=1;world.shotsUsed=world.budget-1;
-  const last=world.statics.filter(body=>body.kind==='number-brick'&&!body.dead).sort((a,b)=>b.gridRow-a.gridRow)[0];
-  assert.ok(last);last.hp=1;
-  assert.equal(world.shoot(0,world.maxPull),true);assert.equal(world.remaining,0);
-  assert.equal(world.phase,'battle');const actor=world.auxiliaries[0];assert.ok(actor?.isAuxiliary);
-  hitCampaignStaticFromBelow(world,last,actor);return last;
-}
-
-
-
-function glassBoundaryRows(world,clock,misses){
-  // Advance only the class clock for a declared deadline fixture. This does
-  // not stand in for the separate ordinary-play route test.
-  world.rules.onTick(clock-world.glassClock);
-  const panes=world.statics.filter(body=>body.kind==='glass'&&!body.dead);
-  assert.ok(panes.length>=misses+1);
-  for(const pane of panes)Object.assign(pane,{active:false});
-  for(const pane of panes.slice(0,misses))Object.assign(pane,{active:true,y:world.glassBoard.bottom-pane.r});
-  const last=panes[misses];Object.assign(last,{active:true,y:world.glassBoard.top});
-  world.rules.onAfterTick();return [last];
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-const task11Upgrades=['gravity','density','growth','pulse'];
-
-test('task11 all twenty merge levels use two local choices, first teaching and useful unlimited-launch HUDs',()=>{
-  for(let k=0;k<10;k++)for(const r of [5,6]){
-    const level=k*10+r,g=graphicsRecorder(),{scene}=app.seedLevelRenderer(g,390,844,level);
-    const before=JSON.stringify(app.readRestart().campaignProgress),stored=saved.get('qiuqiule-campaign');
-    app.enterCampaign(level);let state=app.readRestart();
-    assert.equal(state.campaignOffer.level,level);assert.equal(state.campaignOffer.choices.length,2);
-    assert.equal(new Set(state.campaignOffer.choices.map(choice=>choice.id)).size,2);
-    assert.ok(state.campaignOffer.choices.every(choice=>task11Upgrades.includes(choice.id)));
-    assert.equal(element('#campaign-level-title').textContent,`${level} · ${'合成'}`);
-    const goal=element('#campaign-level-goal').textContent;
-    assert.doesNotMatch(goal,/Infinity|NaN|undefined|余.*发/);
-    assert.ok(goal.includes(String(2+Math.floor(k/3))));
-    assert.match(goal,/最大|合成/);
-    assert.equal((element('#campaign-upgrades').innerHTML.match(/<small>/g)||[]).length,2,'both offered upgrades explain their effect');
-    const offered=app.readRestart().campaignOffer.choices.map(c=>c.id);clickAction('campaign-cancel');const cancelled=levelRecord(app.readRestart().campaignProgress,level);assert.equal(cancelled.attempts,0);assert.deepEqual(cancelled.offerChoices,offered);assert.deepEqual(app.readRestart().campaignProgress.tutorials,{});
-    app.enterCampaign(level);const choice=app.readRestart().campaignOffer.choices[0];
-    clickAction('campaign-upgrade',{upgrade:choice.id});app.advanceUi(.65);state=app.readRestart();const world=state.world;
-    assert.equal(world.config.classId,'merge');assert.equal(world.config.k,k);assert.equal(world.config.implemented,true);
-    assert.equal(world.budget,42);assert.ok(Number.isFinite(world.remaining));assert.equal(world.upgradeId,choice.id);
-    assert.deepEqual(world.buffs,{[choice.id]:1});assert.equal(world.tutorialVisible,true);
-    assert.equal(!!state.campaignProgress.tutorials[world.config.classId],false);
-    scene.update(0,0);assertFiniteScene(g);const hud=element('#campaign-goal').textContent;
-    assert.equal(element('#campaign-goal').hidden,false);assert.doesNotMatch(hud,/Infinity|NaN|undefined|余.*发/);
-    assert.match(hud,/覆盖|合成|最大/);
-    assert.doesNotMatch(element('#stage-progress').attributes['aria-label']||'',/Infinity|NaN|undefined/);
-    const record=levelRecord(state.campaignProgress,level);
-    assert.equal(record.attempts,1);assert.equal(record.upgradeChoices[choice.id],1);assert.equal(record.rating,0);
-    const remaining=world.remaining;assert.equal(world.shoot(-7,0),true);assert.equal(world.remaining,remaining,'a launch consumes no pressure or time allowance');assert.equal(world.tutorialVisible,false);
-    assert.equal(world.shotsUsed,1);scene.update(0,0);assertFiniteScene(g);
-  }
-});
-
-test('task11 pause, background and rotation preserve merge pressure in the same attempt',t=>{
-  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
-  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;});
-  const counters=world=>({shots:world.shotsUsed,remaining:world.remaining,mergeMade:world.mergeMade,mergeCount:world.mergeCount,
-    mergeElapsed:world.mergeElapsed,mergeClock:world.mergeState?.elapsed,mergeClears:world.mergeClears,coverage:world.mergeCoverage,
-    chainElapsed:world.chainState?.elapsed,removed:world.chainState?.cleared,maxChain:world.chainState?.maxChain,
-    liveCount:world.chainState?.liveCount,headProgress:world.chainState?.headProgress});
-  for(const level of [95,99])for(const [portraitWidth,portraitHeight] of [[390,844],[320,568]]){
-    const {world,scene,g,upgrade}=modernCampaignRun(level,portraitWidth,portraitHeight),pointer=inputCanvas();let resize;
-    window.innerWidth=portraitWidth;window.innerHeight=portraitHeight;
-    window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
-    app.mountSceneBoundary(pointer.canvas,g);assert.equal(world.shoot(-7,0),true);advanceScene(scene,.05);
-    clickAction('pause');app.advanceUi(.42);const before=counters(world),elapsed=world.elapsed,attempt=app.readRestart().campaignAttemptId;
-    advanceScene(scene,.35);assert.deepEqual(counters(world),before);near(world.elapsed,elapsed);
-    document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();
-    const checkpoint=levelRecord(JSON.parse(saved.get('qiuqiule-campaign')),level);
-    assert.equal(checkpoint.activeAttempt,attempt);near(checkpoint.activeElapsed,elapsed);assert.equal(checkpoint.losses,0);assert.equal(checkpoint.abandoned,0);
-    for(const [width,height] of [[portraitHeight,portraitWidth],[portraitWidth,portraitHeight]]){
-      window.innerWidth=width;window.innerHeight=height;resize();scene.update(0,0);assertFiniteScene(g);
-      assert.equal(world.width,width);assert.equal(world.height,height);assert.equal(world.upgradeId,upgrade.id);
-      const after=counters(world),expected={...before};
-      for(const key of ['coverage','remaining','headProgress']){near(after[key]??0,expected[key]??0);delete after[key];delete expected[key];}
-      assert.deepEqual(after,expected);
-      assert.ok(world.campaignBodies.every(body=>[body.x,body.y,body.r,body.vx,body.vy].every(Number.isFinite)));
-    }
-    document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();clickAction('resume');app.advanceUi(.42);
-    advanceScene(scene,.05);assert.ok(world.elapsed>elapsed);assert.equal(app.readRestart().campaignAttemptId,attempt);
-    assert.ok(Number.isFinite(world.remaining));assert.equal(world.shotsUsed,before.shots);
-  }
-});
-
-test('task11 restart removes a live merge and records abandonment before a fresh local choice',()=>{
-  for(const level of [5,6]){
-    const {world,scene}=modernCampaignRun(level);assert.equal(world.shoot(-7,0),true);advanceScene(scene,.05);
-    clickAction('pause');app.advanceUi(.42);clickRestart();app.advanceUi(.65);
-    let state=app.readRestart(),record=levelRecord(state.campaignProgress,level);
-    assert.equal(state.world.isCampaignOffer,true);assert.equal(record.attempts,1);assert.equal(record.abandoned,1);assert.equal(record.losses,0);assert.equal(record.failStreak,0);
-    assert.equal(state.campaignOffer.choices.length,2);assert.ok(state.campaignOffer.choices.every(choice=>task11Upgrades.includes(choice.id)));
-    const choice=state.campaignOffer.choices[0];clickAction('campaign-upgrade',{upgrade:choice.id});app.advanceUi(.65);state=app.readRestart();
-    assert.notEqual(state.world,world);assert.equal(state.world.level,level);assert.equal(state.world.shotsUsed,0);assert.equal(state.world.budget,42);assert.ok(Number.isFinite(state.world.remaining));
-    assert.deepEqual(state.world.buffs,{[choice.id]:1});assert.equal(state.world.tutorialVisible,true);assert.equal(state.world.completed,false);
-    assert.equal(state.world.mergeMade||state.world.chainState?.cleared||0,0);assert.equal(state.world.score,0);
-    assert.equal(state.scene.effects.length,0);assert.equal(state.scene.impactGhosts.length,0);
-    record=levelRecord(state.campaignProgress,level);assert.equal(record.attempts,2);assert.equal(record.rating,0);assert.equal(record.wins,0);
-  }
-});
-
-function mergeBoundaryBall(world,level,x,y,velocity={}){
-  const radius=[.55,.75,1,1.3,1.65][level-1],mass=.55**2*2**(level-1);
-  const body=world.makeBody(x,y,radius*world.unit,mass/radius**2);
-  Object.assign(body,{kind:'merge-ball',mergeLevel:level,mass,density:mass/radius**2,hp:Infinity,maxHp:Infinity,
-    active:true,solid:true,born:1,drag:1.2,mergeAt:-Infinity,mergeChain:0,vx:0,vy:0,...velocity});
-  world.enemies.push(body);return body;
-}
-function mergePressureBoundary(world,{finalMerge=false,elapsed=1}={}){
-  // A declared near-terminal state checks ordering and save/UI integration.
-  // Sixteen legal L4 radii cover 43.34% of the 14u square. The actual pair
-  // collision below leaves >42% even after producing its L5 child.
-  world.enemies=[];world.mergeElapsed=elapsed;world.elapsed=elapsed;world.time=elapsed;
-  world.mergeSpawnClock=0;const b=world.arenaBounds,u=world.unit,cx=(b.left+b.right)/2,cy=(b.top+b.bottom)/2;
-  for(let row=0;row<4;row++)for(let col=0;col<4;col++)mergeBoundaryBall(world,4,cx+(col-1.5)*2.7*u,cy+(row-1.5)*2.7*u);
-  Object.assign(world.player,{x:b.left+world.player.r+.02*u,y:b.bottom-world.player.r-.02*u,vx:0,vy:0});
-  if(finalMerge){
-    world.mergeMade=world.config.targetMax-1;
-    const [a,c]=world.enemies;c.x=a.x+a.r+c.r-.01*u;a.vx=3*u;
-  }
-  world.step(1/120);
-}
-
-test('task11 an actual last L4 merge wins before simultaneous full pressure and persists each timed rating once',()=>{
-  for(const [elapsed,rating] of [[59,3],[89,2],[100,1]]){
-    app.seedSkins();const {world,scene,g}=modernCampaignRun(5),events=observeWorldEvents(world);
-    mergePressureBoundary(world,{finalMerge:true,elapsed});scene.update(0,0);
-    assert.equal(world.mergeMade,world.config.targetMax);assert.equal(world.mergeCount,1);
-    assert.ok(world.mergeCoverage>=world.config.coverageLimit,'victory ordering is tested while pressure also reaches its loss limit');
-    assert.equal(world.completed,true);assert.equal(world.phase,'campaign-celebrate');assert.equal(world.resultRating,rating);
-    assert.equal(events.filter(event=>event.type==='campaignMerge').length,1);assertFiniteScene(g);
-    finishTask8Scene(world,scene);app.advanceUi(.82);
-    const record=levelRecord(app.readRestart().campaignProgress,5);
-    assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,rating);assert.equal(record.bestScore,world.score);
-    assert.ok(record.firstClearTime>=elapsed);assert.equal(element('#campaign-rating').attributes['aria-label'],`本关评分 ${rating} 点，共三点`);
-    assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readSkins().skins.unlocked,0);
-    assert.equal(events.filter(event=>event.type==='over').length,1);scene.update(0,0);
-    assert.equal(levelRecord(app.readRestart().campaignProgress,5).wins,1);
-  }
-});
-
-test('task11 actual pressure failures reveal a zero-rating skip only after three completed losses',()=>{
-  let {world,scene}=modernCampaignRun(5);
-  for(let attempt=1;attempt<=3;attempt++){
-    mergePressureBoundary(world);scene.update(0,0);
-    assert.equal(world.phase,'over');assert.equal(world.completed,false);assert.ok(world.mergeCoverage>=.42);
-    const record=levelRecord(app.readRestart().campaignProgress,5);
-    assert.equal(record.losses,attempt);assert.equal(record.failStreak,attempt);assert.equal(record.abandoned,0);assert.equal(record.rating,0);
-    app.advanceUi(.82);clickRestart();app.advanceUi(.65);assert.equal(element('#campaign-skip').hidden,attempt<3);
-    if(attempt<3){clickAction('campaign-upgrade',{upgrade:app.readRestart().campaignOffer.choices[0].id});app.advanceUi(.65);world=app.readRestart().world;}
-  }
-  clickAction('campaign-skip');const state=app.readRestart(),record=levelRecord(state.campaignProgress,5);
-  assert.equal(record.skipped,true);assert.equal(record.cleared,false);assert.equal(record.rating,0);
-  assert.equal(state.campaignProgress.completed,4);assert.equal(state.campaignProgress.unlocked,6);
-  app.advanceUi(.65);app.enterCampaign(5);assert.equal(app.readRestart().campaignOffer.level,5);clickAction('campaign-cancel');
-});
-
-function mergeClearBoundary(world){
-  // Two legal maximum-size bodies touch through the real dynamic-contact path.
-  world.enemies=[];const b=world.arenaBounds,x=(b.left+b.right)/2,y=(b.top+b.bottom)/2,r=1.65*world.unit;
-  mergeBoundaryBall(world,5,x-r+.005*world.unit,y);mergeBoundaryBall(world,5,x+r-.005*world.unit,y);
-  world.step(1/120);
-}
-
-test('task11 real maximum merges emit inward fragments once and retain 120 Hz real-time scheduling during slow motion',()=>{
-  const {world,scene,g}=modernCampaignRun(5),events=observeWorldEvents(world),tones=app.recordTones();
-  app.setFeedbackStrength(1);
-  try{
-    mergeClearBoundary(world);scene.update(0,0);const event=events.find(event=>event.type==='campaignMergeClear');
-    assert.ok(event);assert.equal(world.mergeClears,1);assert.equal(world.mergeMade,0);assert.equal(world.score,500);
-    assert.equal(events.filter(event=>event.type==='kill').length,0);assert.equal(scene.impactGhosts.length,0);
-    const fragments=scene.effects.filter(effect=>effect.type==='shard');assert.ok(fragments.length>0&&fragments.length<=10);
-    for(const fragment of fragments)assert.ok((event.x-fragment.x)*fragment.vx+(event.y-fragment.y)*fragment.vy>0,'merge fragments move into the shared centre');
-    assert.ok([660,880,1100].every(frequency=>tones.calls.some(call=>call[0]===frequency)));
-    assert.ok(scene.zoomPulse);near(world.presentationTimeScale,.3);
-    const calls=[],step=world.step;world.step=function(dt,dragging,options){calls.push({dt,scale:options.timeScale});return step.call(this,dt,dragging,options);};
-    advanceScene(scene,.05);assert.equal(calls.length,6,'slow motion still schedules six real ticks in 50 ms');
-    calls.forEach(call=>{near(call.scale,.3);near(call.dt,.3/120);});
-    assertFiniteScene(g);advanceScene(scene,.5);assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,0);
-    assert.equal(events.filter(event=>event.type==='campaignMergeClear').length,1);assert.equal(world.score,500);
-  }finally{tones.restore();app.setFeedbackStrength(.6);}
-});
-
-test('task11 reduced-motion maximum merges retain sparse inward fragments and sound without camera or slow motion',async()=>{
-  await withReloadedEntry({juice:1,expressions:false},true,fresh=>{
-    const g=graphicsRecorder(),{world,scene}=fresh.seedCampaignRenderer(g,390,844,5),events=observeWorldEvents(world),tones=fresh.recordTones();
-    fresh.setFeedbackStrength(1);
-    try{
-      mergeClearBoundary(world);scene.update(0,0);const event=events.find(event=>event.type==='campaignMergeClear');assert.ok(event);
-      const fragments=scene.effects.filter(effect=>effect.type==='shard');assert.ok(fragments.length>0&&fragments.length<=4);
-      for(const fragment of fragments)assert.ok((event.x-fragment.x)*fragment.vx+(event.y-fragment.y)*fragment.vy>0);
-      assert.equal(events.filter(event=>event.type==='kill').length,0);assert.equal(world.presentationTimeScale,1);
-      assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);assert.equal(element('#game').style.transform,'none');
-      assert.ok(tones.calls.some(call=>call[0]===880));assertFiniteScene(g);
-    }finally{tones.restore();}
-  });
-});
-
-function chainDeadlineBoundary(world){
-  // This explicit deadline fixture does not stand in for a full play route.
-  // Advance the mode clock, then clear the visible queue through mode hit hooks
-  // so the next real step tests survival at sixty seconds without a hole hit.
-  assert.equal(world.shoot(-7,0),true);world.rules.onTick(59.99);
-  world.elapsed=59.99;world.time=59.99;
-  for(const bead of [...world.chainBeads])if(bead.active!==false&&!bead.dead)
-    world.rules.onStaticHit(bead,{normalSpeed:world.baseSpeed,impactVx:0,impactVy:-world.baseSpeed,attacker:world.player});
-  world.rules.onAfterTick();assert.equal(world.chainState.liveCount,0);
-  assert.ok(world.chainState.cleared<world.config.goal,'this fixture reaches the timer route, not the removal goal');
-  world.step(.02);
-}
-
-
-
-test('task11 merge trial terminal paths never save ratings, attempts, teaching or skins',()=>{
-  for(const level of [5,6]){
-    app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:8,unlocked:8},30);
-    const progress=JSON.stringify(app.readRestart().campaignProgress),skins=JSON.stringify(app.readSkins().skins);
-    const storedProgress=saved.get('qiuqiule-campaign'),storedSkins=saved.get('qiuqiule-skins');
-    app.runCampaignTrial(level,'growth');const {world,scene}=app.readRestart();
-    if(true)mergePressureBoundary(world,{finalMerge:true});else chainDeadlineBoundary(world);
-    scene.update(0,0);finishTask8Scene(world,scene);assert.equal(app.readRestart().result?.completed,true);
-    assert.equal(app.readSkins().skinUnlock,null);assert.equal(JSON.stringify(app.readRestart().campaignProgress),progress);
-    assert.equal(JSON.stringify(app.readSkins().skins),skins);assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
-    app.advanceUi(.82);clickRestart();const state=app.readRestart();
-    assert.notEqual(state.world,world);assert.equal(state.world.level,level);assert.equal(state.world.upgradeId,'growth');
-    assert.equal(state.world.shotsUsed,0);assert.equal(state.campaignAttemptId,null);assert.equal(app.isFeedbackDemo(),true);
-    assert.equal(saved.get('qiuqiule-campaign'),storedProgress);assert.equal(saved.get('qiuqiule-skins'),storedSkins);
-  }
-  app.seedSkins();
-});
-
-
-
-function seededCampaignRun(level,upgradeId,seed){
-  const g=graphicsRecorder(),{scene}=app.seedLevelRenderer(g,390,844,level),random=Math.random;
-  try{
-    Math.random=()=> (task11Upgrades.indexOf(upgradeId)+.1)/task11Upgrades.length;app.enterCampaign(level);
-    assert.ok(app.readRestart().campaignOffer.choices.some(choice=>choice.id===upgradeId));
-    Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/2**32;};
-    clickAction('campaign-upgrade',{upgrade:upgradeId});
-  }finally{Math.random=random;}
-  app.advanceUi(.65);return {g,scene,world:app.readRestart().world};
-}
-
-
-
-function chainCascadeBoundary(world){
-  // Arrange a declared three-cascade boundary from legal bead sizes. The
-  // separator is removed by an actual radial player collision, not a hook.
-  const pattern=[0,0,1,1,0,0,2,0,1,0,1,2];assert.equal(world.chainBeads.length,pattern.length);
-  world.chainBeads.forEach((bead,index)=>{
-    const size=pattern[index];bead.sizeIndex=size;bead.r=[.6,.85,1.1][size]*world.unit;bead.mass=(bead.r/world.unit)**2;
-  });
-  world.rules.onTick(1/120);const target=world.chainBeads[6],track=world.chainTrack;
-  assert.equal(target.active,true);assert.equal(world.shoot(-world.maxPull,0),true);
-  const nx=(target.x-track.cx)/track.radius,ny=(target.y-track.cy)/track.radius,p=world.player;
-  Object.assign(p,{x:target.x-nx*(target.r+p.r+.01*world.unit),y:target.y-ny*(target.r+p.r+.01*world.unit),
-    vx:nx*world.unit*20,vy:ny*world.unit*20,feedbackFreeze:0});
-  world.step(1/120);return target;
-}
-
-
-
-test('task11 a smaller physical viewport recomputes true merge pressure without settling during resize',t=>{
-  const {world,scene,g}=modernCampaignRun(5),pointer=inputCanvas();
-  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
-  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;});
-  window.innerWidth=390;window.innerHeight=844;
-  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};app.mountSceneBoundary(pointer.canvas,g);
-  // A resize boundary only: fourteen legal L4 balls fit below 42% on the
-  // original board. Cross-device area changes are distinct from rotation.
-  world.enemies=[];const b=world.arenaBounds,u=world.unit,cx=(b.left+b.right)/2,cy=(b.top+b.bottom)/2;
-  for(let index=0;index<14;index++)mergeBoundaryBall(world,4,cx+(index%4-1.5)*2.7*u,cy+(Math.floor(index/4)-1.5)*2.7*u);
-  world.mergeMade=1;world.mergeElapsed=12;world.elapsed=12;world.time=12;world.rules.onAfterTick();
-  assert.ok(world.mergeCoverage<.42);const bodies=new Map(world.campaignBodies.map(body=>[body.id,{r:body.r,mass:body.mass}]));
-  window.innerWidth=320;window.innerHeight=568;resize();scene.update(0,0);
-  assert.equal(world.phase,'battle');assert.equal(app.readRestart().result,null);assert.equal(world.mergeMade,1);near(world.mergeElapsed,12);
-  assert.ok(world.mergeCoverage>.42);const area=world.enemies.reduce((sum,body)=>sum+Math.PI*body.r**2,0);
-  near(world.mergeCoverage,area/(world.arenaBounds.width*world.arenaBounds.height));
-  for(const body of world.campaignBodies){near(body.r,bodies.get(body.id).r*world.unit/u);near(body.mass,bodies.get(body.id).mass);}
-  assert.equal(levelRecord(app.readRestart().campaignProgress,5).losses,0);assertFiniteScene(g);
-  scene.update(0,1000/120);assert.equal(world.phase,'over');assert.equal(world.completed,false);
-  assert.equal(levelRecord(app.readRestart().campaignProgress,5).losses,1);
-});
-
-test('task11 a full aimed merge run creates its maximum balls through real scene physics and saves its earned result',()=>{
-  app.seedSkins();const {world,scene,g}=seededCampaignRun(5,'density',733),events=observeWorldEvents(world);app.setFeedbackStrength(.6);
-  // Ordinary play from the untouched starting layout: push the largest live
-  // body, preferring the nearest equal-level choice, with a full pull.
-  for(let frame=0;frame<24000&&world.phase!=='over';frame++){
-    if(world.ready){
-      const p=world.player,target=world.enemies.filter(body=>body.active!==false&&body.hp>0)
-        .sort((a,b)=>b.mergeLevel-a.mergeLevel||Math.hypot(a.x-p.x,a.y-p.y)-Math.hypot(b.x-p.x,b.y-p.y))[0];
-      if(target){
-        const angle=Math.atan2(target.y-p.y,target.x-p.x);
-        assert.equal(world.shoot(-Math.cos(angle)*world.maxPull,-Math.sin(angle)*world.maxPull),true);
-      }
-    }
-    scene.update(0,1000/120);
-  }
-  assert.equal(world.phase,'over');assert.equal(world.completed,true,JSON.stringify({state:world.mergeState,shots:world.shotsUsed}));
-  assert.equal(world.mergeMade,world.config.targetMax);assert.ok(world.shotsUsed>1);assert.ok(world.mergeCount>5);
-  assert.ok(events.some(event=>event.type==='campaignMerge'&&event.level===5));assert.equal(events.filter(event=>event.type==='over').length,1);
-  assert.ok(world.mergeCoverage<world.config.coverageLimit);assertFiniteScene(g);
-  const record=levelRecord(app.readRestart().campaignProgress,5);
-  assert.equal(record.wins,1);assert.equal(record.losses,0);assert.equal(record.rating,world.resultRating);assert.equal(record.bestScore,world.score);
-  assert.ok(record.firstClearTime>=world.mergeElapsed);assert.equal(app.readSkins().skinUnlock,null);assert.ok(element('#result-reason').textContent.startsWith(world.resultSummary));assert.match(element('#result-reason').textContent,/点/);
-});
-
-
-test('v7.9 endless appearance unlocks at 26767 without interrupting battle or Boss and ignores campaign/demo scores',t=>{
+test('endless appearance unlocks at 26767 without interrupting battle or Boss and ignores demo scores',t=>{
   const prior=saved.get('qiuqiule-appearance-state');
-  t.after(()=>{app.seedSkins();if(prior===undefined)saved.delete('qiuqiule-appearance-state');else saved.set('qiuqiule-appearance-state',prior);});
+  t.after(()=>{app.seedCircle();if(prior===undefined)saved.delete('qiuqiule-appearance-state');else saved.set('qiuqiule-appearance-state',prior);});
   for(const phase of ['battle','boss']){
-    const {world}=controlRun();app.seedEndless();app.seedSkins();app.seedAppearanceState();
+    const {world}=controlRun();app.seedEndless();app.seedCircle();app.seedAppearanceState();
     if(phase==='boss'){world.stage=5;world.beginBoss();world.phase='boss';world.events=[];}
     world.score=26766;app.updateScoreHud();assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false);
     world.score=26767;app.updateScoreHud();
     const state=app.readAppearancePresentation().state;
     assert.equal(state.bigEyeUnlocked,true);assert.equal(state.pendingUnlock,true);assert.equal(state.selected,'original');
     assert.equal(app.readRestart().paused,false);assert.equal(app.readRestart().modal,null);assert.equal(world.phase,phase);
-    assert.equal(app.readSkins().skinUnlock,null,'live scoring saves ownership but does not interrupt the current run');
+    assert.equal(app.readPlayerShape().skinUnlock,null,'live scoring saves ownership but does not interrupt the current run');
     assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).pendingUnlock,true);
     app.updateScoreHud();assert.deepEqual(app.readAppearancePresentation().state,state,'repeated HUD frames cannot re-award or auto-equip');
   }
-  app.seedCampaignRenderer(graphicsRecorder(),390,844,10);app.seedSkins();app.seedAppearanceState();
-  app.readRestart().world.score=99999;app.updateScoreHud();app.grantAppearanceForTest();
-  assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false,'campaign points cannot award the endless appearance');
-  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedAppearanceState();app.runFeedbackDemo('steer');
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedAppearanceState();app.runFeedbackDemo('steer');
   app.readRestart().world.score=99999;app.updateScoreHud();app.grantAppearanceForTest();
   assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false,'trial scenes do not alter ownership');
 });
 
 test('v7.9 endless appearance reward uses the animated unlock route and returns to the equipped style only after dismissal',t=>{
-  const {world}=controlRun();app.seedEndless();app.seedSkins({enabled:true,sides:6,unlocked:6},10);
+  const {world}=controlRun();app.seedEndless();app.seedCircle();
   app.seedAppearanceState();
-  const original=app.readSkins().playerContour,ink=app.playerInk();
-  t.after(()=>{app.seedSkins();app.setPlayerInk('#252720');});
+  const original=app.readPlayerShape().playerContour,ink=app.playerInk();
+  t.after(()=>{app.seedCircle();app.setPlayerInk('#252720');});
   world.score=26767;app.updateScoreHud();world.phase='over';app.showResultForTest();
-  let state=app.readRestart(),reward=app.readSkins().skinUnlock;
+  let state=app.readRestart(),reward=app.readPlayerShape().skinUnlock;
   assert.equal(state.modal,'skin-unlock');assert.equal(state.paused,true);assert.equal(state.result,null);
-  assert.equal(reward.appearance,'big-eye');assert.equal(reward.ready,false);
-  clickAction('close');assert.equal(app.readSkins().skinUnlock.phase,'enter');assert.equal(app.readAppearancePresentation().state.pendingUnlock,true);
-  app.advanceUi(.8);assert.equal(app.readSkins().skinUnlock.ready,false);
+  assert.deepEqual(reward.queue,[{kind:'appearance',id:'big-eye'}]);assert.equal(reward.ready,false);
+  clickAction('close');assert.equal(app.readPlayerShape().skinUnlock.phase,'enter');assert.equal(app.readAppearancePresentation().state.pendingUnlock,true);
+  app.advanceUi(.8);assert.equal(app.readPlayerShape().skinUnlock.ready,false);
   const middle=app.readAppearancePresentation().layers;
   assert.ok(middle.some(layer=>layer.id==='big-eye'&&layer.weight>0&&layer.weight<1),'appearance fades into the shared reveal animation');
-  app.advanceUi(.86);assert.equal(app.readSkins().skinUnlock.ready,true);
+  app.advanceUi(.86);assert.equal(app.readPlayerShape().skinUnlock.ready,true);
   assert.ok(app.readAppearancePresentation().layers.some(layer=>layer.id==='big-eye'&&layer.weight===1));
   assert.equal(app.readAppearancePresentation().state.selected,'original','preview never silently equips the reward');
   assert.equal(app.playerInk(),ink,'reward preview never overwrites the saved player color');
   clickAction('close');
-  assert.equal(app.readSkins().skinUnlock.phase,'leave');assert.equal(app.readRestart().result.campaign,false);
+  assert.equal(app.readPlayerShape().skinUnlock.phase,'leave');assert.ok(app.readRestart().result);
   assert.equal(app.readAppearancePresentation().state.pendingUnlock,false);
   assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).pendingUnlock,false);
   app.advanceUi(.62);
-  assert.equal(app.readSkins().skinUnlock,null);assert.equal(app.readAppearancePresentation().override,null);
-  assert.equal(app.readRestart().uiAnchor,'over');assertSameContour(app.readSkins().active,original);
+  assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readAppearancePresentation().override,null);
+  assert.equal(app.readRestart().uiAnchor,'over');assertSameContour(app.readPlayerShape().active,original);
   assert.ok(app.readAppearancePresentation().layers.every(layer=>layer.id==='original'));
   const earned={...app.readAppearancePresentation().state};
   const next=controlRun().world;app.seedAppearanceState(earned);next.score=30000;next.phase='over';app.showResultForTest();
-  assert.equal(app.readSkins().skinUnlock,null,'later qualifying runs never replay an acknowledged unlock');
+  assert.equal(app.readPlayerShape().skinUnlock,null,'later qualifying runs never replay an acknowledged unlock');
   assert.ok(app.readRestart().result);
 });
 
+test('a queued appearance and three stage companions require one ready acknowledgement each and restore the equipped photo and companion',t=>{
+  const stored=new Map(saved),{world}=controlRun();app.seedEndless();app.seedCircle();
+  app.seedCompanions({unlocked:1,selected:'sun-1'});
+  const photo=app.recordCompositePhotos(true),image=app.readAppearance().appearance,originalInk=app.playerInk();
+  t.after(()=>{photo.restore();app.seedCircle();document.hidden=false;saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  Object.assign(world,{score:26767,stage:20,maxStage:20});app.updateScoreHud();
+  assert.equal(app.readRestart().modal,null);assert.deepEqual(app.readCompanions().state.pendingUnlocks,['moon-1','star-1','sun-2']);
+  world.phase='over';app.showResultForTest();
+  const reward=app.readPlayerShape().skinUnlock,queue=[{kind:'appearance',id:'big-eye'},...['moon-1','star-1','sun-2'].map(id=>({kind:'companion',id}))];
+  assert.deepEqual(reward.queue,queue);assert.equal(reward.index,0);assert.equal(app.readRestart().result,null);
+  const escape=()=>{for(const handler of listeners.get('keydown'))handler({key:'Escape',preventDefault(){}});};
+  clickAction('close');escape();assert.equal(reward.index,0);assert.equal(app.readAppearancePresentation().state.pendingUnlock,true);
+  documentPointer('pointerdown');documentPointer('click');clickRestart();clickAction('home');
+  assert.equal(app.readRestart().world,world);assert.equal(app.readPlayerShape().skinUnlock,reward);assert.equal(app.readRestart().result,null,'background and result controls cannot bypass queued rewards');
+  app.advanceUi(.8);const frozen={elapsed:reward.elapsed,pose:app.sourcePose()};
+  document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();app.advanceUi(5);
+  assert.equal(reward.elapsed,frozen.elapsed);assert.deepEqual(app.sourcePose(),frozen.pose);assert.equal(reward.ready,false);
+  document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();app.advanceUi(.86);
+  for(let index=0;index<queue.length;index++){
+    assert.equal(reward.index,index);assert.equal(reward.ready,true);assert.equal(app.readRestart().result,null);assert.equal(app.readRestart().controlFlight,null);
+    assert.equal(element('#skin-unlock-title').dataset.kind,queue[index].kind);
+    assert.equal(app.readAppearancePresentation().state.selected,'custom');assert.equal(app.readCompanions().state.selected,'sun-1');
+    assert.equal(app.readAppearance().appearance,image);assert.equal(app.playerInk(),originalInk);
+    if(queue[index].kind==='companion')assert.deepEqual(app.readCompanions().layers,[{id:queue[index].id,weight:1}]);
+    clickAction('close');
+    const pending=JSON.parse(saved.get('qiuqiule-companions')).pendingUnlocks;
+    assert.deepEqual(pending,queue.slice(Math.max(1,index+1)).map(item=>item.id));
+    assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).pendingUnlock,false);
+    if(index+1<queue.length){
+      assert.equal(reward.phase,'switch');assert.equal(reward.index,index+1);assert.equal(reward.ready,false);assert.equal(app.readRestart().result,null);
+      clickAction('close');escape();assert.equal(reward.index,index+1,'rapid repeated input cannot acknowledge an unshown reward');
+      app.advanceUi(.18);assert.equal(reward.ready,false);assert.equal(app.readRestart().result,null);
+      app.advanceUi(.18);assert.equal(reward.ready,true);
+    }
+  }
+  assert.equal(reward.phase,'leave');assert.ok(app.readRestart().result);app.advanceUi(.62);
+  assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readRestart().modal,'over');
+  assert.deepEqual(app.readCompanions().layers,[{id:'sun-1',weight:1}]);
+  assert.ok(app.readAppearancePresentation().layers.every(layer=>layer.id==='custom'));assert.equal(app.readAppearance().appearance,image);
+  assert.deepEqual(app.readCompanions().state.pendingUnlocks,[]);assert.equal(app.readCompanions().state.selected,'sun-1');
+});
+
+test('reloading after one companion acknowledgement preserves every unseen reward and never replays the acknowledged item',async t=>{
+  const stored=new Map(saved),{world}=controlRun();app.seedEndless();app.seedCircle();app.seedCompanions();
+  t.after(()=>{app.seedCircle();saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  world.stage=world.maxStage=15;app.updateScoreHud();world.phase='over';app.showResultForTest();app.advanceUi(1.65);clickAction('close');
+  const pending=['moon-1','star-1'];assert.deepEqual(app.readCompanions().state.pendingUnlocks,pending);
+  assert.equal(app.readRestart().result,null);assert.equal(app.readPlayerShape().skinUnlock.ready,false);
+  await withReloadedEntry(null,false,fresh=>{
+    const restored=fresh.readCompanions().state;assert.equal(restored.unlocked,3);assert.deepEqual(restored.pendingUnlocks,pending);
+    const {world:next}=fresh.seedRenderer(graphicsRecorder(),390,844,true);fresh.seedCircle();fresh.seedCompanions(restored);fresh.seedEndless({maxStage:15});
+    next.phase='over';fresh.showResultForTest();
+    assert.deepEqual(fresh.readPlayerShape().skinUnlock.queue,pending.map(id=>({kind:'companion',id})));
+    assert.equal(fresh.readPlayerShape().skinUnlock.ready,false);assert.equal(fresh.readRestart().result,null);
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-companions')).pendingUnlocks,pending,'restoring or showing a reward never acknowledges it');
+  });
+});
+
+test('companion reward transitions keep one visible player through rotation and reduced motion without advancing or replacing the queue',async()=>{
+  for(const reduced of [false,true])await withReloadedEntry({juice:.6},reduced,fresh=>{
+    const originalWindow={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+    window.innerWidth=390;window.innerHeight=844;window.devicePixelRatio=1;
+    window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else originalWindow.add(type,handler);};
+    const g=graphicsRecorder(),{world,scene}=fresh.seedRenderer(g,390,844,true);fresh.seedCircle();fresh.seedEndless();fresh.seedCompanions({unlocked:1,selected:'sun-1'});
+    const photos=fresh.recordCompositePhotos(true),image=fresh.readAppearance().appearance,pointer=inputCanvas(390,844,fresh);
+    try{
+      fresh.mountSceneBoundary(pointer.canvas,g);world.stage=world.maxStage=15;fresh.updateScoreHud();world.phase='over';fresh.showResultForTest();
+      const reward=fresh.readPlayerShape().skinUnlock,expected=reward.queue.map(item=>item.id),time=world.time;
+      fresh.advanceUi(reduced?.56:1.65);assert.equal(reward.ready,true);
+      const before=fresh.sourcePose();clickAction('close');const after=fresh.sourcePose();
+      for(const key of ['x','y','r'])near(after[key],before[key]);
+      assert.equal(reward.phase,'switch');assert.equal(reward.index,1);assert.equal(reward.ready,false);
+      fresh.advanceUi(reduced?.1:.18);const age=reward.elapsed;
+      window.innerWidth=844;window.innerHeight=390;resize();fresh.advanceUi(0);
+      assert.equal(fresh.readPlayerShape().skinUnlock,reward);assert.equal(reward.elapsed,age);assert.deepEqual(reward.queue.map(item=>item.id),expected);
+      assert.equal(element('#ui-ball').hidden,false);near(Number(element('#skin-unlock-panel').style.opacity),1);
+      assert.ok(['x','y','r'].every(key=>Number.isFinite(fresh.sourcePose()[key])));assert.equal(fresh.readRestart().result,null);
+      assert.equal(fresh.readAppearance().appearance,image);assert.equal(fresh.readCompanions().state.selected,'sun-1');assert.equal(world.time,time);
+      fresh.advanceUi(reduced?.1:.18);assert.equal(reward.ready,true);clickAction('close');fresh.advanceUi(reduced?.28:.62);
+      assert.equal(fresh.readPlayerShape().skinUnlock,null);assert.equal(fresh.readRestart().modal,'over');assert.equal(fresh.readAppearance().appearance,image);
+      assert.deepEqual(fresh.readCompanions().layers,[{id:'sun-1',weight:1}]);assert.equal(world.time,time);
+    }finally{photos.restore();window.innerWidth=originalWindow.width;window.innerHeight=originalWindow.height;window.devicePixelRatio=originalWindow.dpr;window.addEventListener=originalWindow.add;}
+  });
+});
+
+test('switching original, Big Eye and custom retains the saved image and reuses its decoded photo until explicit replacement',async t=>{
+  const stored=new Map(saved),originalImage=globalThis.Image;let decodes=0;
+  globalThis.Image=class{async decode(){decodes++;}};
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedAppearanceState({bigEyeUnlocked:true});app.bindPhotoRenderer({setImage(){},hide(){}});
+  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedCircle();saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  const firstUrl='data:image/png;base64,Zmlyc3Q=';await app.applyAppearance(firstUrl,true);const image=app.readAppearance().appearance;
+  for(const id of ['original','custom','big-eye','original','custom']){
+    assert.equal(app.chooseAppearanceForTest(id),true);app.advanceSkin(.3);
+    assert.equal(app.readAppearance().appearance,image);assert.equal(app.readAppearance().appearanceUrl,firstUrl);
+    assert.equal(await loadAppearance(),firstUrl);assert.equal(app.readAppearancePresentation().state.selected,id);assert.equal(decodes,1);
+  }
+  const secondUrl='data:image/png;base64,c2Vjb25k';await app.applyAppearance(secondUrl,true);
+  assert.notEqual(app.readAppearance().appearance,image);assert.equal(decodes,2);assert.equal(await loadAppearance(),secondUrl);
+  assert.equal(app.readAppearancePresentation().state.selected,'custom');
+  await withReloadedEntry(null,false,async fresh=>{
+    fresh.bindPhotoRenderer({setImage(){},hide(){}});await fresh.applyAppearance(await loadAppearance());
+    assert.equal(fresh.readAppearancePresentation().state.selected,'custom');assert.equal(fresh.readAppearance().appearanceUrl,secondUrl);
+    assert.ok(fresh.readAppearancePresentation().layers.every(layer=>layer.id==='custom'));
+  });
+});
+
 test('v7.10 appearance fades preserve preview motion and restore the pre-Big Eye player color',t=>{
-  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedAppearanceState({bigEyeUnlocked:true});
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedAppearanceState({bigEyeUnlocked:true});
   const oldSettings=app.readFeedbackSettings();app.setPlayerInk('#405060');
-  t.after(()=>{app.seedSkins();app.setPlayerInk(oldSettings.player);});
+  t.after(()=>{app.seedCircle();app.setPlayerInk(oldSettings.player);});
   const before=app.seedWardrobePresentation(.73),homeBefore={...app.readHome().player};
   assert.equal(app.chooseAppearanceForTest('big-eye'),true);
   const presentation=app.readAppearancePresentation();
@@ -5211,9 +3801,9 @@ test('v7.10 appearance fades preserve preview motion and restore the pre-Big Eye
 });
 
 test('v7.9 wardrobe back consumes the gallery navigation before any ball transfer',t=>{
-  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedWardrobePresentation(.4);
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedWardrobePresentation(.4);
   const calls=[],restore=app.bindWardrobeControls({update:dt=>calls.push(['update',dt]),back:()=>{calls.push(['back']);return true;},cancelInteraction:()=>calls.push(['cancel'])});
-  t.after(()=>{restore();app.seedSkins();});
+  t.after(()=>{restore();app.seedCircle();});
   const before=app.sourcePose();clickAction('close');
   assert.equal(app.readRestart().modal,'wardrobe');assert.equal(app.readRestart().transfer,null);assert.deepEqual(app.sourcePose(),before);
   assert.deepEqual(calls,[['back']]);app.advanceSkin(.05);app.advanceUi(.05);
@@ -5222,10 +3812,10 @@ test('v7.9 wardrobe back consumes the gallery navigation before any ball transfe
 
 
 test('v7.9 Big Eye renders one large circular pupil without expressions and never changes collision geometry',t=>{
-  t.after(()=>{app.seedSkins();app.setPlayerInk('#252720');app.setExpressionEnabled(false);});
-  for(const mode of ['home','levels','endless','campaign']){
+  t.after(()=>{app.seedCircle();app.setPlayerInk('#252720');app.setExpressionEnabled(false);});
+  for(const mode of ['home','endless']){
     const g=graphicsRecorder(),{scene,active,player,pointer}=pullScene(mode,g);
-    app.seedSkins({enabled:true,sides:6,unlocked:6});
+    app.seedCircle();
     app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});app.setPlayerInk('#b8db8a');app.setExpressionEnabled(true);
     const physical={x:player.x,y:player.y,r:player.r,mass:player.mass,density:player.density,vx:player.vx,vy:player.vy};
     scene.update(0,0);
@@ -5244,11 +3834,11 @@ test('v7.9 Big Eye renders one large circular pupil without expressions and neve
 });
 
 test('v7.9 transparent custom photos retain their captured base color throughout a Big Eye crossfade',t=>{
-  const g=graphicsRecorder(),{home}=app.seedRenderer(g);app.seedSkins();
+  const g=graphicsRecorder(),{home}=app.seedRenderer(g);app.seedCircle();
   const oldInk=app.setPlayerInk('#405060'),photos=app.recordCompositePhotos(true);
   app.seedAppearanceState({selected:'custom',bigEyeUnlocked:true},{hasImage:true});
   const image=app.readAppearance().appearance,pose={x:100,y:200,r:30,squash:0};
-  t.after(()=>{photos.restore();app.seedSkins();app.setPlayerInk(oldInk);});
+  t.after(()=>{photos.restore();app.seedCircle();app.setPlayerInk(oldInk);});
   app.paintUiForTest(pose);assert.equal(photos.main.at(-1).options.baseColor,0x405060);
   assert.equal(app.chooseAppearanceForTest('big-eye'),true);assert.equal(app.playerInk(),0xb8db8a);
   for(const step of [0,.14]){
@@ -5268,10 +3858,10 @@ test('v7.9 transparent custom photos retain their captured base color throughout
 
 test('v7.10 Big Eye keeps a visible same-hue comet and seven-point aim guide in the actual battle and Boss scene',t=>{
   const previous=app.readFeedbackSettings();
-  t.after(()=>{app.seedSkins();app.setPlayerInk(previous.player);app.setFeedbackStrength(previous.juice);});
+  t.after(()=>{app.seedCircle();app.setPlayerInk(previous.player);app.setFeedbackStrength(previous.juice);});
   for(const phase of ['battle','boss']){
     const {world,scene,g,pointer}=controlRun(),p=world.player;
-    app.seedSkins();app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});app.setPlayerInk('#b8db8a');
+    app.seedCircle();app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});app.setPlayerInk('#b8db8a');
     if(phase==='boss'){world.stage=5;world.beginBoss();world.phase='boss';world.events=[];}
     const b=world.arenaBounds;
     Object.assign(p,{x:b.left+40,y:b.bottom-p.r-20,vx:world.unit*35,vy:0,feedbackFreeze:0});
@@ -5296,9 +3886,9 @@ test('v7.10 Big Eye keeps a visible same-hue comet and seven-point aim guide in 
 test('v7.10 leaving Big Eye through a new custom photo restores color without replacing unrelated settings',async t=>{
   const originalImage=globalThis.Image,previous=app.readFeedbackSettings(),stored=new Map(['qiuqiule-settings','qiuqiule-appearance-state','qiuqiule-appearance'].map(key=>[key,saved.get(key)]));
   globalThis.Image=class{async decode(){}};
-  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedAppearanceState({bigEyeUnlocked:true});
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedAppearanceState({bigEyeUnlocked:true});
   app.bindPhotoRenderer({hide(){},setImage(){}});app.setPlayerInk('#405060');
-  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedSkins();app.setPlayerInk(previous.player);for(const [key,value]of stored)value===undefined?saved.delete(key):saved.set(key,value);});
+  t.after(()=>{globalThis.Image=originalImage;app.bindPhotoRenderer(null);app.seedCircle();app.setPlayerInk(previous.player);for(const [key,value]of stored)value===undefined?saved.delete(key):saved.set(key,value);});
   assert.equal(app.chooseAppearanceForTest('big-eye'),true);
   assert.equal(app.chooseAppearanceForTest('big-eye'),false,'reselecting the active appearance cannot overwrite its saved prior color');
   assert.equal(app.readAppearancePresentation().state.previousPlayerColor,'#405060');
@@ -5314,26 +3904,24 @@ test('v7.10 leaving Big Eye through a new custom photo restores color without re
 });
 
 
-test('v7.10 formal endless scoring unlocks all nine companion milestones permanently without awarding campaign or trial scores',t=>{
+test('formal endless stages unlock all nine companion milestones permanently without awarding score-only or trial milestones',t=>{
   const key='qiuqiule-companions',prior=saved.get(key);
-  t.after(()=>{app.seedCompanions();prior===undefined?saved.delete(key):saved.set(key,prior);});
+  t.after(()=>{app.seedCircle();prior===undefined?saved.delete(key):saved.set(key,prior);});
   const {world}=controlRun();app.seedEndless();app.seedCompanions();
-  world.score=7999;app.updateScoreHud();assert.equal(app.readCompanions().state.unlocked,0);
+  world.score=999999;world.stage=world.maxStage=4;app.updateScoreHud();assert.equal(app.readCompanions().state.unlocked,0,'score no longer earns companions');
   for(let milestone=1;milestone<=9;milestone++){
-    world.score=milestone*8000;app.updateScoreHud();
-    assert.equal(app.readCompanions().state.unlocked,milestone);
-    assert.equal(app.readCompanions().state.selected,null,'earning an orbit decoration must not auto-equip it');
+    world.stage=world.maxStage=milestone*5;app.updateScoreHud();
+    const state=app.readCompanions().state;assert.equal(state.unlocked,milestone);assert.equal(state.pendingUnlocks.length,milestone);
+    assert.equal(state.selected,null,'earning an orbit decoration must not auto-equip it');
     assert.equal(JSON.parse(saved.get(key)).unlocked,milestone);
     assert.equal(app.readRestart().paused,false);assert.equal(app.readRestart().modal,null);
   }
-  world.score=1;app.updateScoreHud();assert.equal(app.readCompanions().state.unlocked,9);
-  app.seedCompanions(JSON.parse(saved.get(key)));assert.equal(app.readCompanions().state.unlocked,9,'the persisted ownership restores independently of the current score');
-  app.seedCampaignRenderer(graphicsRecorder());app.seedCompanions();app.readRestart().world.score=999999;app.updateScoreHud();app.grantCompanionsForTest();
-  assert.equal(app.readCompanions().state.unlocked,0);
-  app.seedRenderer(graphicsRecorder());app.seedCompanions();app.runFeedbackDemo('steer');app.readRestart().world.score=999999;app.updateScoreHud();app.grantCompanionsForTest();
-  assert.equal(app.readCompanions().state.unlocked,0);
+  world.stage=world.maxStage=1;world.score=1;app.updateScoreHud();assert.equal(app.readCompanions().state.unlocked,9);
+  app.seedCompanions(JSON.parse(saved.get(key)));assert.equal(app.readCompanions().state.unlocked,9,'saved ownership restores independently of the current stage');
+  app.seedRenderer(graphicsRecorder());app.seedCompanions();app.runFeedbackDemo('steer');
+  Object.assign(app.readRestart().world,{score:999999,stage:99,maxStage:99});app.updateScoreHud();app.grantCompanionsForTest();
+  assert.equal(app.readCompanions().state.unlocked,0);assert.deepEqual(app.readCompanions().state.pendingUnlocks,[]);
 });
-
 test('v7.10 companion equip, replacement and same-card removal fade from the current appearance without resetting the moving player',t=>{
   const key='qiuqiule-companions',prior=saved.get(key);
   t.after(()=>{app.seedCompanions();prior===undefined?saved.delete(key):saved.set(key,prior);});
@@ -5377,10 +3965,10 @@ function assertOrbitMatchesBody(draw,g,id='star-3'){
 
 
 test('v7.10 the real player renderer carries companions across all scenes while leaving bodies and auxiliary balls unchanged',t=>{
-  const calls=app.recordCompanionDraws();t.after(()=>{calls.restore();app.seedSkins();app.seedCompanions();});
-  for(const mode of ['home','levels','endless','campaign']){
+  const calls=app.recordCompanionDraws();t.after(()=>{calls.restore();app.seedCircle();app.seedCompanions();});
+  for(const mode of ['home','endless']){
     const g=graphicsRecorder(),{scene,active,player,pointer}=pullScene(mode,g);
-    app.seedSkins({enabled:true,sides:6,unlocked:6});app.seedCompanions({unlocked:9,selected:'star-3'});
+    app.seedCircle();app.seedCompanions({unlocked:9,selected:'star-3'});
     const before=physicalFields(player),count=active.enemies?.length,aux=active.auxiliaries?.length;
     calls.calls.length=0;scene.update(0,0);
     assert.equal(calls.calls.length,1,mode+' renders the orbit once around its primary player');
@@ -5402,9 +3990,9 @@ test('v7.10 the real player renderer carries companions across all scenes while 
   assert.equal(calls.calls.length,0,'clones never acquire a second set of purely decorative companions');assert.deepEqual(physicalFields(auxiliary),before);
 });
 
-test('v7.10 detached UI companion paths track the visible outline through squash, pull, rotation, and continuous shape changes',t=>{
-  app.seedRenderer(graphicsRecorder());app.seedSkins({enabled:true,sides:6,unlocked:15});app.seedCompanions({unlocked:9,selected:'moon-2'});
-  t.after(()=>{app.seedCompanions();app.seedSkins();});
+test('v7.10 detached UI companion paths track the visible outline through squash, pull and rotation',t=>{
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedCompanions({unlocked:9,selected:'moon-2'});
+  t.after(()=>{app.seedCompanions();app.seedCircle();});
   const pose={x:100,y:200,r:30,squash:0,roll:0},original={...pose};
   app.paintUiForTest(pose);const node=element('#ui-companions'),markup=node.innerHTML;
   assert.equal(node.hidden,false);assert.match(markup,/<svg/);assert.match(markup,/<path/);
@@ -5413,21 +4001,19 @@ test('v7.10 detached UI companion paths track the visible outline through squash
   assert.equal(node.innerHTML,markup,'translation follows the center without changing the local outline');
   assert.equal(node.style.transform,'translate3d(51px,133px,0)');
   for(const changes of [{squash:.4},{roll:1.7},{visualPull:{amount:1,angle:.8}}]){
-    app.paintUiForTest({...pose,...changes});assert.notEqual(node.innerHTML,markup,'the orbit geometry follows '+Object.keys(changes)[0]);
+    app.paintUiForTest({...pose,...changes});
+    if('roll' in changes)assert.equal(node.innerHTML,markup,'rotating a perfect circle leaves its outline and companion orbit unchanged');
+    else assert.notEqual(node.innerHTML,markup,'the orbit geometry follows '+Object.keys(changes)[0]);
     assert.equal(node.style.transform,'translate3d(40px,140px,0)','the independent container must not scale or rotate the already projected path again');
   }
   assert.deepEqual(pose,original);
   app.advanceCompanions(.1);app.paintUiForTest(pose);assert.notEqual(node.innerHTML,markup,'the shared orbit clock keeps the companions moving');
-  const beforeMorph=node.innerHTML,clock=app.readCompanions().clock;
-  app.changeSkinSides(9);app.advanceSkin(.15);app.paintUiForTest(pose);
-  assert.notEqual(node.innerHTML,beforeMorph,'a partially morphed polygon updates its companion orbit in the same frame');
-  assert.equal(app.readCompanions().clock,clock,'changing shapes does not restart or advance the orbit phase');
   app.chooseCompanionForTest('moon-2');app.advanceCompanions(.18);app.paintUiForTest(pose);assert.equal(node.hidden,true);
 });
 
 test('v7.10 companion drawing stays below the crown in both Canvas celebration and detached DOM presentation',async t=>{
-  const recording=app.recordCompanionDraws();t.after(()=>{recording.restore();app.seedCompanions();app.seedSkins();});
-  const {g,world,scene}=bossScene();app.seedSkins({enabled:true,sides:6,unlocked:6});app.seedCompanions({unlocked:9,selected:'star-3'});
+  const recording=app.recordCompanionDraws();t.after(()=>{recording.restore();app.seedCompanions();app.seedCircle();});
+  const {g,world,scene}=bossScene();app.seedCircle();app.seedCompanions({unlocked:9,selected:'star-3'});
   advanceToBoss(world,scene);defeatBoss(world,scene);advanceScene(scene,1.6);recording.calls.length=0;scene.update(0,0);
   assert.equal(world.phase,'boss-celebrate');assert.equal(recording.calls.length,1);
   const companionPaths=recording.calls[0].shapes;assert.ok(companionPaths.length>0);
@@ -5443,8 +4029,8 @@ test('v7.10 companion drawing stays below the crown in both Canvas celebration a
 
 
 test('v7.10 an unskinned UI ball gives the orbit its actual post-rotation CSS-squashed outline',t=>{
-  app.seedRenderer(graphicsRecorder());app.seedSkins();app.seedCompanions({unlocked:9,selected:'moon-2'});
-  t.after(()=>{app.seedCompanions();app.seedSkins();});
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedCompanions({unlocked:9,selected:'moon-2'});
+  t.after(()=>{app.seedCompanions();app.seedCircle();});
   const pose={x:100,y:200,r:30,squash:.2,roll:0,visualPull:{amount:.7,angle:.8}};
   app.paintUiForTest(pose);
   const transform=element('#ui-ball').style.transform,scale=/scale\(([^,]+),([^)]+)\)/.exec(transform);
@@ -5467,7 +4053,7 @@ test('v7.11 every appearance uses score ink for aim, stage dots and Boss awards 
   for(const [bg,ink]of [['#f4f3eb',0x252720],['#121415',0xf0f2e8]])for(const appearance of ['original','custom','big-eye']){
     await withReloadedEntry({player:'#d98db7',bg,juice:1},false,fresh=>{
       const {world,scene,g,pointer}=controlRun(fresh),p=world.player;
-      fresh.seedSkins();
+      fresh.seedCircle();
       const photos=appearance==='custom'?fresh.recordCompositePhotos(true):null;
       fresh.seedAppearanceState({selected:appearance,bigEyeUnlocked:true},{hasImage:appearance==='custom'});
       try{
@@ -5494,7 +4080,7 @@ test('v7.11 every appearance uses score ink for aim, stage dots and Boss awards 
 test('v7.11 custom photo skins retain contrast-safe comets and aim feedback even when their saved player color matches the background',async()=>{
   for(const [bg,ink]of [['#f4f3eb',0x252720],['#121415',0xf0f2e8]])await withReloadedEntry({player:bg,bg,juice:1},false,fresh=>{
     const {world,scene,g,pointer}=controlRun(fresh),p=world.player;
-    fresh.seedSkins();const photos=fresh.recordCompositePhotos(true);
+    fresh.seedCircle();const photos=fresh.recordCompositePhotos(true);
     try{
       Object.assign(p,{x:80,y:600,vx:world.unit*35,vy:0});advanceScene(scene,.12);
       const trailInk=fresh.feedbackInk(),history=scene.cometTrails.entries.get(p);
@@ -5514,9 +4100,9 @@ test('v7.11 custom photo skins retain contrast-safe comets and aim feedback even
 
 
 test('v7.11 live companions keep their actual world displacement history rather than redrawing an orbit arc around the current player',t=>{
-  const recording=app.recordCompanionDraws();t.after(()=>{recording.restore();app.seedSkins();app.seedCompanions();});
+  const recording=app.recordCompanionDraws();t.after(()=>{recording.restore();app.seedCircle();app.seedCompanions();});
   const {world,scene,g}=controlRun(),p=world.player;
-  app.seedSkins({enabled:true,sides:8,unlocked:8});app.seedCompanions({selected:'sun-1',unlocked:9});
+  app.seedCircle();app.seedCompanions({selected:'sun-1',unlocked:9});
   Object.assign(p,{x:180,y:600,vx:0,vy:-world.unit*35,feedbackFreeze:0});scene.update(0,0);
   const first=app.readCompanionHistory()[0][1].points[0];
   advanceScene(scene,.2);
@@ -5534,7 +4120,7 @@ test('v7.11 live companions keep their actual world displacement history rather 
 
 test('v7.11 companion histories reset at pause, background, resizing, a new world and final unequip without connecting unrelated positions',t=>{
   const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
-  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;app.seedSkins();app.seedCompanions();});
+  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;app.seedCircle();app.seedCompanions();});
   for(const reason of ['pause','background','resize','restart','unequip']){
     const {world,scene,g,pointer}=controlRun(),p=world.player;let resize;
     if(reason==='resize'){
@@ -5556,8 +4142,8 @@ test('v7.11 companion histories reset at pause, background, resizing, a new worl
 });
 
 test('v7.11 Big Eye clone opacity multiplies the body and pupil through ordinary and fading renders',t=>{
-  const g=graphicsRecorder(),{world}=controlRun();app.seedSkins();app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});
-  t.after(()=>app.seedSkins());
+  const g=graphicsRecorder(),{world}=controlRun();app.seedCircle();app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});
+  t.after(()=>app.seedCircle());
   const clone={...world.player,isAuxiliary:true,born:1,squash:0,vx:0,vy:0};
   for(const alpha of [1,.5,.25]){
     g.clear();app.drawPlayerForTest(g,clone,app.playerInk(),alpha);
@@ -5567,12 +4153,12 @@ test('v7.11 Big Eye clone opacity multiplies the body and pupil through ordinary
 });
 
 test('v7.11.2 companion tails grow with speed only while the player comet can be active in a live arena',t=>{
-  t.after(()=>{app.seedSkins();app.seedCompanions();app.setFeedbackStrength(.6);});
+  t.after(()=>{app.seedCircle();app.seedCompanions();app.setFeedbackStrength(.6);});
   function extent(mode,speed,phase='battle'){
     const g=graphicsRecorder(),state=mode==='home'?app.seedRenderer(g):app.seedRenderer(g,390,844,true);
     const player=(state.world||state.home).player,unit=state.world?.unit||player.r;
     if(state.world)state.world.phase=phase;
-    app.seedSkins();app.seedCompanions({selected:'sun-1',unlocked:9});app.setFeedbackStrength(1);
+    app.seedCircle();app.seedCompanions({selected:'sun-1',unlocked:9});app.setFeedbackStrength(1);
     Object.assign(player,{x:100,y:400,vx:unit*speed,vy:0,squash:0});
     for(let frame=0;frame<24;frame++){
       player.x+=4;app.advanceCompanions(1/60);g.clear();app.drawPlayerForTest(g,player,app.playerInk());
@@ -5592,11 +4178,11 @@ test('v7.11.2 companion tails grow with speed only while the player comet can be
   sameLength(extent('play',40,'choose'),threshold,'upgrade selection keeps the ordinary orbit-tail length');
 });
 
-test('companion trail rollback keeps moving home and level players on orbit arcs without recording translation',t=>{
-  t.after(()=>{app.seedSkins();app.seedCompanions();});
-  for(const mode of ['home','levels']){
+test('companion trail rollback keeps the moving home player on orbit arcs without recording translation',t=>{
+  t.after(()=>{app.seedCircle();app.seedCompanions();});
+  for(const mode of ['home']){
     const g=graphicsRecorder(),{player}=pullScene(mode,g);
-    app.seedSkins();app.seedCompanions({selected:'moon-1',unlocked:9});
+    app.seedCircle();app.seedCompanions({selected:'moon-1',unlocked:9});
     Object.assign(player,{x:120,y:400,vx:0,vy:0,squash:0});
     for(let i=0;i<12;i++){
       player.y-=3;app.advanceCompanions(1/60);g.clear();app.drawPlayerForTest(g,player,app.playerInk());
@@ -5608,7 +4194,7 @@ test('companion trail rollback keeps moving home and level players on orbit arcs
 });
 
 
-test('the endless track continues untouched through Boss entry, pause and victory, and only changes mix on failure',t=>{
+test('Boss entry selects its track, pause menus preserve it, and victory returns to endless before rewards',t=>{
   const calls=[];
   t.mock.method(GameAudio.prototype,'setMusicScene',name=>calls.push(name));
   const {scene,home}=app.seedRenderer(graphicsRecorder());
@@ -5619,13 +4205,15 @@ test('the endless track continues untouched through Boss entry, pause and victor
   const {world}=app.readRestart();
   const beforeBoss=calls.length;
   world.stage=5;world.beginBoss();scene.handleEvents();
-  assert.equal(calls.length,beforeBoss);
+  assert.deepEqual(calls.slice(beforeBoss),['boss']);
+  const duringBoss=calls.length;
   clickAction('pause');app.advanceUi(.5);clickAction('settings');app.advanceUi(.5);
-  clickAction('close');app.advanceUi(.5);clickAction('resume');app.advanceUi(.5);
-  assert.equal(calls.length,beforeBoss);
-  world.defeatBoss();scene.handleEvents();assert.equal(calls.length,beforeBoss);
+  clickAction('close');app.advanceUi(.5);clickAction('run-upgrades');app.advanceUi(.5);clickAction('close');app.advanceUi(.5);
+  clickAction('resume');app.advanceUi(.5);
+  assert.equal(calls.length,duringBoss,'pause, settings, inventory and resume do not restart or replace Boss music');
+  world.defeatBoss();scene.handleEvents();assert.deepEqual(calls.slice(beforeBoss),['boss','endless']);
   world.beginBoss();scene.handleEvents();world.endRun('boss');scene.handleEvents();
-  advanceScene(scene,1.2);assert.deepEqual(calls.slice(beforeBoss),['failedEndless']);
+  advanceScene(scene,1.2);assert.deepEqual(calls.slice(beforeBoss),['boss','endless','boss','failedEndless']);
   assert.equal(app.readRestart().modal,'over');
   clickRestart();assert.equal(calls.at(-1),'endless');
   const regular=endingRun();advanceScene(regular.scene,1.2);
@@ -5633,27 +4221,34 @@ test('the endless track continues untouched through Boss entry, pause and victor
   clickAction('home');assert.equal(calls.at(-1),'home');
 });
 
-test('music keeps campaign offers and exits on the map mix and distinguishes wins, losses and voluntary exits',t=>{
-  const calls=[];
-  t.mock.method(GameAudio.prototype,'setMusicScene',name=>calls.push(name));
-  app.seedLevelRenderer(graphicsRecorder(),390,844,1);
-  app.enterCampaign(1);clickAction('campaign-cancel');
-  assert.deepEqual(calls,['levels','levels']);
-  for(const won of [true,false]){
-    const {world,scene}=modernCampaignRun();
-    assert.deepEqual(calls.slice(-2),['levels','campaign']);
-    world.finishCampaign(won);scene.handleEvents();
-    assert.equal(calls.at(-1),won?'resultCampaign':'failedCampaign');
-    app.advanceUi(1);clickAction('levels');app.advanceUi(1);
-    assert.equal(calls.at(-1),'levels');
-  }
-  modernCampaignRun();clickAction('pause');app.advanceUi(1);clickAction('home');
-  assert.equal(calls.at(-1),'resultCampaign');
-  app.seedRenderer(graphicsRecorder(),390,844,true);
-  clickAction('pause');app.advanceUi(1);clickAction('home');
-  assert.equal(calls.at(-1),'resultEndless');
+test('Boss music follows direct demos and is replaced immediately on an active Boss restart or voluntary exit',t=>{
+  const calls=[];t.mock.method(GameAudio.prototype,'setMusicScene',name=>calls.push(name));
+  t.after(()=>{app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  app.seedRenderer(graphicsRecorder());app.runFeedbackDemo('boss-rewards');
+  let {world,scene}=app.readRestart();scene.handleEvents();
+  assert.equal(world.phase,'boss-entry');assert.deepEqual(calls.slice(-2),['endless','boss'],'a demo that begins directly at Boss entry uses the same event route');
+  clickAction('pause');app.advanceUi(.5);clickRestart();assert.equal(calls.at(-1),'endless');app.advanceUi(.5);
+  ({world,scene}=app.readRestart());world.stage=5;world.beginBoss();scene.handleEvents();assert.equal(calls.at(-1),'boss');
+  clickAction('pause');app.advanceUi(.5);clickAction('home');assert.equal(calls.at(-1),'resultEndless');
+  app.advanceUi(1);clickAction('home');assert.equal(calls.at(-1),'home');
 });
 
+test('a rapid Boss entry, defeat and failure batch finishes on the failure mix and keeps its entry and defeat cues',t=>{
+  const calls=[];t.mock.method(GameAudio.prototype,'setMusicScene',name=>calls.push(name));
+  const {world,scene}=feedbackRun(),audio=app.recordFeedbackAudio(),tones=app.recordTones();
+  t.after(()=>{audio.restore();tones.restore();app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  world.events=[];world.stage=5;world.beginBoss();world.defeatBoss();world.endRun('boss');scene.handleEvents();
+  assert.deepEqual(calls,['boss','endless','failedEndless']);assert.equal(world.phase,'over');
+  assert.equal(tones.calls.filter(args=>args[0]===260).length,1);
+  assert.equal(audio.calls.filter(call=>call.name==='bossDefeat').length,1);
+  scene.handleEvents();assert.deepEqual(calls,['boss','endless','failedEndless'],'a redraw cannot replay stale Boss events');
+});
+
+test('voluntary endless exit selects its result mix and returning home restores the menu mix',t=>{
+  const calls=[];t.mock.method(GameAudio.prototype,'setMusicScene',name=>calls.push(name));
+  app.seedRenderer(graphicsRecorder(),390,844,true);clickAction('pause');app.advanceUi(1);clickAction('home');
+  assert.equal(calls.at(-1),'resultEndless');app.advanceUi(1);clickAction('home');assert.equal(calls.at(-1),'home');
+});
 test('leaving the web page fades early and cancelling the navigation restores the visible game',t=>{
   const calls=[];
   t.mock.method(GameAudio.prototype,'setHidden',hidden=>calls.push(hidden));
@@ -5731,4 +4326,47 @@ test('a blocked drag leaves global audio retries available on ordinary taps and 
       assert.equal(locked,false);
     }
   });
+});
+
+function inventoryText(node){return [node.textContent||'',...(node.children||[]).map(inventoryText)].join(' ');}
+function inventoryWorldSnapshot(world){return JSON.stringify({stage:world.stage,time:world.time,phase:world.phase,buffs:world.buffs,player:world.player,enemies:world.enemies,stageKills:world.stageKills,score:world.score});}
+
+test('endless run inventory carries the real player out and back while every combat state remains paused',t=>{
+  const {world,scene}=feedbackRun();world.buffs={energy:8,frenzy:3,gambler:4,risk:9};world.nextGambler=true;
+  const original=inventoryWorldSnapshot(world);
+  t.after(()=>{app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  clickAction('pause');app.advanceUi(.42);
+  assert.equal(element('#pause-upgrades').hidden,false);assert.equal(element('#pause-panel').classList.contains('with-run-upgrades'),true);
+  const pausePose={...app.readPlayerShape().lastUiPose};clickAction('run-upgrades');
+  let state=app.readRestart();assert.equal(state.modal,'run-upgrades');assert.equal(state.paused,true);assert.equal(state.transfer.target,'run-upgrades');
+  near(state.transfer.from.x,pausePose.x);near(state.transfer.from.y,pausePose.y);near(state.transfer.from.r,pausePose.r);
+  assert.equal(element('#modal-layer').inert,true);clickAction('close');assert.equal(app.readRestart().transfer.target,'run-upgrades','a repeated click cannot reverse an unfinished flight');
+  app.advanceUi(.21);const midway=app.readPlayerShape().lastUiPose;assert.notEqual(midway.x,pausePose.x);assert.notEqual(midway.r,pausePose.r);
+  app.advanceUi(.21);state=app.readRestart();assert.equal(state.transfer,null);assert.equal(state.uiAnchor,'run-upgrades');assert.equal(element('#ui-ball').hidden,false);assert.equal(element('#ui-ball').dataset.state,'run-upgrades');
+  const settled={...app.readPlayerShape().lastUiPose};near(settled.x,89);near(settled.y,153);near(settled.r,21);
+  const rows=element('#run-upgrades-list').children;assert.deepEqual(rows.map(row=>row.dataset.upgradeId),['energy','gambler','frenzy']);
+  assert.match(inventoryText(rows[0]),/弹性十足.*8 层/);assert.match(inventoryText(rows[1]),/赌徒.*4 次.*下阶段/);assert.match(inventoryText(rows[2]),/狂潮.*3 层.*180%/);
+  assert.equal(element('#run-upgrades-empty').hidden,true);
+  element('#run-upgrades-body').scrollTop=250;advanceScene(scene,.5);
+  assert.deepEqual(app.readPlayerShape().lastUiPose,settled,'scrolling the list cannot move its fixed player anchor');
+  assert.equal(inventoryWorldSnapshot(world),original,'the overlay never advances combat, rewards, counters or upgrades');
+  for(const handler of listeners.get('keydown'))handler({key:'Escape',preventDefault(){}});
+  state=app.readRestart();assert.equal(state.modal,'pause');assert.equal(state.transfer.target,'pause');assert.equal(state.paused,true);
+  near(state.transfer.from.x,settled.x);near(state.transfer.from.y,settled.y);app.advanceUi(.42);
+  assert.equal(app.readRestart().uiAnchor,'pause');assert.equal(app.readRestart().paused,true);assert.equal(inventoryWorldSnapshot(world),original);
+  clickAction('resume');assert.equal(app.readRestart().paused,true);app.advanceUi(.42);assert.equal(app.readRestart().paused,false);
+});
+
+test('run inventory refreshes its acquired entries and empty state without duplicating rows or changing the run',t=>{
+  const {world}=feedbackRun();world.buffs={};
+  t.after(()=>{app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
+  clickAction('pause');app.advanceUi(.42);clickAction('run-upgrades');app.advanceUi(.42);
+  assert.equal(element('#run-upgrades-list').children.length,0);assert.equal(element('#run-upgrades-empty').hidden,false);
+  clickAction('close');app.advanceUi(.42);world.buffs={density:9,gambler:2};world.nextGambler=false;world.gamblerRewardPending=false;world.gamblerTargetMultiplier=1;
+  clickAction('run-upgrades');app.advanceUi(.42);
+  const rows=element('#run-upgrades-list').children;assert.equal(rows.length,2);assert.equal(element('#run-upgrades-empty').hidden,true);
+  assert.match(inventoryText(rows[0]),/重量级.*9 层.*初始/);assert.match(inventoryText(rows[1]),/赌徒.*2 次.*已兑现/);
+  element('#run-upgrades-body').scrollTop=200;clickAction('close');app.advanceUi(.42);clickAction('run-upgrades');app.advanceUi(.42);
+  assert.equal(element('#run-upgrades-list').children.length,2);assert.equal(element('#run-upgrades-body').scrollTop,0);
+  assert.equal(app.readRestart().world,world);assert.equal(app.readRestart().paused,true);
 });

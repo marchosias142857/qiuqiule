@@ -1,9 +1,9 @@
 // One resident source carries the endless clock through menus, battles and crossfades.
-// These are decoded music-time positions; both ends were moved together to quiet samples.
+// Decoded music-time loop points; Boss includes an offline-blended return bridge.
 const CROSSFADE = .65;
 export const MUSIC_TRACKS = Object.freeze({
-  endless: {title: '绕星', url: './audio/endless.mp3', loopStart: 9.1393, loopEnd: 118.8490},
-  campaign: {title: '跳格子', url: './audio/campaign.mp3', loopStart: 4.9465, loopEnd: 84.1214},
+  endless: {title: '绕星', url: './audio/endless.mp3', loopStart: 9.1393, loopEnd: 118.8490, trimDB: 0},
+  boss: {title: '冠冕', url: './audio/boss.mp3', loopStart: 11.51721088435374, loopEnd: 93.30421768707484, trimDB: -3},
 });
 
 const menu = {gain: .72, cutoff: 8000, duration: .6};
@@ -12,9 +12,9 @@ const result = {gain: .68, cutoff: 20000, duration: .45};
 const failed = {gain: .55, cutoff: 20000, duration: .45};
 export const MUSIC_SCENES = Object.freeze({
   home: {...menu, track: 'endless'}, endless: {...play, track: 'endless'},
-  levels: {...menu, track: 'campaign'}, campaign: {...play, track: 'campaign'},
-  resultCampaign: {...result, track: 'campaign'}, resultEndless: {...result, track: 'endless'},
-  failedCampaign: {...failed, track: 'campaign'}, failedEndless: {...failed, track: 'endless'},
+  boss: {...play, track: 'boss'},
+  resultEndless: {...result, track: 'endless'},
+  failedEndless: {...failed, track: 'endless'},
 });
 
 // Keep the same linear segments in memory and on the AudioParam so an interrupted
@@ -48,10 +48,11 @@ export class MusicPlayer {
     this.buffers = new Map();
     this.loads = new Map();
     this.voices = new Map();
-    this.starts = {endless: 0, campaign: 0};
+    this.starts = Object.fromEntries(Object.keys(MUSIC_TRACKS).map(name => [name, 0]));
     this.resident = null;
     this.track = null;
     this.pending = null;
+    this.activationAllowed = false;
     this.switchAt = this.fadeEnd = 0;
     this.scene = scene;
     this.wanted = MUSIC_SCENES[scene].track;
@@ -68,7 +69,7 @@ export class MusicPlayer {
       if (!Number.isFinite(buffer?.duration) || buffer.duration < MUSIC_TRACKS[name].loopEnd) {
         throw new Error('Incomplete music track: ' + name);
       }
-      if (name !== 'campaign' || this.wanted === 'campaign') this.buffers.set(name, buffer);
+      if (name === 'endless' || this.wanted === name) this.buffers.set(name, buffer);
       return buffer;
     }).finally(() => this.loads.delete(name));
     this.loads.set(name, work);
@@ -76,20 +77,26 @@ export class MusicPlayer {
   }
   spawn(name, buffer, time, gainValue) {
     const track = MUSIC_TRACKS[name], source = this.context.createBufferSource(), gain = this.context.createGain();
+    const trim = this.context.createGain();
     source.buffer = buffer;
     source.loop = true;
     source.loopStart = track.loopStart;
     source.loopEnd = track.loopEnd;
     gain.gain.value = gainValue;
-    source.connect(gain);
+    // Apply the track balance before playback, independently of the normalized
+    // crossfade. Reversing a fade must never normalize the Boss trim back to 1.
+    trim.gain.value = 10 ** (track.trimDB / 20);
+    source.connect(trim);
+    trim.connect(gain);
     gain.connect(this.filter);
     source.start(time);
-    const voice = {name, source, gain, time, points: [{time, value: gainValue}]};
+    const voice = {name, source, trim, gain, time, points: [{time, value: gainValue}]};
     this.starts[name]++;
     this.voices.set(name, voice);
     return voice;
   }
-  setScene(scene) {
+  setScene(scene, {activate = true} = {}) {
+    this.activationAllowed = activate;
     if (scene !== this.scene) {
       this.scene = scene;
       this.wanted = MUSIC_SCENES[scene].track;
@@ -103,7 +110,8 @@ export class MusicPlayer {
     }
     this.retireSilent();
     if (!this.retirement && this.fadeEnd > this.context.currentTime) this.queueRetirement();
-    if (this.wanted !== 'campaign') this.buffers.delete('campaign');
+    for (const name of this.buffers.keys()) if (name !== 'endless' && name !== this.wanted) this.buffers.delete(name);
+    if (!activate) return null;
     if (this.wanted === this.track && this.resident) return null;
     if (this.pending?.name === this.wanted) return this.pending.work;
     const name = this.wanted;
@@ -117,37 +125,40 @@ export class MusicPlayer {
     if (!this.resident) {
       try {
         const buffer = await this.ensure('endless');
+        if (!this.activationAllowed) return;
         if (!this.resident) {
           const now = this.context.currentTime;
           this.resident = this.spawn('endless', buffer, now, this.track ? 0 : 1);
           if (!this.track) this.track = 'endless';
         }
       } catch (error) {
-        // The campaign track can still play offline if it was cached separately.
+        // A secondary track can still play offline if it was cached separately.
         if (name === 'endless') throw error;
       }
     }
-    if (this.wanted !== name) return;
+    if (!this.activationAllowed || this.wanted !== name) return;
     if (this.track === name) return;
     const buffer = this.voices.get(name)?.source.buffer || await this.ensure(name);
-    if (this.wanted !== name || this.track === name) return;
+    if (!this.activationAllowed || this.wanted !== name || this.track === name) return;
     this.crossfade(name, buffer);
   }
   crossfade(name, buffer) {
     const now = this.context.currentTime;
     this.retireSilent();
     const target = this.voices.get(name) || this.spawn(name, buffer, now, 0);
-    if (name === 'campaign') this.buffers.set(name, buffer);
-    // Rotate the current mix towards the target. For two fresh tracks this is
-    // cos/sin; reversing a partial fade also preserves its current power.
+    if (name !== 'endless') this.buffers.set(name, buffer);
+    // Rotate the entire current mix towards one target when a fade reverses.
+    // Its sampled radius can be just below
+    // one between linear automation points; recover it without a gain jump.
     const current = new Map([...this.voices.values()].map(voice => [voice, valueAt(voice.points, now)]));
-    const targetAngle = Math.acos(Math.min(1, Math.max(0, current.get(target))));
-    const otherWeight = Math.sin(targetAngle);
+    const targetGain = current.get(target);
+    const otherWeight = Math.hypot(...[...current].filter(([voice]) => voice !== target).map(([, value]) => value));
+    const radius = Math.hypot(targetGain, otherWeight), targetAngle = Math.atan2(otherWeight, targetGain);
     for (const [voice, from] of current) {
       const points = [{time: now, value: from}];
       for (let i = 1; i <= 12; i++) {
-        const angle = targetAngle * (1 - i / 12);
-        const value = voice === target ? Math.cos(angle) : otherWeight > 1e-8 ? from * Math.sin(angle) / otherWeight : 0;
+        const progress = i / 12, angle = targetAngle * (1 - progress), powerRadius = radius + (1 - radius) * progress;
+        const value = voice === target ? powerRadius * Math.cos(angle) : otherWeight > 1e-8 ? from * powerRadius * Math.sin(angle) / otherWeight : 0;
         points.push({time: now + CROSSFADE * i / 12, value});
       }
       voice.points = schedule(voice.gain.gain, points);
@@ -163,6 +174,7 @@ export class MusicPlayer {
       if (voice === this.resident || name === this.track || valueAt(voice.points, now) > 0) continue;
       voice.source.stop(now);
       voice.source.disconnect();
+      voice.trim.disconnect();
       voice.gain.disconnect();
       this.voices.delete(name);
     }

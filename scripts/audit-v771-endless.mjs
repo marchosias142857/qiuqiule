@@ -108,7 +108,7 @@ for(let f=0;f<spec.frames;f++){
  if(spec.scenario==='slow-aim'){
   if(f===10)pointer('pointerdown',p.x,p.y);if(f>=10&&f<190)pointer('pointermove',p.x+65,p.y+50);if(f===190)pointer('pointerup',p.x+65,p.y+50);
  }
- if(['opening','rewards','gambler','boss'].includes(spec.scenario)&&w?.phase==='choose'&&chosen<(spec.scenario==='boss'?2:1)){
+ if(['opening','rewards','gambler','boss'].includes(spec.scenario)&&w?.phase==='choose'&&chosen<(['boss','gambler'].includes(spec.scenario)?2:1)){
   const c=w.choices.find(c=>c.id!=='growth')||w.choices[0];Object.assign(p,{x:c.x,y:c.y,vx:0,vy:0,feedbackFreeze:0});chosen++;
  }
  if(spec.scenario==='boss'&&w.phase==='boss'&&f%4===0)w.damageBoss(w.baseSpeed);
@@ -136,7 +136,7 @@ const checks={
  shoot:coverage.launchCalls>0,
  'slow-aim':coverage.minTimeScale<1&&coverage.launchCalls>0,
  rewards:chosen===1&&phases.has('battle'),
- gambler:coverage.maxChoices===5&&chosen===1&&phases.has('battle'),
+ gambler:coverage.maxChoices===3&&chosen===2&&phases.has('battle'),
  boss:chosen===2&&phases.has('boss-entry')&&phases.has('boss-celebrate')&&phases.has('battle'),
  pressure:coverage.maxPressureAlpha>0&&scene.pressureWarning.alpha===0,
  pause:coverage.pausedFrames>0&&!app.auditRead().paused,

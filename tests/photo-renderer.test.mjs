@@ -88,23 +88,24 @@ test('local backing bounds contain continuous rolled pulls and squash without pe
   }
 });
 
-test('image upload and eleven prewarmed meshes are reused across movement and deformation',()=>{
+test('image upload and the one prewarmed circle mesh are reused across movement and deformation',()=>{
   const gl=graphics(),canvas=surface(gl),renderer=new PhotoRenderer(canvas);
   assert.equal(renderer.setImage(photo),true);
   assert.equal(renderer.stats.backend,'webgl');assert.equal(renderer.stats.textureUploads,1);
-  assert.equal(renderer.stats.cachedMeshes,11);assert.equal(renderer.stats.meshUploads,11);
+  assert.equal(renderer.stats.cachedMeshes,1);assert.equal(renderer.stats.meshUploads,1);
+  assert.equal(gl.buffers.size,1);
   assert.equal(canvas.options.preserveDrawingBuffer,true);
   assert.equal(canvas.options.premultipliedAlpha,true);
   assert.deepEqual(gl.calls.filter(c=>c[0]==='pixelStorei'),[
     ['pixelStorei','UNPACK_FLIP_Y_WEBGL',false],['pixelStorei','UNPACK_PREMULTIPLY_ALPHA_WEBGL',true]
   ]);
-  renderer.draw(skinContour(6),pose,{scale:3});
+  renderer.draw(skinContour(0),pose,{scale:3});
   assert.equal(gl.calls.filter(c=>c[0]==='drawArrays').length,1);
-  renderer.hide();renderer.draw(skinContour(6),{...pose,x:300,y:400},{scale:3});
+  renderer.hide();renderer.draw(skinContour(0),{...pose,x:300,y:400},{scale:3});
   assert.equal(renderer.stats.drawCalls,1,'CSS movement must reuse the retained raster');
   assert.equal(canvas.hidden,false);
-  for(let i=0;i<40;i++)renderer.draw(skinContour(6),{...pose,roll:i*.03,pullAmount:i/40,squash:Math.sin(i)*.1},{scale:3});
-  assert.equal(renderer.stats.textureUploads,1);assert.equal(renderer.stats.meshUploads,11);
+  for(let i=0;i<40;i++)renderer.draw(skinContour(0),{...pose,roll:i*.03,pullAmount:i/40,squash:Math.sin(i)*.1},{scale:3});
+  assert.equal(renderer.stats.textureUploads,1);assert.equal(renderer.stats.meshUploads,1);
   assert.equal(gl.calls.filter(c=>c[0]==='texImage2D').length,1);
   assert.equal(gl.calls.filter(c=>c[0]==='drawArrays').length,renderer.stats.drawCalls);
   assert.ok(gl.calls.filter(c=>c[0]==='drawArrays').every(c=>c[1]==='TRIANGLE_FAN'&&c[3]===194));
@@ -132,21 +133,31 @@ test('flight uniforms invalidate only the retained raster and never upload image
   assert.equal(gl.calls.filter(c=>c[0]==='texImage2D').length,1);
 });
 
-test('the circle and all campaign skins use prewarmed meshes and retain one transient morph buffer',()=>{
+test('only the circle is prewarmed while arbitrary contours share one on-demand mesh in both backends',()=>{
   const gl=graphics(),renderer=new PhotoRenderer(surface(gl));renderer.setImage(photo);
   const initial=renderer.stats;
-  for(const sides of [0,6,7,8,9,10,11,12,13,14,15])for(let i=0;i<8;i++)
-    renderer.draw(skinContour(sides),{...pose,roll:i*.1,pullAmount:i/8});
+  assert.deepEqual([...renderer.meshes.keys()],[skinContour(0)]);
+  for(const sides of [0,6,7,8,9,10,11,12,13,14,15]){
+    const before=renderer.stats.meshUploads;
+    for(let i=0;i<8;i++)assert.equal(renderer.draw(skinContour(sides),{...pose,roll:i*.1,pullAmount:i/8}),true);
+    assert.equal(renderer.stats.meshUploads,before+(sides?1:0),'each new contour uploads once, and its deformations reuse that mesh');
+  }
   assert.equal(renderer.stats.textureUploads,1);
-  assert.equal(renderer.stats.meshUploads,initial.meshUploads);
-  assert.equal(renderer.stats.cachedMeshes,11);assert.equal(renderer.stats.transientMeshes,0);
+  assert.equal(renderer.stats.meshUploads,initial.meshUploads+10);
+  assert.equal(renderer.stats.cachedMeshes,1);assert.equal(renderer.stats.transientMeshes,1);
   for(let i=1;i<20;i++)renderer.draw(morphSkinContour(7,8,i/20),pose);
-  assert.equal(renderer.stats.transientMeshes,1);assert.equal(gl.buffers.size,12);
+  assert.equal(renderer.stats.transientMeshes,1);assert.equal(gl.buffers.size,2);
   renderer.clear();assert.equal(gl.buffers.size,0);assert.equal(gl.textures.size,0);
   const fallback=new PhotoRenderer(surface(null));fallback.setImage(photo);
-  assert.equal(fallback.stats.cachedMeshes,11);
-  for(const sides of [0,6,7,8,9,10,11,12,13,14,15])fallback.draw(skinContour(sides),{...pose,pullAmount:.8});
-  assert.equal(fallback.stats.transientMeshes,0);
+  assert.equal(fallback.stats.cachedMeshes,1);
+  assert.deepEqual([...fallback.meshes.keys()],[skinContour(0)]);
+  for(const sides of [0,6,7,8,9,10,11,12,13,14,15]){
+    const contour=skinContour(sides);assert.equal(fallback.draw(contour,{...pose,pullAmount:.8}),true);
+    const frames=fallback.stats.frames;
+    fallback.draw(contour,{...pose,pullAmount:.8,x:pose.x+25});
+    assert.equal(fallback.stats.frames,frames,'translation retains the on-demand raster');
+  }
+  assert.equal(fallback.stats.transientMeshes,1);assert.equal(fallback.stats.cachedMeshes,1);
 });
 
 test('photo base color and opacity update both backends without reuploading pixels or geometry',()=>{
@@ -161,7 +172,7 @@ test('photo base color and opacity update both backends without reuploading pixe
   renderer.draw(contour,pose,{baseColor:0x336699,alpha:.1});
   assert.equal(canvas.style.opacity,'0.1');assert.equal(renderer.stats.frames,before.frames,'fade uses composition, not rerasterization');
   renderer.draw(contour,pose,{baseColor:0x669933});
-  assert.equal(renderer.stats.frames,before.frames+1);assert.equal(renderer.stats.textureUploads,1);assert.equal(renderer.stats.meshUploads,11);
+  assert.equal(renderer.stats.frames,before.frames+1);assert.equal(renderer.stats.textureUploads,1);assert.equal(renderer.stats.meshUploads,before.meshUploads);
   const fallbackCanvas=surface(null),fallback=new PhotoRenderer(fallbackCanvas);fallback.setImage(photo);
   fallback.draw(contour,pose,{baseColor:0x336699,alpha:.4});
   assert.equal(fallbackCanvas.style.opacity,'0.4');assert.equal(fallbackCanvas.ctx.fillStyle,'#336699');
@@ -185,7 +196,7 @@ test('two companion photo slots are lazy, ordered before the main photo and reus
   }
   assert.equal(canvases.length,2);
   for(const slot of pool.slots){
-    assert.equal(slot.renderer.stats.textureUploads,1);assert.equal(slot.renderer.stats.meshUploads,11);
+    assert.equal(slot.renderer.stats.textureUploads,1);assert.equal(slot.renderer.stats.meshUploads,2);
     assert.ok(slot.canvas.width<=512&&slot.canvas.height<=512);assert.equal(slot.canvas.hidden,false);
   }
   pool.hide();assert.ok(canvases.every(canvas=>canvas.hidden));
@@ -236,9 +247,9 @@ test('flight reserve contains rotated full-charge silhouettes and the fallback c
 test('morphs reuse one dynamic GPU buffer instead of accumulating transient frames',()=>{
   const gl=graphics(),renderer=new PhotoRenderer(surface(gl));renderer.setImage(photo);
   for(let i=1;i<200;i++)renderer.draw(morphSkinContour(6,15,i/200),pose);
-  assert.equal(renderer.stats.cachedMeshes,11);assert.equal(renderer.stats.transientMeshes,1);
-  assert.equal(gl.buffers.size,12);assert.equal(gl.textures.size,1);
-  renderer.draw(skinContour(15),pose);assert.equal(gl.buffers.size,12);
+  assert.equal(renderer.stats.cachedMeshes,1);assert.equal(renderer.stats.transientMeshes,1);
+  assert.equal(gl.buffers.size,2);assert.equal(gl.textures.size,1);
+  renderer.draw(skinContour(15),pose);assert.equal(gl.buffers.size,2);
 });
 
 test('global UI clipping is translated into local canvas bounds',()=>{
@@ -261,7 +272,7 @@ test('removal frees every image resource and a replacement cannot reuse the old 
   assert.equal(renderer.draw(skinContour(0),pose),false);
   const replacement={width:512,height:512};renderer.setImage(replacement);renderer.draw(skinContour(0),pose);
   assert.equal(renderer.image,replacement);assert.equal(renderer.stats.textureUploads,2);
-  assert.equal(gl.textures.size,1);assert.equal(gl.buffers.size,11);
+  assert.equal(gl.textures.size,1);assert.equal(gl.buffers.size,1);
   renderer.setImage(null);assert.equal(gl.textures.size,0);
 });
 

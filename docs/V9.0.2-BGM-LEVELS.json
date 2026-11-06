@@ -1,0 +1,226 @@
+{
+  "version": "9.0.2",
+  "method": {
+    "tool": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+    "analysis": "Read input_i, input_tp, input_lra from loudnorm=I=-18:TP=-1:LRA=11:print_format=json; analysis output discarded, no file normalization or re-encoding.",
+    "sectionFilter": "atrim=start=START:end=END,asetpts=PTS-STARTPTS,loudnorm=I=-18:TP=-1:LRA=11:print_format=json",
+    "windows": "Non-overlapping complete 10-second windows starting at each decoded loopStart. Full loop also measured independently.",
+    "verificationScope": "Local decoded-signal measurements and routing/automation tests. No claim of a human listening test or exact perceived-loudness parity."
+  },
+  "tracks": {
+    "endless": {
+      "file": "dist/audio/endless.mp3",
+      "sha256": "f06e05ee22385561fb0bb72359f46a0c10919f15e95c209e9b349fc7a9abbce1",
+      "fileModified": false,
+      "wholeFile": {
+        "integratedLUFS": -18.22,
+        "truePeakDBTP": -6.53,
+        "loudnessRangeLU": 2.2
+      },
+      "intro10Seconds": {
+        "startSeconds": 0,
+        "endSeconds": 10,
+        "integratedLUFS": -18.32,
+        "truePeakDBTP": -6.88,
+        "loudnessRangeLU": 1.6
+      },
+      "loop": {
+        "startSeconds": 9.1393,
+        "endSeconds": 118.849,
+        "integratedLUFS": -18.23,
+        "truePeakDBTP": -6.53,
+        "loudnessRangeLU": 2.4
+      },
+      "complete10SecondLoopWindows": [
+        {
+          "startSeconds": 9.1393,
+          "endSeconds": 19.1393,
+          "integratedLUFS": -18.33,
+          "truePeakDBTP": -7.32,
+          "loudnessRangeLU": 0.8
+        },
+        {
+          "startSeconds": 19.1393,
+          "endSeconds": 29.1393,
+          "integratedLUFS": -18.06,
+          "truePeakDBTP": -7.68,
+          "loudnessRangeLU": 1.8
+        },
+        {
+          "startSeconds": 29.1393,
+          "endSeconds": 39.1393,
+          "integratedLUFS": -17.75,
+          "truePeakDBTP": -7.47,
+          "loudnessRangeLU": 1.2
+        },
+        {
+          "startSeconds": 39.1393,
+          "endSeconds": 49.1393,
+          "integratedLUFS": -18.05,
+          "truePeakDBTP": -7.97,
+          "loudnessRangeLU": 0.7
+        },
+        {
+          "startSeconds": 49.1393,
+          "endSeconds": 59.1393,
+          "integratedLUFS": -19.13,
+          "truePeakDBTP": -7.78,
+          "loudnessRangeLU": 2.1
+        },
+        {
+          "startSeconds": 59.1393,
+          "endSeconds": 69.13929999999999,
+          "integratedLUFS": -18.74,
+          "truePeakDBTP": -7.34,
+          "loudnessRangeLU": 2.7
+        },
+        {
+          "startSeconds": 69.1393,
+          "endSeconds": 79.1393,
+          "integratedLUFS": -17.99,
+          "truePeakDBTP": -7.71,
+          "loudnessRangeLU": 0.8
+        },
+        {
+          "startSeconds": 79.1393,
+          "endSeconds": 89.1393,
+          "integratedLUFS": -17.65,
+          "truePeakDBTP": -7.36,
+          "loudnessRangeLU": 1.4
+        },
+        {
+          "startSeconds": 89.1393,
+          "endSeconds": 99.1393,
+          "integratedLUFS": -19.38,
+          "truePeakDBTP": -7.0,
+          "loudnessRangeLU": 2.1
+        },
+        {
+          "startSeconds": 99.1393,
+          "endSeconds": 109.1393,
+          "integratedLUFS": -18.09,
+          "truePeakDBTP": -7.0,
+          "loudnessRangeLU": 0.4
+        }
+      ],
+      "quietestMeasured10SecondWindowLUFS": -19.38,
+      "loudestMeasured10SecondWindowLUFS": -17.65,
+      "playbackTrimDB": 0,
+      "playbackTrimAmplitude": 1,
+      "expectedLoopLUFSAfterTrackTrim": -18.23
+    },
+    "boss": {
+      "file": "dist/audio/boss.mp3",
+      "sha256": "5d4e0fd3de4b403f764a8d64dc205bdbb7a59f841071e99b7ffd4338e0dc525d",
+      "fileModified": false,
+      "wholeFile": {
+        "integratedLUFS": -18.29,
+        "truePeakDBTP": -7.34,
+        "loudnessRangeLU": 1.1
+      },
+      "intro10Seconds": {
+        "startSeconds": 0,
+        "endSeconds": 10,
+        "integratedLUFS": -19.18,
+        "truePeakDBTP": -8.6,
+        "loudnessRangeLU": 2.0
+      },
+      "loop": {
+        "startSeconds": 11.51721088435374,
+        "endSeconds": 93.30421768707484,
+        "integratedLUFS": -18.2,
+        "truePeakDBTP": -7.33,
+        "loudnessRangeLU": 0.9
+      },
+      "complete10SecondLoopWindows": [
+        {
+          "startSeconds": 11.51721088435374,
+          "endSeconds": 21.51721088435374,
+          "integratedLUFS": -18.06,
+          "truePeakDBTP": -7.55,
+          "loudnessRangeLU": 0.9
+        },
+        {
+          "startSeconds": 21.51721088435374,
+          "endSeconds": 31.51721088435374,
+          "integratedLUFS": -18.45,
+          "truePeakDBTP": -8.15,
+          "loudnessRangeLU": 0.5
+        },
+        {
+          "startSeconds": 31.51721088435374,
+          "endSeconds": 41.517210884353744,
+          "integratedLUFS": -18.35,
+          "truePeakDBTP": -7.55,
+          "loudnessRangeLU": 0.5
+        },
+        {
+          "startSeconds": 41.517210884353744,
+          "endSeconds": 51.517210884353744,
+          "integratedLUFS": -18.05,
+          "truePeakDBTP": -7.53,
+          "loudnessRangeLU": 0.4
+        },
+        {
+          "startSeconds": 51.517210884353744,
+          "endSeconds": 61.517210884353744,
+          "integratedLUFS": -17.83,
+          "truePeakDBTP": -7.33,
+          "loudnessRangeLU": 0.5
+        },
+        {
+          "startSeconds": 61.517210884353744,
+          "endSeconds": 71.51721088435374,
+          "integratedLUFS": -18.21,
+          "truePeakDBTP": -8.29,
+          "loudnessRangeLU": 0.3
+        },
+        {
+          "startSeconds": 71.51721088435374,
+          "endSeconds": 81.51721088435374,
+          "integratedLUFS": -18.11,
+          "truePeakDBTP": -8.51,
+          "loudnessRangeLU": 0.4
+        },
+        {
+          "startSeconds": 81.51721088435374,
+          "endSeconds": 91.51721088435374,
+          "integratedLUFS": -18.49,
+          "truePeakDBTP": -8.04,
+          "loudnessRangeLU": 1.5
+        }
+      ],
+      "quietestMeasured10SecondWindowLUFS": -18.49,
+      "loudestMeasured10SecondWindowLUFS": -17.83,
+      "playbackTrimDB": -3,
+      "playbackTrimAmplitude": 0.7079457843841379,
+      "expectedLoopLUFSAfterTrackTrim": -21.2
+    }
+  },
+  "decision": {
+    "bossTrimDB": -3,
+    "reason": "The user reports a conspicuous Boss loudness increase. Existing full-file and loop integrated LUFS are already close, so repeating whole-file normalization would not address that feedback. Boss has a denser, less variable loudness profile (loop LRA 0.9 LU versus endless 2.4 LU); instantaneous transitions and perceived loudness are not guaranteed by integrated LUFS matching. Apply a deliberate, audible 3 dB playback balance correction to Boss only.",
+    "qualification": "The measurements do not show a 3 dB full-track mismatch; the trim is a listening-feedback correction, not a claim that either original asset was normalized incorrectly. The first 10 seconds of Boss are already quieter on the integrated meter.",
+    "runtimeRoute": "source -> static per-track trim -> normalized crossfade gain -> shared scene lowpass -> scene gain -> user BGM bus -> feedback duck -> master",
+    "crossfadeSeconds": 0.65,
+    "crossfadePolicy": "Keep normalized 0..1 equal-power automation separate from static trim, including rapid reversals; never normalize the static Boss correction away.",
+    "loadingPolicy": "While Boss is pending, endless keeps its existing track/scene/bus gain. The trim exists before Boss source.start and affects only that source.",
+    "scenePolicy": "Both endless and Boss play scenes remain gain 1 and cutoff 20000 Hz. Home/result attenuation, user BGM/SFX settings, mute and background controls are unchanged.",
+    "lifecycle": "Retiring a faded-out Boss voice disconnects its source, static trim and crossfade gain; resident endless keeps its clock."
+  },
+  "validation": {
+    "command": "node --test tests/audio.test.mjs",
+    "passed": 52,
+    "failed": 0,
+    "covered": [
+      "trim set before source start",
+      "trim independent of scene and user volume",
+      "650 ms crossfade",
+      "instantaneous effective-gain continuity during repeated fade reversals",
+      "no preemptive duck during delayed decode",
+      "one endless resident source",
+      "muted/hidden late-load behavior",
+      "retired trim node cleanup"
+    ]
+  }
+}

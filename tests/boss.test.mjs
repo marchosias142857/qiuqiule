@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, bossConfig, length, BOSS_TIMING} from '../dist/physics.js';
-import {LegacyCampaignWorld as CampaignWorld} from '../dist/campaign.js';
 
 const near=(a,b,epsilon=1e-6)=>assert.ok(Math.abs(a-b)<epsilon,`${a} != ${b}`);
 const advance=(world,seconds)=>{let left=seconds;while(left>1e-10){const dt=Math.min(left,1/120);world.step(dt);left-=dt;}};
@@ -214,15 +213,7 @@ test('boss resize preserves entry, square geometry, thresholds, stunned health, 
   advance(w,BOSS_TIMING.spin+BOSS_TIMING.hold+BOSS_TIMING.fade-.3);assert.equal(w.phase,'transition');
 });
 
-test('campaign levels never gain boss phases and a fresh endless run has no boss residue',()=>{
-  for(const level of [5,10,100]){
-    const w=new CampaignWorld(390,844,level,()=>.5);assert.equal(w.boss,null);
-    while(w.phase==='battle'){
-      if(!w.enemies.some(b=>b.hp>0))w.spawnEnemy();
-      const b=w.enemies.find(b=>b.hp>0);w.damage(b,1e9);w.enemies=w.enemies.filter(b=>b.hp>0);
-    }
-    assert.equal(w.completed,true);assert.equal(w.boss,null);assert.ok(!w.events.some(e=>e.type.startsWith('boss')));
-  }
+test('a fresh endless run has no boss residue',()=>{
   const w=new World(390,844,()=>.5);assert.equal(w.boss,null);assert.equal(w.bossCelebration,null);assert.equal(w.player.roll,undefined);
 });
 
@@ -292,7 +283,6 @@ test('boss arena becomes a physical square and restores 98.5 percent wall retent
       w.wall(p);assert.ok(p.x-p.r>=w.arenaBounds.left-1e-7&&p.x+p.r<=w.arenaBounds.right+1e-7&&p.y-p.r>=w.arenaBounds.top-1e-7&&p.y+p.r<=w.arenaBounds.bottom+1e-7);
       near(length(p),98.5);
     }
-    const campaign=new CampaignWorld(width,height,5,()=>.5);assert.deepEqual(campaign.arenaBounds,full);near(campaign.readySpeed,campaign.unit*8);
   }
 });
 

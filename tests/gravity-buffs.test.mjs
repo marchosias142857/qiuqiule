@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, BUFFS, BLACK_HOLE_GRAVITY, regularBuffBonus, length} from '../dist/physics.js';
-import {LegacyCampaignWorld as CampaignWorld, legacyLevelConfig as levelConfig} from '../dist/campaign.js';
 
 const near=(a,b,epsilon=1e-8)=>assert.ok(Math.abs(a-b)<epsilon,`${a} != ${b}`);
 function world(){
@@ -109,11 +108,4 @@ test('offered fixed multipliers match awarded values alongside the endless diffi
   assert.ok(profiles[2].profile.hp>profiles[1].profile.hp);
   assert.ok(profiles[2].profile.density>profiles[1].profile.density);
   assert.ok(profiles[2].spawn<=profiles[1].spawn&&profiles[1].spawn<profiles[0].spawn);
-});
-
-test('campaign attribute upgrades keep their existing fixed values and do not acquire endless specials',()=>{
-  const w=new CampaignWorld(900,900,100,()=>.5);w.stage=51;
-  w.gainAttribute();w.gainAttribute();
-  near(w.energy,levelConfig(100).playerEnergy*1.14);near(w.density,1.12);
-  assert.equal(w.buffs.gravity,undefined);assert.equal(w.choices.length,0);
 });

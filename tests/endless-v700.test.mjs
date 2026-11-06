@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {World, length, BOSS_TIMING} from '../dist/physics.js';
-import {CampaignWorld, LegacyCampaignWorld} from '../dist/campaign.js';
 
 const near = (a, b, tolerance = 1e-7) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
 function run() {
@@ -145,20 +144,6 @@ test('v7 endless redirection keeps speed over repeated turns without repeated ac
       near(length(w.player), speed);
     }
   }
-});
-
-test('v7 retains campaign launch and mass behavior for all density-enabled classes and legacy games', () => {
-  for (const level of Array.from({length:100}, (_, i) => i + 1).filter(n => n % 10 >= 1 && n % 10 <= 8)) {
-    const plain = new CampaignWorld(900, 700, level, () => .5);
-    const heavy = new CampaignWorld(900, 700, level, () => .5, {upgradeId: 'density'});
-    for (const w of [plain, heavy]) { w.player.vx = w.player.vy = 0; assert.ok(w.shoot(0, -w.maxPull * .6)); }
-    near(length(heavy.player) / length(plain.player), 1 / Math.sqrt(1.35));
-    near(heavy.player.mass / plain.player.mass, 1.35);
-  }
-  const legacy = new LegacyCampaignWorld(900, 700, 1, () => .5);
-  legacy.density = 1.5; legacy.player.vx = legacy.player.vy = 0;
-  assert.ok(legacy.shoot(0, -legacy.maxPull));
-  near(length(legacy.player), legacy.baseSpeed * Math.sqrt(legacy.energy / legacy.density));
 });
 
 test('v7 preserves v6.9 seeded opening and stage-refill geometry and random consumption', () => {

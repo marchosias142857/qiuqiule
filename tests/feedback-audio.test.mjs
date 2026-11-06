@@ -50,7 +50,7 @@ test('an impact layers a fixed transient, body, energetic bass and tail on exact
   assert.ok(Math.abs(noise.stopTime - noise.startTime - .008) < 1e-9);
   assert.ok(Math.abs(tail.target.gain.events.at(-1).at - tail.startTime - .15) < 1e-9);
   assert.equal(c.sources[0], audio.source);
-  assert.equal(audio.source.target.target, audio.player.filter);
+  assert.equal(audio.source.target.target.target, audio.player.filter);
   assert.ok([body, bass, tail, noise].reduce((sum, voice) => sum + peak(voice), 0) < .11);
   for (const voice of [...audio.voices]) {
     const gain = voice.target; voice.finish();

@@ -7,12 +7,12 @@ const upgrade = (id, name, kind, maxStacks, short, detail, effect, requires = {}
 // Limits count acquired layers, never appearances in an offer. Distances and
 // speeds below use player-radius units; physics applies the effects.
 export const UPGRADE_DEFINITIONS = Object.freeze([
-  upgrade('energy', '弹性十足', 'regular', 4, '弹射能量 ×1.3',
-    '每层弹射能量乘 1.3，最多 4 层；满层后可获得超速。', {energyMultiplier: 1.3}),
-  upgrade('overspeed', '超速', 'regular', 2, '速度上限 +8 u/s',
-    '弹性十足满 4 层后解锁，每层提高速度上限 8 u/s，最多 2 层。', {speedCapBonus: 8}, {energy: 4}),
-  upgrade('density', '重量级', 'regular', 5, '质量 ×1.35，无尽弹射不减速',
-    '每层质量乘 1.35，撞击更有分量；无尽模式同样拉伸不降低弹射速度，最多 5 层。', {densityMultiplier: 1.35}),
+  upgrade('energy', '弹性十足', 'regular', Infinity, '前 4 层能量 ×1.3，之后持续增长',
+    '无层数上限。前 4 层每层弹射能量乘 1.3；之后每层增加第 4 层总能量的 12%。获得 4 层后解锁超速。', {energyMultiplier: 1.3}),
+  upgrade('overspeed', '超速', 'regular', Infinity, '前 2 层上限 +8 u/s，之后递减增长',
+    '弹性十足达到 4 层后解锁，无层数上限。前 2 层每层提高速度上限 8 u/s；之后额外获得 n 层时，共再提高 4√n u/s。', {speedCapBonus: 8}, {energy: 4}),
+  upgrade('density', '重量级', 'regular', Infinity, '前 5 层质量 ×1.35，之后持续增长',
+    '无层数上限。前 5 层每层质量乘 1.35；之后每层增加第 5 层总质量的 15%。无尽模式同样拉伸不降低弹射速度。', {densityMultiplier: 1.35}),
   upgrade('rubber', '橡胶', 'regular', 4, '未击杀保速 +8 点，击杀 +4 点',
     '每层最低撞击保速：未击杀增加 8 个百分点，直接击杀增加 4 个百分点，最多 4 层。分别从 70% 和 85% 起，最多保留 100%。', {retentionBonus: .08, lethalRetentionBonus: .04}),
   upgrade('growth', '大一圈', 'regular', 2, '直径变大，每层伤害 +10%',
@@ -33,18 +33,17 @@ export const UPGRADE_DEFINITIONS = Object.freeze([
   upgrade('split', '分身有术', 'special', 1, '每发首杀分出两颗子球',
     '每发第一次击杀后分出两颗 0.7u 子球，以 60% 速度和伤害飞完这一发。',
     {count: 2, radius: .7, speedRatio: .6, damageRatio: .6}),
-  upgrade('penetration', '势如破竹', 'special', 1, '每发第一次击杀不减速',
-    '每发的第一次击杀保留全部速度。', {firstKillRetention: 1}),
+  upgrade('penetration', '势如破竹', 'special', 1, '每发首杀恢复出手速度',
+    '每发第一次击杀时，主球恢复到这一发出手时的速度；已经更快则保持。出手速度不含回旋加速，恢复时再按当前回旋状态计入 30% 加速。', {restoreShotSpeed: true}),
   upgrade('boomerang', '回旋加速', 'special', 1, '撞墙后短暂加速',
     '撞墙后 0.8 秒内速度提高 30%。', {duration: .8, speedMultiplier: 1.3}),
   upgrade('shockwave', '震荡波纹', 'special', 1, '每第 2 次撞墙释放冲击波',
-    '每第 2 次撞墙释放半径 3u 的冲击波，造成 75% 满拉伤害。', {everyWalls: 2, radius: 3, fullPullDamageRatio: .75}),
-  upgrade('risk', '冒险', 'risk', 2, '敌球 HP ×1.15，分数 ×1.5',
-    '新生敌球 HP 每层乘 1.15，得分每层乘 1.5，最多 2 层；刷新速度不变，不增加 Boss HP。', {enemyHpMultiplier: 1.15, scoreMultiplier: 1.5}),
-  upgrade('gambler', '赌徒', 'risk', 2, '下阶段目标 +50%，下次五选一',
-    '下一阶段击杀目标增加 50%，下一次强化改为五选一；最多获得 2 次。', {nextTargetMultiplier: 1.5, nextChoiceCount: 5}),
-  upgrade('frenzy', '狂潮', 'risk', 1, '波次更密，连击上限 12',
-    '每波增加 2 颗，波间休止缩短 30%，连击倍率上限从 8 提高到 12。', {waveSizeBonus: 2, restMultiplier: .7, comboCap: 12}),
+    '每第 2 次撞墙释放半径 4u 的冲击波，造成 75% 满拉伤害。', {everyWalls: 2, radius: 4, fullPullDamageRatio: .75}),
+  upgrade('gambler', '赌徒', 'risk', Infinity, '下阶段目标 +50%，完成后多选一轮',
+    '可反复获得。每次只提高下一阶段击杀目标 50%；完成下一阶段后，额外获得一轮三选一：普通阶段共 2 轮，Boss 阶段共 3 轮。待生效时不会再次出现。', {nextTargetMultiplier: 1.5, extraRewardRounds: 1}),
+  upgrade('frenzy', '狂潮', 'risk', Infinity, '波次更密，6 连击后伤害递增',
+    '无层数上限。首次获得后每波增加 2 颗、波间休止缩短 30%；从第 2 层起，每层每波再增加 1 颗、波间休止再乘 0.9。连击倍率上限保持 12。每层在超过 6 连击后，每多击杀 1 颗使后续伤害增加 15%，本层最多增加 60%；多层加算，连击中断后重置。',
+    {waveSizeBonus: 2, extraWaveSizeBonus: 1, restMultiplier: .7, extraRestMultiplier: .9, comboCap: 12, comboDamageThreshold: 6, comboDamagePerKill: .15, comboDamageCap: .6}),
 ]);
 
 export const UPGRADES = Object.freeze(Object.fromEntries(UPGRADE_DEFINITIONS.map(entry => [entry.id, entry])));
@@ -56,11 +55,50 @@ const definitionFor = entry => {
   const id = typeof entry === 'string' ? entry : entry?.id;
   return Object.hasOwn(UPGRADES, id) ? UPGRADES[id] : null;
 };
-const acquired = (counts, id) => Math.max(0, Math.floor(Number(counts?.[id]) || 0));
+const layers = value => Number.isFinite(Number(value))
+  ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(Number(value)))) : 0;
+const acquired = (counts, id) => layers(counts?.[id]);
+const SOFT_CAPS = Object.freeze({energy: 4, density: 5, overspeed: 2});
+
+export function upgradeStat(id, count = 0) {
+  const n = layers(count);
+  if (id === 'energy') return 1.3 ** Math.min(n, 4) * (1 + .12 * Math.max(0, n - 4));
+  if (id === 'density') return 1.35 ** Math.min(n, 5) * (1 + .15 * Math.max(0, n - 5));
+  if (id === 'overspeed') return 8 * Math.min(n, 2) + 4 * Math.sqrt(Math.max(0, n - 2));
+  return 0;
+}
+
+export function upgradeOffer(entry, counts = {}) {
+  const definition = definitionFor(entry);
+  if (!definition) return {...entry};
+  const id = definition.id, count = acquired(counts, id);
+  let short = definition.short;
+  if (id === 'energy') short = '弹射能量 ×1.3';
+  if (id === 'density') short = '质量 ×1.35，无尽弹射不减速';
+  if (id === 'overspeed') short = '速度上限 +8 u/s';
+  if (id === 'frenzy' && count > 0) {
+    const total = Math.round((count + 1) * definition.effect.comboDamageCap * 100);
+    short = `每波再 +1，休止再 ×0.9；连击增伤上限共 +${total}%`;
+  }
+  if (count >= SOFT_CAPS[id]) {
+    const previous = upgradeStat(id, count), next = upgradeStat(id, count + 1);
+    const increase = id === 'overspeed' ? next - previous : (next / previous - 1) * 100;
+    const displayed = Number(increase.toPrecision(3));
+    short = id === 'overspeed' ? `速度上限 +${displayed} u/s`
+      : id === 'energy' ? `弹射能量 +${displayed}%` : `质量 +${displayed}%，无尽弹射不减速`;
+  }
+  return {...definition, short};
+}
+
+function lateProgress(context) {
+  const stage = Number(context.stage);
+  return Number.isFinite(stage) ? Math.max(0, Math.min(1, (stage - 11) / 9)) : 0;
+}
 
 export function canAcquireUpgrade(entry, counts = {}) {
   const definition = definitionFor(entry);
-  return !!definition && acquired(counts, definition.id) < definition.maxStacks
+  return !!definition && Number.isFinite(Number(counts?.[definition.id] ?? 0))
+    && acquired(counts, definition.id) < definition.maxStacks
     && Object.entries(definition.requires).every(([id, minimum]) => acquired(counts, id) >= minimum);
 }
 
@@ -70,7 +108,7 @@ export function eligibleUpgrades({counts = {}, pool = null, exclude = []} = {}) 
     && !excluded.has(entry.id) && canAcquireUpgrade(entry, counts));
 }
 
-export function upgradeWeight(entry, context = {}) {
+export function upgradeWeight(entry, context = {}, counts = {}) {
   const definition = definitionFor(entry);
   if (!definition) return 0;
   const id = definition.id;
@@ -79,37 +117,50 @@ export function upgradeWeight(entry, context = {}) {
   if (context.nextBoss && ['energy', 'density', 'split'].includes(id)) weight *= 2;
   if (context.completedShots > 0 && Number.isFinite(context.averageKillsPerShot)
     && context.averageKillsPerShot < 1.5 && ['split', 'pulse', 'gravity'].includes(id)) weight *= 2;
+  const late = lateProgress(context), count = acquired(counts, id);
+  if (id === 'frenzy') {
+    weight *= count === 0 ? 1 + 1.5 * late
+      : Math.max(.4, 1 / (1 + .25 * Math.max(0, count - 1) * late));
+  }
+  if (Object.hasOwn(SOFT_CAPS, id)) {
+    const extra = Math.max(0, count - SOFT_CAPS[id]);
+    weight *= Math.max(.2, 1 / (1 + .22 * extra * late));
+  }
   return weight;
 }
 
 const sample = random => Math.max(0, Math.min(1 - Number.EPSILON, Number(random()) || 0));
 
-function weightedChoice(candidates, context, random) {
-  let point = sample(random) * candidates.reduce((total, entry) => total + upgradeWeight(entry, context), 0);
+function weightedChoice(candidates, context, counts, random) {
+  let point = sample(random) * candidates.reduce((total, entry) => total + upgradeWeight(entry, context, counts), 0);
   for (const entry of candidates) {
-    point -= upgradeWeight(entry, context);
+    point -= upgradeWeight(entry, context, counts);
     if (point < 0) return entry;
   }
   return candidates.at(-1);
 }
 
-export function rollUpgrades({counts = {}, context = {}, random = Math.random, count = 3} = {}) {
+export function rollUpgrades({counts = {}, context = {}, random = Math.random, count = 3, exclude = []} = {}) {
   const size = Number.isFinite(count) ? Math.max(0, Math.min(5, Math.floor(count))) : 3;
-  const eligible = eligibleUpgrades({counts}), selected = [], used = new Set();
+  const eligible = eligibleUpgrades({counts, exclude}), selected = [], used = new Set();
+  const late = lateProgress(context);
   for (let index = 0; index < size && used.size < eligible.length; index++) {
-    // Five-choice offers retain the ordinary three slots and add one regular
-    // and one special slot. Risk is a 60% category roll, not a rarity roll.
+    // Starting with stage 12, every slot can favor risk. There is no regular
+    // guarantee; distinct IDs naturally limit each offer to two risk upgrades.
+    // Do not consume an extra random draw before that stage.
     const preferred = index === 0 || index === 3 ? 'regular' : index === 1 || index === 4 ? 'special'
-      : sample(random) < .6 ? 'risk' : 'regular';
-    const pools = [preferred, ...['regular', 'special', 'risk'].filter(pool => pool !== preferred)];
+      : sample(random) < .6 + .25 * late ? 'risk' : 'regular';
+    const riskChance = index === 0 || index === 3 ? .2 * late : .45 * late;
+    const poolName = index !== 2 && late > 0 && sample(random) < riskChance ? 'risk' : preferred;
+    const pools = [poolName, ...['regular', 'special', 'risk'].filter(pool => pool !== poolName)];
     let candidates = [];
     for (const pool of pools) {
       candidates = eligible.filter(entry => entry.pool === pool && !used.has(entry.id));
       if (candidates.length) break;
     }
     if (!candidates.length) break;
-    const choice = weightedChoice(candidates, context, random);
-    used.add(choice.id); selected.push({...choice});
+    const choice = weightedChoice(candidates, context, counts, random);
+    used.add(choice.id); selected.push(upgradeOffer(choice, counts));
   }
   // Return only real, distinct, eligible upgrades. An empty array tells physics
   // to finish the normal reward rest and continue, without a synthetic upgrade.

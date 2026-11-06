@@ -88,6 +88,9 @@ export class GameAudio {
     this.fadeMaster();
     this.ramp(this.music.gain, volumeGain(this.bgmVolume));
     this.ramp(this.effects.gain, volumeGain(this.sfxVolume));
+    if (this.player && (!this.enabled || this.hidden || !this.bgmVolume)) {
+      this.loading = this.player.setScene(this.musicScene, {activate: false});
+    }
   }
   prepareMusic() {
     if (this.hidden || !this.enabled || !this.bgmVolume || this.player || !this.prepareHome) return;
@@ -110,8 +113,11 @@ export class GameAudio {
   setMusicScene(scene) {
     if (!Object.hasOwn(MUSIC_SCENES, scene)) return;
     this.musicScene = scene;
-    if (this.player && this.context.state === 'running' && !this.hidden && this.enabled && this.bgmVolume) {
-      this.loading = this.player.setScene(scene);
+    if (this.player) {
+      // Update intent even while silent so a slow, obsolete decode cannot start
+      // a Boss track after the run has already ended or returned home.
+      const activate = this.context.state === 'running' && !this.hidden && this.enabled && this.bgmVolume > 0;
+      this.loading = this.player.setScene(scene, {activate});
     }
     return this.loading;
   }
@@ -293,6 +299,13 @@ export class GameAudio {
     if (!amount) return;
     this.noiseAt(at, .005, .007 * gain * amount);
     this.toneAt(at, pitch * 2.5, .065, 'sine', (.005 + .003 * energy) * gain * amount, .98, .0015);
+  }
+  shockwave({hit = false, strength = .6} = {}) {
+    const amount = audioLevel(strength, .6);
+    if (!amount || !this.canPlayEffects || this.voices.size >= MAX_EFFECT_VOICES) return false;
+    const gain = .028 * amount * (hit ? 1.3 : 1) / Math.sqrt(1 + this.voices.size / 4);
+    this.toneAt(this.context.currentTime, 85, .18, 'sine', gain, 55 / 85, .006);
+    return true;
   }
   launch(power = .5) {
     if (!this.canPlayEffects) return;

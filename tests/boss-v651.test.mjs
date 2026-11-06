@@ -12,10 +12,10 @@ test('every encounter is the same inflation Boss and withdrawn type overrides ca
 });
 
 test('the real Boss route sweeps every survivor once before entry and preserves clearing score semantics',()=>{
- const w=world();w.applyUpgrade('risk');for(let i=0;i<3;i++)enemy(w,{x:80+i*80,y:150+i*100});w.stageKills=w.killTarget;w.pendingClearing={x:80,y:150};w.auxiliaries=[{hp:Infinity,isPlayer:true,isAuxiliary:true,r:w.unit*.7,x:50,y:50,vx:0,vy:0}];w.beginClearing();
+ const w=world();assert.equal(w.applyUpgrade('risk'),false);for(let i=0;i<3;i++)enemy(w,{x:80+i*80,y:150+i*100});w.stageKills=w.killTarget;w.pendingClearing={x:80,y:150};w.auxiliaries=[{hp:Infinity,isPlayer:true,isAuxiliary:true,r:w.unit*.7,x:50,y:50,vx:0,vy:0}];w.beginClearing();
  assert.equal(w.phase,'clearing');assert.equal(w.boss,null);assert.equal(w.auxiliaries.length,0);const target=w.stageKills;
  for(let i=0;i<240&&w.phase==='clearing';i++)w.step(1/120);
- assert.equal(w.phase,'boss-entry');assert.equal(w.enemies.length,0);assert.equal(w.score,45);assert.equal(w.stageKills,target);assert.equal(w.totalKills,0);assert.equal(w.shotKills,0);assert.equal(w.events.filter(e=>e.type==='clearKill').length,3);assert.equal(w.events.filter(e=>e.type==='bossEntry').length,1);
+ assert.equal(w.phase,'boss-entry');assert.equal(w.enemies.length,0);assert.equal(w.score,30);assert.equal(w.stageKills,target);assert.equal(w.totalKills,0);assert.equal(w.shotKills,0);assert.equal(w.events.filter(e=>e.type==='clearKill').length,3);assert.equal(w.events.filter(e=>e.type==='bossEntry').length,1);
 });
 
 test('direct Boss entry clears enemy, auxiliary and queued children without adding a second clearing award',()=>{

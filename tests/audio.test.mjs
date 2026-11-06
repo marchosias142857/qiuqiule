@@ -28,7 +28,7 @@ test('volume buses are independent; master mute preserves levels and suppresses 
   audio.setLevels({sound:true,bgmVolume:0,sfxVolume:.7});
   assert.equal(audio.music.gain.value,0);assert.equal(audio.effects.gain.value,volumeGain(.7));
   audio.tone();assert.equal(c.oscillators.length,1);assert.equal(c.oscillators[0].target.target,audio.effects);
-  assert.equal(audio.source.target.target,audio.player.filter);assert.equal(audio.player.sceneGain.target,audio.music);
+  assert.equal(audio.source.target.target.target,audio.player.filter);assert.equal(audio.player.sceneGain.target,audio.music);
   audio.setLevels({sound:false,bgmVolume:.42,sfxVolume:.7});audio.tone();
   assert.equal(audio.master.gain.value,0);assert.equal(c.oscillators.length,1);
   audio.setLevels({sound:true});assert.equal(audio.music.gain.value,volumeGain(.42));assert.equal(audio.effects.gain.value,volumeGain(.7));
@@ -109,7 +109,7 @@ test('boss victory schedules five rising notes on the effects bus and cleans up 
   }
   assert.equal(audio.voices.size,0);
   assert.equal(contexts,1);assert.equal(loads,1);assert.equal(c.sources.length,1);
-  assert.equal(audio.source,music);assert.equal(music.starts,1);assert.equal(music.target.target,audio.player.filter);
+  assert.equal(audio.source,music);assert.equal(music.starts,1);assert.equal(music.target.target.target,audio.player.filter);
 });
 
 test('boss victory respects master mute, effects volume and background state without restarting music', async () => {
@@ -150,7 +150,7 @@ test('boss defeat starts its transient, body, low end and short tail on one imme
     assert.equal(envelope.at(-1).value,.0001);
     assert.ok(voice.stopTime>attack.at&&voice.stopTime<=12.17+1e-10,'all voices end within the 170 ms cue');
   }
-  assert.equal(audio.source,music);assert.equal(music.starts,1);assert.equal(music.target.target,audio.player.filter);
+  assert.equal(audio.source,music);assert.equal(music.starts,1);assert.equal(music.target.target.target,audio.player.filter);
 });
 
 test('boss defeat releases every node without disrupting the later victory melody or continuous music', async () => {
@@ -360,7 +360,7 @@ test('reward contact starts a crisp short chink on one audio-clock origin withou
     assert.ok(attack.at>8&&attack.at<=8.003);assert.ok(attack.value>0&&attack.value<=.032);
     assert.equal(envelope.at(-1).value,.0001);assert.ok(voice.stopTime>attack.at);
   }
-  assert.equal(audio.source,music);assert.equal(music.starts,1);assert.equal(music.target.target,audio.player.filter);
+  assert.equal(audio.source,music);assert.equal(music.starts,1);assert.equal(music.target.target.target,audio.player.filter);
 });
 
 test('reward contact keeps a quiet basic cue at zero strength and releases all nodes without affecting music', async () => {
@@ -441,56 +441,57 @@ function staged() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return {promise, resolve, reject};
 }
-async function musicSetup(loadMusic = async () => ({duration: 122})) {
+const completeMusic = name => ({duration: Math.max(122, MUSIC_TRACKS[name].loopEnd + 1)});
+async function musicSetup(loadMusic = async (_, name) => completeMusic(name)) {
   const c = context(), audio = new GameAudio({createContext: () => c, loadMusic});
   await audio.unlock(); await audio.loading;
   return {c, audio};
 }
 
-test('first gesture decodes only the resident music; levels selected before unlock are respected', async () => {
-  const c = context(), loads = [], initial = staged(), campaign = staged();
+test('first gesture decodes resident music first and respects a Boss scene selected before unlock', async () => {
+  const c = context(), loads = [], initial = staged(), boss = staged();
   const audio = new GameAudio({createContext: () => c, loadMusic: async (_, name) => {
-    loads.push(name); return name === 'endless' ? initial.promise : campaign.promise;
+    loads.push(name); return name === 'endless' ? initial.promise : boss.promise;
   }});
-  audio.setMusicScene('levels');
+  audio.setMusicScene('boss');
   assert.equal(audio.context, null); assert.deepEqual(loads, []);
   await audio.unlock(); assert.deepEqual(loads, ['endless']);
   initial.resolve({duration: 122});
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(loads, ['endless', 'campaign']);
+  assert.deepEqual(loads, ['endless', 'boss']);
   assert.equal(audio.musicStatus().track, 'endless');
   assert.equal(audio.player.resident.gain.gain.value, 1, 'the original stays audible throughout a slow decode');
   const pending = audio.loading;
-  campaign.resolve({duration: 86.6}); await pending;
-  const status = audio.musicStatus(), campaignVoice = audio.player.voices.get('campaign');
-  assert.equal(status.track, 'campaign'); assert.equal(status.title, '跳格子');
+  boss.resolve(completeMusic('boss')); await pending;
+  const status = audio.musicStatus(), bossVoice = audio.player.voices.get('boss');
+  assert.equal(status.track, 'boss'); assert.equal(status.title, '冠冕');
   assert.equal(audio.source.loopStart, 9.1393); assert.equal(audio.source.loopEnd, 118.849);
-  assert.equal(campaignVoice.source.loopStart, 4.9465); assert.equal(campaignVoice.source.loopEnd, 84.1214);
-  assert.equal(campaignVoice.source.offset, 0);
+  assert.equal(bossVoice.source.loopStart, MUSIC_TRACKS.boss.loopStart); assert.equal(bossVoice.source.loopEnd, MUSIC_TRACKS.boss.loopEnd);
+  assert.equal(bossVoice.source.offset, 0);
   near(status.fadeEnd - status.switchAt, .65);
-  await audio.setMusicScene('campaign');
-  assert.equal(audio.player.voices.get('campaign'), campaignVoice);
-  assert.deepEqual(audio.musicStatus().starts, {endless: 1, campaign: 1});
-  assert.deepEqual(loads, ['endless', 'campaign']);
+  await audio.setMusicScene('boss');
+  assert.equal(audio.player.voices.get('boss'), bossVoice);
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
+  assert.deepEqual(loads, ['endless', 'boss']);
 });
 
-test('abandoned campaign fetches neither activate nor retain a decoded track; retries can reuse an in-flight request', async () => {
+test('abandoned Boss fetches neither activate nor retain a decoded track; retries can reuse an in-flight request', async () => {
   const first = staged(), second = staged(), calls = [];
   let attempts = 0;
   const {audio} = await musicSetup(async (_, name) => {
     calls.push(name);
-    if (name === 'campaign') return ++attempts === 1 ? first.promise : second.promise;
+    if (name === 'boss') return ++attempts === 1 ? first.promise : second.promise;
     return {duration: 122};
   });
-  const abandoned = audio.setMusicScene('levels');
-  audio.setMusicScene('home'); first.resolve({duration: 86.6}); await abandoned;
+  const abandoned = audio.setMusicScene('boss');
+  audio.setMusicScene('home'); first.resolve(completeMusic('boss')); await abandoned;
   assert.deepEqual(audio.musicStatus().cached, ['endless']);
-  assert.equal(audio.musicStatus().starts.campaign, 0);
-  const inFlight = audio.setMusicScene('levels');
-  audio.setMusicScene('home'); const reopened = audio.setMusicScene('levels');
-  second.resolve({duration: 86.6}); await Promise.all([inFlight, reopened]);
-  assert.equal(audio.musicStatus().starts.campaign, 1);
-  assert.deepEqual(calls, ['endless', 'campaign', 'campaign']);
+  assert.equal(audio.musicStatus().starts.boss, 0);
+  const inFlight = audio.setMusicScene('boss');
+  audio.setMusicScene('home'); const reopened = audio.setMusicScene('boss');
+  second.resolve(completeMusic('boss')); await Promise.all([inFlight, reopened]);
+  assert.equal(audio.musicStatus().starts.boss, 1);
+  assert.deepEqual(calls, ['endless', 'boss', 'boss']);
 });
 
 test('an entire endless run and its results keep the resident track without preloading another file', async () => {
@@ -514,47 +515,266 @@ test('an entire endless run and its results keep the resident track without prel
 
 test('reversing halfway holds the equal-power mix at its audible gains and reuses the still-running sources', async () => {
   const {c, audio} = await musicSetup(); c.currentTime = 12;
-  await audio.setMusicScene('campaign');
-  const campaign = audio.player.voices.get('campaign'), initial = audio.musicStatus();
+  await audio.setMusicScene('boss');
+  const boss = audio.player.voices.get('boss'), initial = audio.musicStatus();
   c.currentTime = (initial.switchAt + initial.fadeEnd) / 2;
-  const previous = [audio.player.resident, campaign];
+  const previous = [audio.player.resident, boss];
   await audio.setMusicScene('endless');
   for (const v of previous) near(v.points[0].value, Math.SQRT1_2);
-  const backing = audio.player.resident.points, overlay = campaign.points;
+  const backing = audio.player.resident.points, overlay = boss.points;
   for (let i = 0; i < backing.length; i++) near(backing[i].value ** 2 + overlay[i].value ** 2, 1);
   const returning = audio.musicStatus(); c.currentTime = (returning.switchAt + returning.fadeEnd) / 2;
-  await audio.setMusicScene('campaign');
-  assert.equal(audio.player.voices.get('campaign'), campaign); assert.equal(campaign.source.stopTime, undefined);
-  assert.equal(audio.musicStatus().starts.campaign, 1);
+  await audio.setMusicScene('boss');
+  assert.equal(audio.player.voices.get('boss'), boss); assert.equal(boss.source.stopTime, undefined);
+  assert.equal(audio.musicStatus().starts.boss, 1);
 });
 
 test('a corrupt decoded cue leaves the current source playing; the next interaction can retry', async () => {
   let attempts = 0;
-  const {audio} = await musicSetup(async (_, name) => ({duration: name === 'campaign' && !attempts++ ? 60 : 122}));
-  await audio.setMusicScene('levels');
+  const {audio} = await musicSetup(async (_, name) => ({duration: name === 'boss' && !attempts++ ? 60 : 122}));
+  await audio.setMusicScene('boss');
   assert.equal(audio.musicStatus().track, 'endless');
   assert.deepEqual(audio.musicStatus().cached, ['endless']);
   await audio.unlock(); await audio.loading;
-  assert.equal(audio.musicStatus().track, 'campaign'); assert.equal(attempts, 2);
+  assert.equal(audio.musicStatus().track, 'boss'); assert.equal(attempts, 2);
 });
 
-test('returning home drops campaign PCM after each crossfade and a resumed retirement follows the audio clock', async t => {
+test('returning home drops Boss PCM after each crossfade and a resumed retirement follows the audio clock', async t => {
   t.mock.timers.enable({apis: ['setTimeout']});
   const {c, audio} = await musicSetup();
   for (let i = 0; i < 10; i++) {
-    await audio.setMusicScene('levels');
+    await audio.setMusicScene('boss');
     c.currentTime += 1;
-    const outgoing = audio.player.voices.get('campaign');
+    const outgoing = audio.player.voices.get('boss');
     await audio.setMusicScene('home');
-    assert.ok(!audio.musicStatus().cached.includes('campaign'));
+    assert.ok(!audio.musicStatus().cached.includes('boss'));
     c.currentTime += .1;
     audio.setHidden(true); c.currentTime += .06; t.mock.timers.tick(1000);
     assert.equal(c.state, 'suspended'); assert.equal(outgoing.source.stopTime, undefined);
     audio.setHidden(false); await audio.unlock(); c.currentTime += .6; t.mock.timers.tick(1000);
     assert.equal(outgoing.source.disconnected, true); assert.equal(audio.player.voices.size, 1);
   }
-  assert.equal(audio.musicStatus().starts.endless, 1); assert.equal(audio.musicStatus().starts.campaign, 10);
+  assert.equal(audio.musicStatus().starts.endless, 1); assert.equal(audio.musicStatus().starts.boss, 10);
   assert.equal(audio.source.stopTime, undefined);
+});
+
+function voiceGainAt(voice, time) {
+  const points = voice.points;
+  if (time <= points[0].time) return points[0].value;
+  for (let i = 1; i < points.length; i++) {
+    if (time <= points[i].time) {
+      const a = points[i - 1], b = points[i];
+      return a.value + (b.value - a.value) * (time - a.time) / (b.time - a.time);
+    }
+  }
+  return points.at(-1).value;
+}
+
+test('Boss balance applies before its first sample and stays independent of scene and user volume', async () => {
+  const c = context(), started = [], makeSource = c.createBufferSource;
+  c.createBufferSource = function () {
+    const source = makeSource.call(this), start = source.start;
+    source.start = function (...args) {
+      started.push({trim: this.target.gain.value, fade: this.target.target.gain.value});
+      start.apply(this, args);
+    };
+    return source;
+  };
+  const audio = new GameAudio({createContext: () => c, loadMusic: async (_, name) => completeMusic(name)});
+  audio.setLevels({sound: true, bgmVolume: .42, sfxVolume: .7});
+  audio.setMusicScene('endless'); await audio.unlock(); await audio.loading;
+  c.currentTime = 2; await audio.setMusicScene('boss');
+  const boss = audio.player.voices.get('boss'), trim = 10 ** (-3 / 20), resident = audio.player.resident;
+  assert.deepEqual(started, [{trim: 1, fade: 1}, {trim, fade: 0}]);
+  assert.equal(boss.source.target, boss.trim); assert.equal(boss.trim.target, boss.gain);
+  assert.equal(boss.gain.target, audio.player.filter);
+  near(voiceGainAt(boss, c.currentTime + .65), 1);
+  near(voiceGainAt(boss, c.currentTime + .65) * boss.trim.gain.value, trim);
+  near(audio.player.levelPoints.at(-1).value, 1); near(resident.trim.gain.value, 1);
+  near(audio.music.gain.value, volumeGain(.42)); near(audio.effects.gain.value, volumeGain(.7));
+  audio.setLevels({sound: false, bgmVolume: .16, sfxVolume: .3});
+  near(audio.master.gain.value, 0); near(boss.trim.gain.value, trim);
+  audio.setLevels({sound: true}); await audio.loading;
+  near(audio.music.gain.value, volumeGain(.16)); near(audio.effects.gain.value, volumeGain(.3));
+  c.currentTime += 1; await audio.setMusicScene('home');
+  near(audio.player.levelPoints.at(-1).value, .72); near(boss.trim.gain.value, trim);
+  assert.deepEqual(boss.trim.gain.events, [], 'track trim never shares crossfade or scene automation');
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
+});
+
+test('a pending Boss decode never ducks endless and its eventual crossfade starts at the trimmed level', async () => {
+  const delayed = staged(), {c, audio} = await musicSetup(async (_, name) => name === 'boss' ? delayed.promise : completeMusic(name));
+  await audio.setMusicScene('endless'); c.currentTime = 4;
+  const resident = audio.player.resident, musicGain = audio.music.gain.value;
+  const pending = audio.setMusicScene('boss'); await new Promise(resolve => setImmediate(resolve));
+  c.currentTime += 8;
+  near(voiceGainAt(resident, c.currentTime) * resident.trim.gain.value, 1);
+  near(audio.player.levelPoints.at(-1).value, 1); near(audio.music.gain.value, musicGain);
+  assert.equal(audio.player.voices.size, 1);
+  delayed.resolve(completeMusic('boss')); await pending;
+  const boss = audio.player.voices.get('boss');
+  near(resident.points[0].value, 1); near(boss.points[0].value, 0);
+  near(boss.trim.gain.value, 10 ** (-3 / 20));
+  near(boss.points.at(-1).value, 1); near(audio.musicStatus().fadeEnd - c.currentTime, .65);
+  assert.equal(resident.source.stopTime, undefined);
+});
+
+test('Boss uses its own continuous loop and play mix while preserving the resident endless clock', async () => {
+  const loads = [], {c, audio} = await musicSetup(async (_, name) => { loads.push(name); return completeMusic(name); });
+  const resident = audio.source; c.currentTime = 18.2;
+  await audio.setMusicScene('boss');
+  const voice = audio.player.voices.get('boss'), status = audio.musicStatus();
+  assert.equal(status.track, 'boss'); assert.equal(status.title, MUSIC_TRACKS.boss.title);
+  assert.equal(voice.source.loop, true); assert.equal(voice.source.loopStart, MUSIC_TRACKS.boss.loopStart);
+  assert.equal(voice.source.loopEnd, MUSIC_TRACKS.boss.loopEnd); assert.equal(voice.source.offset, 0);
+  near(status.fadeEnd - status.switchAt, .65); near(audio.player.levelPoints.at(-1).value, 1);
+  near(audio.player.filterPoints.at(-1).value, 20000);
+  c.currentTime = status.startedAt + MUSIC_TRACKS.boss.loopEnd + .3;
+  await audio.setMusicScene('boss'); near(audio.musicStatus().position, MUSIC_TRACKS.boss.loopStart + .3);
+  assert.equal(audio.player.voices.get('boss'), voice); assert.equal(audio.source, resident);
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
+  assert.deepEqual(loads, ['endless', 'boss']);
+  await audio.setMusicScene('resultEndless'); c.currentTime += 1; await audio.setMusicScene('home');
+  assert.equal(audio.source, resident); assert.equal(resident.stopTime, undefined);
+  assert.equal(voice.source.disconnected, true); assert.deepEqual(audio.musicStatus().cached, ['endless']);
+});
+
+test('repeated interrupted fades keep each instantaneous gain continuous and total power bounded between samples', async () => {
+  const {c, audio} = await musicSetup();
+  for (const scene of ['boss', 'endless', 'boss', 'endless', 'boss', 'endless', 'boss', 'endless', 'boss']) {
+    c.currentTime += .137;
+    const before = new Map([...audio.player.voices.values()].map(voice => [voice, voiceGainAt(voice, c.currentTime)]));
+    const audibleBefore = new Map([...before].map(([voice, gain]) => [voice, gain * voice.trim.gain.value]));
+    const powerBefore = [...before.values()].reduce((sum, gain) => sum + gain * gain, 0);
+    await audio.setMusicScene(scene);
+    for (const [voice, gain] of before) near(voice.points[0].value, gain);
+    for (const [voice, gain] of audibleBefore) near(voice.points[0].value * voice.trim.gain.value, gain);
+    near(audio.player.voices.get('boss').trim.gain.value, 10 ** (-3 / 20));
+    for (let i = 0; i <= 52; i++) {
+      const sampleAt = audio.player.switchAt + .65 * i / 52;
+      const gains = [...audio.player.voices.values()].map(voice => voiceGainAt(voice, sampleAt));
+      const power = gains.reduce((sum, gain) => sum + gain * gain, 0);
+      const audiblePower = [...audio.player.voices.values()].reduce((sum, voice) => sum + (voiceGainAt(voice, sampleAt) * voice.trim.gain.value) ** 2, 0);
+      assert.ok(gains.every(gain => gain >= 0 && gain <= 1 + 1e-9));
+      assert.ok(power <= 1 + 1e-9 && power >= powerBefore * .995, `${scene} at ${i}: power ${power}`);
+      assert.ok(audiblePower >= 10 ** (-3 / 10) * powerBefore * .995 && audiblePower <= 1 + 1e-9);
+    }
+  }
+  assert.equal(audio.player.voices.size, 2); assert.equal(audio.musicStatus().starts.endless, 1);
+  c.currentTime += 1; await audio.setMusicScene('boss');
+  assert.deepEqual([...audio.player.voices.keys()].sort(), ['boss', 'endless']);
+  assert.deepEqual(audio.musicStatus().cached.sort(), ['boss', 'endless']);
+  await audio.setMusicScene('home'); c.currentTime += 1; await audio.setMusicScene('home');
+  assert.deepEqual([...audio.player.voices.keys()], ['endless']); assert.deepEqual(audio.musicStatus().cached, ['endless']);
+  near(audio.player.resident.points.at(-1).value, 1);
+});
+
+test('slow, failed and incomplete Boss decoding keep the resident endless source audible until a valid retry', async () => {
+  const delay = staged(); let attempts = 0;
+  const {c, audio} = await musicSetup(async (_, name) => {
+    if (name !== 'boss') return completeMusic(name);
+    attempts++; if (attempts === 1) return delay.promise;
+    if (attempts === 2) return {duration: MUSIC_TRACKS.boss.loopEnd / 2};
+    return completeMusic(name);
+  });
+  await audio.setMusicScene('endless'); c.currentTime += 1;
+  const resident = audio.player.resident, points = resident.points;
+  const work = audio.setMusicScene('boss'); await new Promise(resolve => setImmediate(resolve));
+  c.currentTime += 2; assert.equal(audio.musicStatus().track, 'endless'); near(voiceGainAt(resident, c.currentTime), 1);
+  assert.equal(resident.points, points); delay.reject(Error('offline miss')); await work;
+  assert.equal(audio.musicStatus().track, 'endless'); assert.equal(audio.musicStatus().starts.boss, 0);
+  await audio.setMusicScene('boss'); assert.equal(audio.musicStatus().track, 'endless');
+  assert.equal(audio.musicStatus().cached.includes('boss'), false); assert.equal(resident.source.stopTime, undefined);
+  await audio.setMusicScene('boss'); assert.equal(audio.musicStatus().track, 'boss'); assert.equal(attempts, 3);
+  near(resident.points[0].value, 1);
+});
+
+test('out-of-order resident recovery and Boss decoding honor the latest scene without retaining the abandoned track', async () => {
+  const delayed = {endless: staged(), boss: staged()}, calls = [];
+  let residentAttempts = 0;
+  const c = context(), audio = new GameAudio({createContext: () => c, loadMusic: async (_, name) => {
+    calls.push(name);
+    if (name === 'endless' && ++residentAttempts === 1) throw Error('resident cache miss');
+    return delayed[name].promise;
+  }});
+  audio.setMusicScene('boss'); await audio.unlock();
+  const boss = audio.loading;
+  await new Promise(resolve => setImmediate(resolve));
+  const home = audio.setMusicScene('home');
+  await new Promise(resolve => setImmediate(resolve));
+  delayed.boss.resolve(completeMusic('boss')); await boss;
+  assert.equal(audio.musicStatus().track, null); assert.equal(audio.musicStatus().starts.boss, 0);
+  assert.deepEqual(audio.musicStatus().cached, []);
+  delayed.endless.resolve(completeMusic('endless')); await home;
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 0});
+  assert.deepEqual(audio.musicStatus().cached, ['endless']); assert.equal(audio.player.loads.size, 0);
+  assert.deepEqual(calls, ['endless', 'boss', 'endless']);
+});
+
+test('returning to a pending Boss load reuses its request and starts only one voice', async () => {
+  const delayed = staged(); let calls = 0;
+  const {audio} = await musicSetup(async (_, name) => { if (name === 'boss') { calls++; return delayed.promise; } return completeMusic(name); });
+  const first = audio.setMusicScene('boss'); await audio.setMusicScene('home'); const second = audio.setMusicScene('boss');
+  delayed.resolve(completeMusic('boss')); await Promise.all([first, second]);
+  assert.equal(calls, 1); assert.equal(audio.musicStatus().starts.boss, 1); assert.equal(audio.musicStatus().track, 'boss');
+});
+
+test('muted or hidden late Boss loads wait for foreground playback and abandoned scenes never spawn later', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  for (const mode of ['mute', 'volume', 'hidden']) for (const leave of [false, true]) {
+    const delayed = staged(), calls = [];
+    const {audio} = await musicSetup(async (_, name) => {
+      calls.push(name); return name === 'boss' ? delayed.promise : completeMusic(name);
+    });
+    const work = audio.setMusicScene('boss'); await new Promise(resolve => setImmediate(resolve));
+    if (mode === 'hidden') audio.setHidden(true);
+    else audio.setLevels(mode === 'mute' ? {sound: false} : {bgmVolume: 0});
+    if (leave) audio.setMusicScene('home');
+    delayed.resolve(completeMusic('boss')); await work;
+    assert.equal(audio.musicStatus().starts.boss, 0, `${mode}: no source is started behind silence`);
+    assert.equal(audio.musicStatus().track, 'endless');
+    assert.equal(audio.musicStatus().cached.includes('boss'), !leave);
+    if (mode === 'hidden') await audio.setHidden(false);
+    else audio.setLevels(mode === 'mute' ? {sound: true} : {bgmVolume: .55});
+    await audio.loading;
+    assert.equal(audio.musicStatus().track, leave ? 'endless' : 'boss');
+    assert.equal(audio.musicStatus().starts.boss, leave ? 0 : 1); assert.equal(audio.musicStatus().starts.endless, 1);
+    assert.deepEqual(calls, ['endless', 'boss']);
+  }
+});
+
+test('a reversed Boss voice retires only after its audio-clock fade ends across suspension', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const {c, audio} = await musicSetup(); await audio.setMusicScene('boss'); c.currentTime += .2;
+  await audio.setMusicScene('endless'); c.currentTime += .15;
+  await audio.setMusicScene('boss'); c.currentTime += .15;
+  const outgoing = [audio.player.voices.get('boss')];
+  assert.equal(audio.musicStatus().starts.boss, 1);
+  await audio.setMusicScene('home'); assert.deepEqual(audio.musicStatus().cached, ['endless']);
+  c.currentTime += .1; audio.setHidden(true); c.currentTime += .06; t.mock.timers.tick(1000);
+  assert.equal(c.state, 'suspended'); assert.ok(outgoing.every(voice => voice.source.stopTime === undefined));
+  t.mock.timers.tick(10000); assert.ok(outgoing.every(voice => voice.source.stopTime === undefined));
+  await audio.setHidden(false); c.currentTime += .6; t.mock.timers.tick(1000);
+  for (const voice of outgoing) {
+    assert.equal(voice.source.disconnected, true); assert.equal(voice.gain.disconnected, true);
+    assert.equal(voice.trim.disconnected, true);
+    assert.ok(voice.source.stopTime >= voice.points.at(-1).time);
+  }
+  assert.equal(audio.player.resident.trim.disconnected, undefined);
+  assert.deepEqual([...audio.player.voices.keys()], ['endless']); assert.equal(audio.source.stopTime, undefined);
+});
+
+test('Boss can still play when the resident file is unavailable and later gains a silent resident without restarting Boss', async () => {
+  let residentAvailable = false;
+  const c = context(), audio = new GameAudio({createContext: () => c, loadMusic: async (_, name) => {
+    if (name === 'endless' && !residentAvailable) throw Error('missing resident'); return completeMusic(name);
+  }});
+  audio.setMusicScene('boss'); await audio.unlock(); await audio.loading;
+  assert.equal(audio.musicStatus().track, 'boss'); assert.equal(audio.source, null); assert.equal(audio.musicStatus().starts.boss, 1);
+  const boss = audio.player.voices.get('boss'); near(boss.points[0].value, 0); near(boss.points.at(-1).value, 1);
+  c.currentTime += 1; residentAvailable = true; await audio.setMusicScene('boss');
+  assert.ok(audio.source); assert.equal(audio.player.voices.get('boss'), boss); near(audio.player.resident.points[0].value, 0);
+  assert.deepEqual(audio.musicStatus().starts, {endless: 1, boss: 1});
 });
 
 test('home music can be prepared before a gesture without opening the audio device or fetching twice',async t=>{
@@ -687,4 +907,78 @@ test('autoplay skips saved mute and zero BGM, and a page opened in the backgroun
   assert.deepEqual([outputs, fetches, c.sources.length], [0, 0, 0]);
   await audio.setHidden(false); await audio.loading;
   assert.deepEqual([outputs, fetches, c.sources.length], [1, 1, 1]);
+});
+
+test('shockwave plays one low sine sweep per call, and hits are 30 percent louder at equal feedback strength', async () => {
+  const c = context(), audio = new GameAudio({createContext: () => c, loadMusic: async () => ({duration: 122})});
+  await audio.unlock(); await audio.loading;
+  c.currentTime = 4;
+  const peaks = [];
+  for (const hit of [false, true]) {
+    const count = c.oscillators.length;
+    assert.equal(audio.shockwave({hit, strength: .6}), true);
+    assert.equal(c.oscillators.length, count + 1);
+    const source = c.oscillators.at(-1), gain = source.target;
+    assert.equal(source.type, 'sine');
+    assert.equal(source.startTime, 4);
+    assert.deepEqual(source.frequency.events, [
+      {type: 'set', value: 85, at: 4},
+      {type: 'exponential', value: 55, at: 4.18},
+    ]);
+    assert.equal(gain.target, audio.effects);
+    assert.deepEqual(gain.gain.events[0], {type: 'set', value: 0, at: 4});
+    const attack = gain.gain.events[1], release = gain.gain.events[2];
+    assert.equal(attack.type, 'linear'); assert.equal(attack.at, 4.006);
+    assert.deepEqual(release, {type: 'exponential', value: .0001, at: 4.18});
+    assert.ok(source.stopTime > release.at);
+    peaks.push(attack.value);
+    source.finish();
+    assert.equal(source.disconnected, true); assert.equal(gain.disconnected, true);
+    assert.equal(audio.voices.size, 0);
+  }
+  assert.ok(Math.abs(peaks[1] / peaks[0] - 1.3) < 1e-12);
+  assert.equal(audio.source.starts, 1);
+});
+
+test('shockwave obeys locked, muted, hidden, zero-effects and feedback-disabled states without creating voices', async () => {
+  const c = context(); let contexts = 0;
+  const audio = new GameAudio({createContext: () => { contexts++; return c; }, loadMusic: async () => ({duration: 122})});
+  assert.equal(audio.shockwave(), false); assert.equal(contexts, 0);
+  await audio.unlock(); await audio.loading;
+  for (const state of [
+    {sound: false}, {sound: true, sfxVolume: 0}, {sfxVolume: .75, hidden: true},
+    {hidden: false, suspended: true}, {suspended: false, strength: 0},
+  ]) {
+    if (Object.hasOwn(state, 'sound') || Object.hasOwn(state, 'sfxVolume')) audio.setLevels(state);
+    if (Object.hasOwn(state, 'hidden')) audio.hidden = state.hidden;
+    if (Object.hasOwn(state, 'suspended')) c.state = state.suspended ? 'suspended' : 'running';
+    assert.equal(audio.shockwave({hit: true, strength: state.strength ?? .6}), false);
+  }
+  assert.equal(c.oscillators.length, 0); assert.equal(audio.voices.size, 0);
+});
+
+test('shockwave respects the remaining voice budget and reduces overlapping gain', async () => {
+  const c = context(), audio = new GameAudio({createContext: () => c, loadMusic: async () => ({duration: 122})});
+  await audio.unlock(); await audio.loading;
+  audio.shockwave({strength: 1});
+  const first = c.oscillators.at(-1).target.gain.events[1].value;
+  for (let i = 1; i < MAX_EFFECT_VOICES; i++) assert.equal(audio.shockwave({strength: 1}), true);
+  assert.ok(c.oscillators.at(-1).target.gain.events[1].value < first);
+  assert.equal(audio.shockwave({hit: true, strength: 1}), false);
+  assert.equal(c.oscillators.length, MAX_EFFECT_VOICES);
+  assert.equal(audio.voices.size, MAX_EFFECT_VOICES);
+  for (const source of [...audio.voices]) source.finish();
+  assert.equal(audio.voices.size, 0);
+  assert.equal(audio.shockwave(), true);
+});
+
+test('music exposes only the endless and Boss catalog and ignores retired campaign scene names', async () => {
+  const calls = [];
+  const {audio} = await musicSetup(async (_, name) => {calls.push(name); return completeMusic(name);});
+  assert.deepEqual(Object.keys(MUSIC_TRACKS).sort(), ['boss','endless']);
+  for(const scene of ['levels','campaign','resultCampaign','failedCampaign']){
+    assert.equal(audio.setMusicScene(scene), undefined);
+    assert.equal(audio.musicStatus().scene, 'home');
+  }
+  assert.deepEqual(calls, ['endless']);assert.deepEqual(audio.musicStatus().starts, {endless:1,boss:0});
 });

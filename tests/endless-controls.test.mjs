@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, length, BOSS_TIMING} from '../dist/physics.js';
-import {LegacyCampaignWorld as CampaignWorld} from '../dist/campaign.js';
 
 const near = (actual, expected, epsilon = 1e-8) => assert.ok(Math.abs(actual - expected) < epsilon, `${actual} != ${expected}`);
-function world(campaign = false) {
-  const w = campaign ? new CampaignWorld(10000, 10000, 1, () => .5) : new World(10000, 10000, () => .5, {spawnInitial: false});
+function world() {
+  const w = new World(10000, 10000, () => .5, {spawnInitial: false});
   w.enemies = []; w.spawnTimer = 999; w.floorTimer = Infinity; w.introTimer = Infinity; w.target = Infinity; w.events = []; w.energy = 1;
   Object.assign(w.player, {x: 2000, y: 2000, vx: 0, vy: 0});
   return w;
@@ -28,10 +27,6 @@ test('endless battle, Boss entry and Boss permit capture at every speed', () => 
     w.phase = phase;
     assert.equal(w.continuousControl, false); assert.equal(w.ready, false); assert.equal(w.beginPull(), false);
   }
-  const campaign = world(true); campaign.player.vx = campaign.unit * 9;
-  assert.equal(campaign.continuousControl, false); assert.equal(campaign.beginPull(), false);
-  campaign.player.vx = campaign.unit * 7;
-  assert.equal(campaign.beginPull(), true);
 });
 
 test('ordinary endless release redirects current speed while Boss release restores bounded captured-speed addition', () => {
@@ -49,7 +44,7 @@ test('ordinary endless release redirects current speed while Boss release restor
   }
 });
 
-test('holding an endless aim leaves ordinary drag unchanged while campaign and choose retain braking', () => {
+test('holding an endless aim leaves ordinary drag unchanged while reward choices retain braking', () => {
   for (const startSpeed of [5, 30]) {
     const held = world(), free = world();
     for (const w of [held, free]) w.player.vx = w.unit * startSpeed;
@@ -57,7 +52,7 @@ test('holding an endless aim leaves ordinary drag unchanged while campaign and c
     near(held.player.vx, free.player.vx); near(held.player.x, free.player.x);
     near(held.player.vx, held.unit * startSpeed * Math.exp(-(startSpeed > 8 ? .35 : 1.2) * .2));
   }
-  for (const w of [world(true), Object.assign(world(), {phase: 'choose'})]) {
+  for (const w of [Object.assign(world(), {phase: 'choose'})]) {
     w.player.vx = w.unit * 5; w.beginPull(); w.step(.2, true);
     near(w.player.vx, w.unit * 5 * Math.exp(-10 * .2));
     w.shoot(0, -w.maxPull); near(w.player.vy, w.baseSpeed + w.unit * 5);
@@ -66,52 +61,53 @@ test('holding an endless aim leaves ordinary drag unchanged while campaign and c
 
 test('normal collision retains solved direction and seventy percent speed without changing incoming damage', () => {
   for (const offset of [0, 12]) {
-    const endless = world(), campaign = world(true);
-    for (const w of [endless, campaign]) {
-      Object.assign(w.player, {x: 2000, y: 2000, vx: 600, vy: 0});
-      w.collide(w.player, enemy(w, {x: 2000 + w.unit * 1.9, y: 2000 + offset}));
-    }
-    const p = endless.player, old = campaign.player, solved = length(old);
+    const endless = world(),p=endless.player;
+    Object.assign(p, {x: 2000, y: 2000, vx: 600, vy: 0});
+    const b=enemy(endless, {x: 2000 + endless.unit * 1.9, y: 2000 + offset});
+    const distance=Math.hypot(b.x-p.x,b.y-p.y),nx=(b.x-p.x)/distance,ny=(b.y-p.y)/distance;
+    const closing=600*nx,reducedMass=1/(1/p.mass+1/b.mass),impulse=1.9*closing*reducedMass;
+    const old={vx:600-impulse*nx/p.mass,vy:-impulse*ny/p.mass},solved=length(old);
+    const damage=Math.max(1,Math.round(.5*reducedMass*(closing/endless.unit)**2*.31));
+    endless.collide(p,b);
     near(length(p), Math.max(600 * .7, solved));
     near(p.vx / length(p), old.vx / solved); near(p.vy / length(p), old.vy / solved);
-    near(endless.enemies[0].vx, campaign.enemies[0].vx);
-    near(endless.enemies[0].vy, campaign.enemies[0].vy);
-    assert.equal(endless.enemies[0].hp, campaign.enemies[0].hp);
+    near(b.vx, impulse*nx/b.mass);near(b.vy, impulse*ny/b.mass);
+    assert.equal(b.hp,10000-damage);
   }
 });
 
-test('pierce keeps the incoming direction and a ninety-two-percent floor only in endless play', () => {
-  const endless = world(), campaign = world(true);
-  for (const w of [endless, campaign]) {
+test('pierce keeps the incoming direction and a ninety-two-percent floor', () => {
+  const endless = world();
+  for (const w of [endless]) {
     w.buffs.pierce = 1;
     Object.assign(w.player, {x: 2000, y: 2000, vx: 480, vy: 360});
     const b = enemy(w, {x: 2000 + w.unit * 1.9 * .8, y: 2000 + w.unit * 1.9 * .6});
     w.collide(w.player, b);
     near(w.player.vx / length(w.player), .8); near(w.player.vy / length(w.player), .6);
   }
-  near(length(endless.player), 600 * .92); near(length(campaign.player), 600 * .52);
+  near(length(endless.player), 600 * .92);
 });
 
 test('player walls retain ninety-five percent in ordinary endless combat and 98.5 percent in Boss combat', () => {
-  for (const [campaign, phase, retention] of [[false, 'battle', .95], [false, 'boss', .985], [false, 'choose', .92], [false, 'reward', .92], [true, 'battle', .92]]) {
-    const w = world(campaign);if(phase==='boss'){w.stage=5;w.beginBoss();w.step(BOSS_TIMING.entry);}else w.phase=phase;
+  for (const [phase, retention] of [['battle', .95], ['boss', .985], ['choose', .92], ['reward', .92]]) {
+    const w = world();if(phase==='boss'){w.stage=5;w.beginBoss();w.step(BOSS_TIMING.entry);}else w.phase=phase;
     Object.assign(w.player, {x: 0, y: phase==='boss'?w.arenaGeometry.y:2000, vx: -500, vy: 100}); w.wall(w.player);
     near(w.player.vx, 500 * retention); near(w.player.vy, 100);
     const b = enemy(w, {x: 0, y: phase==='boss'?w.arenaGeometry.y:3000, vx: -500}); w.wall(b); near(b.vx, 460);
   }
 });
 
-test('endless drag splits the eight-unit threshold consistently and leaves enemy and campaign drag unchanged', () => {
+test('endless drag splits the eight-unit threshold consistently and leaves enemy drag unchanged', () => {
   const a = world(), b = world();
   for (const w of [a, b]) w.player.vx = w.unit * 8.1;
   const crossing = Math.log(8.1 / 8) / .35, dt = .2;
   a.step(dt); for (let i = 0; i < 20; i++) b.step(dt / 20);
   const expected = a.unit * 8 * Math.exp(-1.2 * (dt - crossing));
   near(length(a.player), expected); near(length(b.player), expected);
-  for (const campaign of [false, true]) {
-    const w = world(campaign), b = enemy(w, {vx: 200}); w.player.vx = 200;
+  {
+    const w = world(), b = enemy(w, {vx: 200}); w.player.vx = 200;
     w.step(.1); near(b.vx, 200 * Math.exp(-1.2 * .1));
-    near(w.player.vx, 200 * Math.exp(-(campaign ? .6 : 1.2) * .1));
+    near(w.player.vx, 200 * Math.exp(-1.2 * .1));
   }
 });
 

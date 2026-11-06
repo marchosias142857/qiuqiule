@@ -1,10 +1,11 @@
 // v6.5.2: the fixed inflation Boss in its square arena.
 // Usage: node scripts/simulate-bosses.mjs [seed-count=1] [seconds-per-run=90] [--quick]
-// Growth fixtures respect the number of prior rewards and every prerequisite
-// and cap. They are possible builds, not a simulation of the preceding stages
-// or of the probability of receiving those offers. Zero is a stage-5 diagnostic
-// baseline, not a claimed acquisition history. At stage 50 all routes have
-// exhausted the same 33-layer pool. No starting milestone upgrades are assumed.
+// Controlled growth fixtures use the base number of prior rewards and respect
+// every prerequisite and cap. Wager bonus acquisitions are not added to these
+// conservative budgets; these are not complete prior-stage acquisition histories
+// or a simulation of offer probabilities. Zero is a stage-5 diagnostic
+// baseline, not a claimed acquisition history. Late fixtures keep spending their
+// finite reward budget on uncapped basics. No starting milestone upgrades are assumed.
 // After entry: real pulls, shots, wall/Boss contacts, steps, resize, and rewards
 // only; never reposition a moving ball, inject damage, or force a victory.
 // Single-shot runs never fire again. Refill runs obey ready and hold for .12s;
@@ -38,17 +39,20 @@ const rng = seed => () => ((seed = Math.imul(seed, 1664525) + 1013904223 >>> 0) 
 const near = (a, b, label, epsilon = 1e-7) => assert.ok(Math.abs(a - b) <= epsilon, `${label}: ${a} != ${b}`);
 const sourceHash = file => createHash('sha256').update(readFileSync(new URL(file, import.meta.url))).digest('hex');
 const priorities = {
-  typical: ['energy','density','energy','density','bank','rubber','energy','density','rubber','boomerang','energy','overspeed','pulse','growth','split','rubber','risk','gambler','risk','gambler'],
-  elastic: ['energy','rubber','rubber','rubber','rubber','energy','boomerang','pierce','energy','density','energy','overspeed','growth','shockwave','density','bank','risk','gambler'],
-  split: ['energy','density','split','rubber','energy','density','energy','shockwave','boomerang','pulse','gravity','magnet','growth','energy','overspeed','bank','frenzy','risk','gambler','gambler'],
-  energy: ['energy','energy','energy','energy','overspeed','overspeed','boomerang','bank','shockwave','rubber','rubber','rubber','density','growth','split','rubber','risk','risk','frenzy'],
+  typical: ['energy','density','energy','density','bank','rubber','energy','density','rubber','boomerang','energy','overspeed','pulse','growth','split','rubber','frenzy','gambler','frenzy','gambler'],
+  elastic: ['energy','rubber','rubber','rubber','rubber','energy','boomerang','pierce','energy','density','energy','overspeed','growth','shockwave','density','bank','frenzy','gambler'],
+  split: ['energy','density','split','rubber','energy','density','energy','shockwave','boomerang','pulse','gravity','magnet','growth','energy','overspeed','bank','frenzy','frenzy','gambler','gambler'],
+  energy: ['energy','energy','energy','energy','overspeed','overspeed','boomerang','bank','shockwave','rubber','rubber','rubber','density','growth','split','rubber','frenzy','frenzy','frenzy'],
 };
-const allLayers = UPGRADE_DEFINITIONS.flatMap(entry => Array(entry.maxStacks).fill(entry.id));
+const originalCaps = {energy: 4, density: 5, overspeed: 2, gambler: 2, frenzy: 1};
+const initialLayers = UPGRADE_DEFINITIONS.flatMap(entry =>
+  Array(Number.isFinite(entry.maxStacks) ? entry.maxStacks : originalCaps[entry.id]).fill(entry.id));
 function buildPath(stage, theme) {
   if (theme === 'zero') { assert.equal(stage, 5); return []; }
-  const budget = Math.min(allLayers.length, stage - 1 + Math.floor((stage - 1) / 5));
+  const budget = stage - 1 + Math.floor((stage - 1) / 5);
   const counts = {}, path = [];
-  for (const id of [...priorities[theme], ...allLayers]) {
+  const continuedGrowth = Array.from({length: budget}, (_, index) => ['energy', 'density', 'overspeed'][index % 3]);
+  for (const id of [...priorities[theme], ...initialLayers, ...continuedGrowth]) {
     if (path.length === budget) break;
     if (!canAcquireUpgrade(id, counts)) continue;
     counts[id] = (counts[id] || 0) + 1; path.push(id);
@@ -174,7 +178,8 @@ function encounter(spec) {
     w.events.length = 0;
   }
   assert.ok(result.shots >= 1); if (mode === 'single') assert.equal(result.shots, 1);
-  if (w.stage > stage) { assert.equal(w.stage, stage + 1); assert.equal(result.rewardSelections + result.skippedRewards, 2); }
+  assert.equal(result.skippedRewards, 0, `${label}: a finite build must retain real rewards`);
+  if (w.stage > stage) { assert.equal(w.stage, stage + 1); assert.equal(result.rewardSelections, 2); }
   result.phase = w.phase; result.nextStage = w.stage > stage; result.reason = w.deathReason;
   result.secondsObserved = firstShot === null ? 0 : time(); result.finalSpeed = length(w.player) / w.unit;
   result.remainingHpFraction = Number.isFinite(w.boss?.maxHp) ? w.boss.hp / w.boss.maxHp : null;

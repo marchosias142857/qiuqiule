@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, BREATH_DURATION} from '../dist/physics.js';
-import {LegacyCampaignWorld} from '../dist/campaign.js';
 
 const near = (actual, expected, epsilon = 1e-7) => assert.ok(Math.abs(actual - expected) < epsilon, `${actual} != ${expected}`);
 function run(width = 1400, height = 1000) {
@@ -52,7 +51,7 @@ test('opening clusters never overlap across random radii and four viewport shape
   }
 });
 
-test('stage formulas use rounded-up floors, bounded wave size and exponential health only in endless', () => {
+test('stage formulas use rounded-up floors, bounded wave size and exponential health', () => {
   const w = run();
   for (const stage of [1, 2, 5, 10, 15, 20, 40]) {
     w.stage = stage; w.time = 91;
@@ -63,10 +62,6 @@ test('stage formulas use rounded-up floors, bounded wave size and exponential he
     const profile = w.enemyProfile(); near(profile.hp, 19 * 1.20 ** (stage - 1) + 4);
     near(profile.density, .65 + .06 * stage + .0004 * 91); near(profile.radiusScale, .8);
   }
-  const campaign = new LegacyCampaignWorld(390, 844, 5, () => .5);
-  assert.equal(campaign.enemies.length, 2); assert.equal(campaign.limit, 18);
-  campaign.limit = 1; assert.equal(campaign.limit, 1);
-  const profile = campaign.enemyProfile(); campaign.time = 1000; assert.deepEqual(campaign.enemyProfile(), profile);
 });
 
 test('floor refill stays immediate but its 150 ms clock runs at two-thirds speed during breath', () => {

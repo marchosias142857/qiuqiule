@@ -31,13 +31,13 @@ test('v7.4 third-kill bonus persists beyond the ordinary and frenzy caps and onl
   }
 });
 
-test('v7.4 variant base, bank, third-kill and risk bonuses multiply before a single rounding step', () => {
-  const w = run(); w.applyUpgrade('risk'); w.applyUpgrade('risk'); w.shoot(-w.maxPull, 0);
+test('variant base, bank and third-kill bonuses multiply before one rounding without the removed risk bonus', () => {
+  const w = run(); assert.equal(w.applyUpgrade('risk'), false); w.shoot(-w.maxPull, 0);
   Object.assign(w.player, {x: 0, vx: -w.baseSpeed, vy: 0}); w.wall(w.player);
   assert.equal(w.shotBanked, true);
   w.damage(enemy(w), 1); w.damage(enemy(w), 1); w.damage(enemy(w, {enemyType: 'fragment'}), 1);
-  // Third fragment: 5 * 3 * 1.5(chain) * 1.5(bank) * 2.25(risk) = 75.9375.
-  assert.deepEqual(awards(w), [34, 68, 76]); assert.equal(w.score, 178);
+  // Third fragment: 5 * 3 * 1.5(chain) * 1.5(bank) = 33.75.
+  assert.deepEqual(awards(w), [15, 30, 34]); assert.equal(w.score, 79);
   const ring = run(); ring.shoot(-ring.maxPull, 0);
   ring.damage(enemy(ring), 1); ring.damage(enemy(ring), 1); ring.damage(enemy(ring, {enemyType: 'ring'}), 1);
   assert.deepEqual(awards(ring), [10, 20, 68]);

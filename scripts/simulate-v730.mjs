@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {mkdtempSync, readFileSync, writeFileSync, rmSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL, fileURLToPath} from 'node:url';
@@ -16,31 +16,37 @@ const args = Object.fromEntries(process.argv.slice(2).map(arg => {
   const [key, ...value] = arg.replace(/^--/, '').split('='); return [key, value.join('=') || true];
 }));
 if (args.help) {
-  console.log('node scripts/simulate-v730.mjs --seeds=8 --max-seconds=600 --out=docs/V7.3.0-SIMULATION.json\nOptional: --baseline-dir=/absolute/v720 --baseline-ref=79f28da54d7fbf42af31a37d23b84a59f53a0ba6 --sigma=10 --cadence=26 --buffs=none,risk,rubber,growth,magnet,shockwave,breath,boomerang');
+  console.log('node scripts/simulate-v730.mjs --seeds=8 --max-seconds=600 --buffs=shockwave --baseline-ref=bd8f29a --baseline-label=v8.2.1 --current-label=v8.3.0 --out=/tmp/shockwave-comparison.json\nOptional: --baseline-dir=/absolute/baseline --sigma=10 --cadence=26 --buffs=none,frenzy,rubber,growth,magnet,shockwave,breath,boomerang');
   process.exit(0);
 }
 const seedCount = Number(args.seeds || 8), maxSeconds = Number(args['max-seconds'] || 600);
 const sigma = Number(args.sigma ?? 10), cadence = Number(args.cadence || 26);
-const buffs = String(args.buffs || 'none,risk,rubber,growth,magnet,shockwave,breath,boomerang').split(',');
+const buffs = String(args.buffs || 'none,frenzy,rubber,growth,magnet,shockwave,breath,boomerang').split(',');
 assert.ok(Number.isInteger(seedCount) && seedCount >= 1 && seedCount <= 32);
 assert.ok(maxSeconds >= 60 && maxSeconds <= 1800 && sigma >= 0 && sigma <= 30 && cadence >= 10 && cadence <= 60);
-assert.ok(buffs.every(id => ['none', 'risk', 'rubber', 'growth', 'magnet', 'shockwave', 'breath', 'boomerang'].includes(id)));
-const baselineRef = String(args['baseline-ref'] || '79f28da54d7fbf42af31a37d23b84a59f53a0ba6');
+assert.ok(buffs.every(id => ['none', 'frenzy', 'rubber', 'growth', 'magnet', 'shockwave', 'breath', 'boomerang'].includes(id)));
+const baselineRef = String(args['baseline-ref'] || 'bd8f29a');
+const baselineLabel = String(args['baseline-label'] || 'baseline'), currentLabel = String(args['current-label'] || 'current');
+assert.notEqual(baselineLabel, currentLabel);
 let temporary = null;
 const baselineDir = args['baseline-dir'] ? path.resolve(String(args['baseline-dir'])) : (() => {
-  temporary = mkdtempSync(path.join(tmpdir(), 'qiuqiule-v720-'));
-  const archive = execFileSync('git', ['archive', baselineRef, 'dist'], {cwd: root, maxBuffer: 40 * 1024 * 1024});
-  execFileSync('tar', ['-x', '-C', temporary], {input: archive});
+  temporary = mkdtempSync(path.join(tmpdir(), 'qiuqiule-baseline-'));
+  mkdirSync(path.join(temporary, 'dist'));
+  // Only the mechanics modules are needed; do not copy music or Site assets.
+  for (const file of ['physics.js', 'enemies.js', 'upgrades.js', 'feedback.js'])
+    writeFileSync(path.join(temporary, 'dist', file), execFileSync('git', ['show', `${baselineRef}:dist/${file}`], {cwd: root}));
   writeFileSync(path.join(temporary, 'package.json'), '{"type":"module"}\n'); return temporary;
 })();
 const baseline = await import(pathToFileURL(path.join(baselineDir, 'dist/physics.js')));
 const current = await import(pathToFileURL(path.join(root, 'dist/physics.js')));
+const baselineUpgrades = await import(pathToFileURL(path.join(baselineDir, 'dist/upgrades.js')));
+const currentUpgrades = await import(pathToFileURL(path.join(root, 'dist/upgrades.js')));
 const {clearingTimeScale} = await import(pathToFileURL(path.join(root, 'dist/rhythm-feedback.js')));
 const hash = filename => createHash('sha256').update(readFileSync(filename)).digest('hex');
 const rng = initial => { let seed = initial >>> 0; return () => ((seed = Math.imul(seed, 1664525) + 1013904223 >>> 0) / 2 ** 32); };
 const normal = random => Math.sqrt(-2 * Math.log(Math.max(Number.EPSILON, random()))) * Math.cos(2 * Math.PI * random());
 const speed = body => Math.hypot(body.vx, body.vy);
-const priorities = ['split', 'pierce', 'rubber', 'energy', 'density', 'penetration', 'pulse', 'gravity', 'bank', 'boomerang', 'magnet', 'growth', 'shockwave', 'breath', 'overspeed', 'frenzy', 'risk', 'gambler'];
+const priorities = ['split', 'pierce', 'rubber', 'energy', 'density', 'penetration', 'pulse', 'gravity', 'bank', 'boomerang', 'magnet', 'growth', 'shockwave', 'breath', 'overspeed', 'frenzy', 'gambler'];
 
 function aimAngle(w) {
   if (w.boss && w.phase === 'boss') return Math.atan2(w.boss.y - w.player.y, w.boss.x - w.player.x);
@@ -114,7 +120,8 @@ function run(WorldClass, seed, buff) {
     clock = tick / 120;
     if (aimUntil !== null && !w.continuousControl) { w.cancelPull(); aimUntil = null; }
     if (w.phase === 'choose' && w.ready && clock >= nextRewardShot) {
-      const ordered = [...w.choices].sort((a, b) => priorities.indexOf(a.id) - priorities.indexOf(b.id));
+      const rank = id => { const index = priorities.indexOf(id); return index < 0 ? priorities.length : index; };
+      const ordered = [...w.choices].sort((a, b) => rank(a.id) - rank(b.id));
       const c = ordered[0], distance = Math.hypot(c.x - w.player.x, c.y - w.player.y);
       if (distance > 0 && w.shoot((w.player.x - c.x) / distance * w.maxPull, (w.player.y - c.y) / distance * w.maxPull)) {
         // Residual reward-shot motion is real gameplay, but is not the previous
@@ -194,17 +201,19 @@ const report = {method: 'New deterministic automated proxy; not the absent PDF s
     baselinePhysicsSha256: hash(path.join(baselineDir, 'dist/physics.js')),
     currentPhysicsSha256: hash(path.join(root, 'dist/physics.js')),
     baselineUpgradesSha256: hash(path.join(baselineDir, 'dist/upgrades.js')),
-    currentUpgradesSha256: hash(path.join(root, 'dist/upgrades.js'))},
+    currentUpgradesSha256: hash(path.join(root, 'dist/upgrades.js')),
+    baselineShockwaveRadius: baselineUpgrades.UPGRADES.shockwave.effect.radius,
+    currentShockwaveRadius: currentUpgrades.UPGRADES.shockwave.effect.radius},
   limitations: [
     'Small paired deterministic proxy, not the absent PDF scripts or a human study.',
     'Starting grants are an experiment; the shipped starting-choice pool is not changed.',
     'Fixed aiming/choice policy is insensitive to some buff-specific tactics and can favor or disadvantage individual buffs.',
     'Subsequent random offers depend on acquired buffs and can diverge; totals therefore measure whole-run effects, not isolated causal damage.',
     'First-five kills per shot excludes reward-shot carryover (reported separately), Boss attacks and automatic clear kills.',
-    'No statistical claim of meeting the PDF >= +0.08 target; direct parameter and regression tests establish implementation, human testing establishes feel.'
+    'No statistical claim of reproducing a PDF improvement target; direct parameter and regression tests establish implementation, human testing establishes feel.'
   ], variants: {}, comparisons: {}};
 const started = performance.now();
-const variants = [{name: 'v7.2.0', World: baseline.World}, {name: 'v7.3.0', World: current.World}];
+const variants = [{name: baselineLabel, World: baseline.World}, {name: currentLabel, World: current.World}];
 try {
   for (const variant of variants) {
     report.variants[variant.name] = {};
@@ -218,7 +227,7 @@ try {
     }
   }
   for (const buff of buffs) {
-    const old = report.variants['v7.2.0'][buff].summary, next = report.variants['v7.3.0'][buff].summary;
+    const old = report.variants[baselineLabel][buff].summary, next = report.variants[currentLabel][buff].summary;
     report.comparisons[buff] = {oldKillsPerShot: old.early.killsPerShot, newKillsPerShot: next.early.killsPerShot,
       deltaKillsPerShot: next.early.killsPerShot - old.early.killsPerShot,
       oldMultiKillShareAllShots: old.early.multiKillShareAllShots, newMultiKillShareAllShots: next.early.multiKillShareAllShots,

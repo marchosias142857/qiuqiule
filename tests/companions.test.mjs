@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {COMPANION_DEFINITIONS,COMPANION_STATE_VERSION,COMPANION_UNLOCK_STEP,COMPANION_ORBIT,
-  normalizeCompanionState,unlockCompanions,selectCompanion,companionColors,companionGeometry,
+  normalizeCompanionState,unlockCompanions,acknowledgeCompanionUnlock,selectCompanion,companionColors,companionGeometry,
   drawCompanions,companionSvg,companionPreview,CompanionTrails,companionTrailLength} from '../dist/companions.js';
 import {COMET_CROSS_SECTION,COMET_TRAIL} from '../dist/comet-trail.js';
 import {skinContour,morphSkinContour} from '../dist/skins.js';
@@ -27,38 +27,93 @@ const crosses=(a,b,c,d)=>{
   return ((ac>ab&&ad< -ab)||(ac< -ab&&ad>ab))&&((ca>cd&&cb< -cd)||(ca< -cd&&cb>cd));
 };
 
-test('nine companions are ordered by count then sun, moon, star at exact 8000 point steps',()=>{
-  assert.equal(COMPANION_STATE_VERSION,1);assert.equal(COMPANION_UNLOCK_STEP,8000);
+test('nine companions are ordered by count then sun, moon, star at exact five-stage steps',()=>{
+  assert.equal(COMPANION_STATE_VERSION,2);assert.equal(COMPANION_UNLOCK_STEP,5);
   assert.deepEqual(COMPANION_DEFINITIONS.map(item=>item.id),['sun-1','moon-1','star-1','sun-2','moon-2','star-2','sun-3','moon-3','star-3']);
   assert.deepEqual(COMPANION_DEFINITIONS.map(item=>item.label),['日·一','月·一','星·一','日·二','月·二','星·二','日·三','月·三','星·三']);
+  assert.deepEqual(COMPANION_DEFINITIONS.map(item=>item.stage),[5,10,15,20,25,30,35,40,45]);
   COMPANION_DEFINITIONS.forEach((item,i)=>{
-    assert.equal(item.count,Math.floor(i/3)+1);assert.equal(item.score,(i+1)*8000);
-    assert.equal(normalizeCompanionState(null,{best:item.score-1}).unlocked,i);
-    assert.equal(normalizeCompanionState(null,{best:item.score}).unlocked,i+1);
-    assert.equal(normalizeCompanionState(null,{best:String(item.score)}).unlocked,i+1);
+    assert.equal(item.count,Math.floor(i/3)+1);assert.equal('score' in item,false);
+    assert.equal(normalizeCompanionState(null,{highestStage:item.stage-1}).unlocked,i);
+    assert.equal(normalizeCompanionState(null,{highestStage:item.stage-.001}).unlocked,i);
+    const earned=normalizeCompanionState(null,{highestStage:item.stage});
+    assert.equal(earned.unlocked,i+1);
+    assert.deepEqual(earned.pendingUnlocks,COMPANION_DEFINITIONS.slice(0,i+1).map(item=>item.id));
+    assert.deepEqual(normalizeCompanionState(null,{highestStage:String(item.stage)}),earned);
   });
 });
 
-test('invalid saves or scores cannot grant companions; historical best migrates without auto-equipping',()=>{
-  const empty={version:1,unlocked:0,selected:null};
+test('invalid stages and legacy raw score cannot grant companions or auto-equip one',()=>{
+  const empty={version:2,unlocked:0,selected:null,pendingUnlocks:[]};
   for(const raw of [null,undefined,[],false,'bad JSON',{unlocked:Infinity},{unlocked:-4},{unlocked:'9'},{selected:'star-3'}])assert.deepEqual(normalizeCompanionState(raw),empty);
-  for(const best of [NaN,Infinity,true,{},null,-8000,'Infinity'])assert.deepEqual(normalizeCompanionState(null,{best}),empty);
-  assert.deepEqual(normalizeCompanionState(null,{best:999999}),{version:1,unlocked:9,selected:null});
+  for(const highestStage of [NaN,Infinity,true,{},null,-5,'Infinity']){
+    assert.deepEqual(normalizeCompanionState(null,{highestStage}),empty);
+    assert.deepEqual(unlockCompanions(null,highestStage),{state:empty,newlyUnlocked:[]});
+  }
+  for(const best of [8000,72000,999999,'999999'])assert.deepEqual(normalizeCompanionState(null,{best}),empty);
+  const all=normalizeCompanionState(null,{highestStage:999999});
+  assert.equal(all.unlocked,9);assert.equal(all.selected,null);assert.equal(all.pendingUnlocks.length,9);
+});
+
+test('legacy score-earned ownership survives migration without replaying already owned rewards',()=>{
+  for(let unlocked=0;unlocked<=9;unlocked++){
+    const selected=unlocked?COMPANION_DEFINITIONS[unlocked-1].id:null;
+    const legacy=Object.freeze({version:1,unlocked,selected});
+    const migrated=normalizeCompanionState(JSON.stringify(legacy),{highestStage:0,best:999999});
+    assert.deepEqual(migrated,{version:2,unlocked,selected,pendingUnlocks:[]});
+    assert.deepEqual(normalizeCompanionState(migrated,{highestStage:unlocked*5}),migrated);
+  }
+  const upgraded=normalizeCompanionState({version:1,unlocked:2,selected:'moon-1'},{highestStage:25});
+  assert.deepEqual(upgraded,{version:2,unlocked:5,selected:'moon-1',pendingUnlocks:['star-1','sun-2','moon-2']});
+  assert.deepEqual(normalizeCompanionState(JSON.stringify(upgraded),{highestStage:25}),upgraded);
 });
 
 test('ownership persists across lower runs and reports every newly crossed milestone once',()=>{
-  const first=unlockCompanions(null,24000);
+  const first=unlockCompanions(null,15);
   assert.deepEqual(first.newlyUnlocked,['sun-1','moon-1','star-1']);
+  assert.deepEqual(first.state.pendingUnlocks,first.newlyUnlocked);
   const equipped=selectCompanion(first.state,'moon-1');
-  const restored=normalizeCompanionState(JSON.stringify(equipped),{best:1});assert.deepEqual(restored,equipped);
-  assert.deepEqual(unlockCompanions(restored,8000),{state:restored,newlyUnlocked:[]});
-  const all=unlockCompanions(restored,72000);
+  const restored=normalizeCompanionState(JSON.stringify(equipped),{highestStage:1});assert.deepEqual(restored,equipped);
+  assert.deepEqual(unlockCompanions(restored,5),{state:restored,newlyUnlocked:[]});
+  const all=unlockCompanions(restored,45);
   assert.equal(all.state.selected,'moon-1');assert.deepEqual(all.newlyUnlocked,COMPANION_DEFINITIONS.slice(3).map(item=>item.id));
+  assert.deepEqual(all.state.pendingUnlocks,COMPANION_DEFINITIONS.map(item=>item.id));
   assert.deepEqual(unlockCompanions(all.state,1e9).newlyUnlocked,[]);
 });
 
+test('pending rewards are canonical, owned-only and durable until their individual acknowledgement',()=>{
+  const pendingUnlocks=Object.freeze(['star-1','sun-1','moon-1','sun-1','star-3','unknown',null]);
+  const raw=Object.freeze({version:2,unlocked:3,selected:'moon-1',pendingUnlocks});
+  const normalized=normalizeCompanionState(raw);
+  assert.deepEqual(normalized.pendingUnlocks,['sun-1','moon-1','star-1']);
+  assert.deepEqual(selectCompanion(normalized,'sun-1').pendingUnlocks,normalized.pendingUnlocks);
+  assert.deepEqual(acknowledgeCompanionUnlock(normalized,'unknown'),normalized);
+  assert.deepEqual(acknowledgeCompanionUnlock(normalized),normalized);
+  const acknowledged=acknowledgeCompanionUnlock(normalized,'moon-1');
+  assert.deepEqual(acknowledged,{...normalized,pendingUnlocks:['sun-1','star-1']});
+  assert.deepEqual(acknowledgeCompanionUnlock(acknowledged,'moon-1'),acknowledged);
+  const reloaded=normalizeCompanionState(JSON.stringify(acknowledged),{highestStage:15});
+  assert.deepEqual(reloaded,acknowledged,'reload must not re-queue a dismissed reward');
+  const next=unlockCompanions(reloaded,20);
+  assert.deepEqual(next.newlyUnlocked,['sun-2']);
+  assert.deepEqual(next.state.pendingUnlocks,['sun-1','star-1','sun-2']);
+  let completed=next.state;
+  for(const id of completed.pendingUnlocks)completed=acknowledgeCompanionUnlock(completed,id);
+  assert.deepEqual(completed.pendingUnlocks,[]);
+  assert.equal(completed.unlocked,4);assert.equal(completed.selected,'moon-1');
+  assert.deepEqual(unlockCompanions(JSON.stringify(completed),20),{state:completed,newlyUnlocked:[]});
+  assert.equal(raw.pendingUnlocks,pendingUnlocks);assert.equal(raw.pendingUnlocks.length,7);
+});
+
+test('malformed pending data never invents notifications for old ownership',()=>{
+  for(const pendingUnlocks of [true,'sun-1',{},null,undefined]){
+    assert.deepEqual(normalizeCompanionState({version:1,unlocked:9,pendingUnlocks}).pendingUnlocks,[]);
+  }
+  assert.deepEqual(normalizeCompanionState({pendingUnlocks:['star-3']}).pendingUnlocks,[]);
+});
+
 test('selection toggles the equipped choice off, guards locked entries and never mutates saves',()=>{
-  const raw=Object.freeze({version:1,unlocked:2,selected:null});
+  const raw=Object.freeze({version:2,unlocked:2,selected:null,pendingUnlocks:Object.freeze(['moon-1'])});
   assert.deepEqual(selectCompanion(raw,'star-1'),raw);assert.deepEqual(selectCompanion(raw,'invalid'),raw);
   const equipped=selectCompanion(raw,'sun-1');assert.equal(equipped.selected,'sun-1');
   assert.equal(selectCompanion(equipped,'sun-1').selected,null);

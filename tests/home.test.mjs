@@ -55,10 +55,45 @@ test('settings collision holds the player at contact for the UI transfer',()=>{
   advance(h,.5);near(h.player.x,x);near(h.player.y,y);h.reset();assert.equal(h.ready,true);
 });
 
-test('mode ball toggles once per collision and campaign entry lands at selection center',()=>{
-  const h=new HomeWorld(390,844,'endless');
-  h.launchTo('mode');while(h.phase==='flight')h.step(1/120);
-  assert.equal(h.mode,'campaign');assert.equal(h.action,'mode');assert.equal(h.phase,'returning');
-  h.action=null;advance(h,.7);assert.equal(h.action,null);assert.equal(h.mode,'campaign');
-  h.launchToPlay();advance(h,3);assert.equal(h.phase,'done');near(h.player.x,195);near(h.player.y,422);
+test('wardrobe is the largest function target and holds at contact for its UI transfer',()=>{
+  for(const [width,height] of [[390,844],[844,390],[768,1024],[1363,936]]){
+    const h=new HomeWorld(width,height),target=h.targets.find(c=>c.id==='wardrobe');
+    assert.deepEqual(h.targets.map(c=>c.id),['play','settings','wardrobe','sound']);
+    assert.ok(h.layout.others.every(c=>c.r<=target.r));
+    assert.equal(h.launchTo('wardrobe'),true);
+    while(h.phase==='flight')h.step(1/120);
+    assert.equal(h.phase,'external');assert.equal(h.action,'wardrobe');
+    near(Math.hypot(h.player.x-target.x,h.player.y-target.y),h.player.r+target.r);
+    const {x,y}=h.player;advance(h,.5);near(h.player.x,x);near(h.player.y,y);
+    h.reset();assert.equal(h.ready,true);
+  }
+});
+
+test('the historical three-function coordinates and radii survive portrait, landscape and resize',()=>{
+  // Recorded base coordinates from v4.2.2 e32f94f, normalized by its base radius.
+  const portrait=[[1.538832528521386,-1.6334198700828841,.611],[2.182,.81,.792],[-.8,-2.05,.43]];
+  const landscape=[[1.3926857446696186,-1.573078196508274,.611],[2.02,1.026,.792],[-.55,-1.9,.43]];
+  const h=new HomeWorld(390,844);
+  for(const [width,height,expectedBase] of [[390,844,48.75],[360,640,45],[320,568,40],[844,390,50.7],[667,375,43.355],[1363,936,86],[768,1024,86],[1024,1024,86]]){
+    h.resize(width,height);
+    const layout=h.layout,base=layout.base,expected=width<=height?portrait:landscape;
+    near(base,expectedBase);assert.equal(layout.others.length,3);
+    layout.others.forEach((body,i)=>{
+      near(body.x,layout.player.x+expected[i][0]*base);
+      near(body.y,layout.player.y+expected[i][1]*base);
+      near(body.r,expected[i][2]*base);assert.equal(body.seed,i+1);
+    });
+    near(layout.player.r,base*.84*.9);
+    near(layout.player.x,width*(width<=height?.5:.66));
+    near(layout.player.y,height*(width<=height?.48:.57));
+    near(layout.others[0].r,(layout.others[1].r+layout.others[2].r)/2);
+  }
+});
+
+test('legacy mode inputs cannot introduce a campaign route and every start lands in endless',()=>{
+  const h=new HomeWorld(390,844,'campaign');
+  assert.equal(h.mode,'endless');assert.equal(h.launchTo('mode'),false);assert.equal(h.phase,'idle');
+  assert.throws(()=>{h.mode='campaign';},TypeError);
+  h.launchToPlay();advance(h,3);assert.equal(h.phase,'done');
+  near(h.player.x,195);near(h.player.y,844*.62);near(h.player.r,390*.047);
 });

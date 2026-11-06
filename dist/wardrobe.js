@@ -1,4 +1,3 @@
-import {skinOptions,skinContour,SKIN_MIN_SIDES,SKIN_MAX_SIDES} from './skins.js';
 import {COMPANION_DEFINITIONS,normalizeCompanionState,companionPreview} from './companions.js';
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -12,7 +11,6 @@ export function cropSourceRect(width,height,zoom=1,panX=0,panY=0){
   const side=Math.min(width,height)/clamp(zoom,1,4);
   return {x:clamp((width-side)/2-panX*side,0,width-side),y:clamp((height-side)/2-panY*side,0,height-side),side};
 }
-export function repeatDelay(milliseconds){return Math.max(55,300-Math.max(0,milliseconds-450)*.15);}
 
 function appearanceDatabase(){
   return new Promise((resolve,reject)=>{
@@ -65,15 +63,6 @@ const returnMarkup='<svg class="return-icon" viewBox="0 0 24 24" aria-hidden="tr
 const lockMarkup='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>';
 const ease=value=>{const t=clamp(value,0,1);return t*t*(3-2*t);};
 
-// Ownership is explicit: skipped campaign milestones remain locked even when
-// a later polygon has already been earned.
-export function wardrobeShapeCards(state){
-  const owned=new Set(skinOptions(state).map(option=>option.sides));
-  return [{sides:0,label:'圆形',level:null,unlocked:true,selected:!state.enabled},...Array.from({length:SKIN_MAX_SIDES-SKIN_MIN_SIDES+1},(_,index)=>{
-    const sides=SKIN_MIN_SIDES+index;
-    return {sides,label:`${sides}边形`,level:(sides-5)*10,unlocked:owned.has(sides),selected:!!state.enabled&&state.sides===sides};
-  })];
-}
 export function wardrobeAppearanceCards(state){
   const selected=state.appearanceId||(state.image?'custom':'original');
   const unlocked=state.appearanceUnlocked===true||Number(state.best)>=26767;
@@ -81,12 +70,8 @@ export function wardrobeAppearanceCards(state){
     {id:'big-eye',label:'大眼萌',unlocked}].map(card=>({...card,selected:card.id===selected}));
 }
 export function wardrobeCompanionCards(state){
-  const companion=normalizeCompanionState({unlocked:state.companionUnlocked,selected:state.companionId},{best:state.best});
+  const companion=normalizeCompanionState({unlocked:state.companionUnlocked,selected:state.companionId},{highestStage:state.highestStage});
   return COMPANION_DEFINITIONS.map((card,index)=>({...card,unlocked:index<companion.unlocked,selected:card.id===companion.selected}));
-}
-function shapePreview(sides){
-  const path=skinContour(sides,96).map((point,index)=>`${index?'L':'M'}${(50+point.x*26).toFixed(2)} ${(59+point.y*26).toFixed(2)}`).join(' ')+' Z';
-  return `<svg viewBox="0 0 100 100" aria-hidden="true"><path class="shape-outline" d="${path}"/></svg>`;
 }
 function appearancePreview(id){
   if(id==='custom')return '<svg viewBox="0 0 100 100" aria-hidden="true"><circle class="shape-outline" cx="50" cy="59" r="26"/><text class="appearance-question" x="50" y="68" text-anchor="middle">?</text></svg>';
@@ -94,14 +79,14 @@ function appearancePreview(id){
   return '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="59" r="26" fill="#252720"/><ellipse cx="45.5" cy="57.2" rx="1.6" ry="3.9" fill="#f4f3eb"/><ellipse cx="54.5" cy="57.2" rx="1.6" ry="3.9" fill="#f4f3eb"/></svg>';
 }
 
-export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=>{},onCompanion=()=>{},onError=()=>{}}){
+export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=()=>{},onError=()=>{}}){
   const $=id=>document.getElementById(id);
   const panel=$('wardrobe-panel'),content=$('wardrobe-content'),backButton=$('wardrobe-back');
   const separator=$('wardrobe-preview-line'),file=$('appearance-file');
   const layer=$('appearance-cropper'),canvas=$('crop-canvas'),zoomControl=$('crop-zoom'),apply=$('crop-apply');
-  const views={main:$('wardrobe-main'),shape:$('shape-gallery'),appearance:$('appearance-gallery'),companion:$('companion-gallery')};
+  const views={main:$('wardrobe-main'),appearance:$('appearance-gallery'),companion:$('companion-gallery')};
   let page='main',transition=null,crop=null,sourceURL=null,loadGeneration=0,saving=false,restoreFocus=null,previewColor=null;
-  const pointers=new Map(),shapeButtons=new Map(),appearanceButtons=new Map(),companionButtons=new Map();
+  const pointers=new Map(),appearanceButtons=new Map(),companionButtons=new Map();
   const setPage=target=>{
     page=target;
     for(const [name,view] of Object.entries(views))view.hidden=name!==page;
@@ -129,25 +114,19 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
   };
   const refresh=()=>{
     const state=getState();
-    $('appearance-tools').hidden=!state.image;
-    $('appearance-clear').hidden=!state.image;
-    for(const card of wardrobeShapeCards(state)){
-      const button=shapeButtons.get(card.sides);button.setAttribute('aria-pressed',String(card.selected));
-      button.setAttribute('aria-disabled',String(!card.unlocked));
-      button.setAttribute('aria-label',card.label+(card.unlocked?'':`，通过${card.level}关解锁`));
-      button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
-    }
     for(const card of wardrobeAppearanceCards(state)){
+      const waitingForImage=card.id==='custom'&&state.imageLoading&&!state.image;
       const button=appearanceButtons.get(card.id);button.setAttribute('aria-pressed',String(card.selected));
-      button.setAttribute('aria-disabled',String(!card.unlocked));
-      button.setAttribute('aria-label',card.label+(card.unlocked?'':'，达26767分解锁'));
+      button.setAttribute('aria-disabled',String(!card.unlocked||!!waitingForImage));
+      button.setAttribute('aria-busy',String(!!waitingForImage));
+      button.setAttribute('aria-label',card.label+(waitingForImage?'，图片读取中':card.unlocked?'':'，达26767分解锁'));
       button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
     }
     const color=state.playerColor??'#252720';
     for(const card of wardrobeCompanionCards(state)){
       const button=companionButtons.get(card.id);button.setAttribute('aria-pressed',String(card.selected));
       button.setAttribute('aria-disabled',String(!card.unlocked));
-      button.setAttribute('aria-label',card.label+(card.unlocked?'':`，达${card.score}分解锁`));
+      button.setAttribute('aria-label',card.label+(card.unlocked?'':`，到达第 ${card.stage} 阶段解锁`));
       button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
       if(color!==previewColor)button.querySelector('.companion-preview').innerHTML=companionPreview(card.id,color);
     }
@@ -158,41 +137,33 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
     button.innerHTML=`<span class="wardrobe-card-title">${title}</span>${preview}<span class="wardrobe-card-lock">${lockMarkup}<span>${unlockText}</span></span>`;
     return button;
   };
-  for(const card of wardrobeShapeCards(getState())){
-    const button=makeCard(card.label,shapePreview(card.sides),card.level?`通过${card.level}关<br>解锁`:'');
-    button.id=`shape-option-${card.sides}`;button.setAttribute('data-shape',String(card.sides));
-    button.addEventListener('click',()=>{
-      if(transition)return;
-      if(!wardrobeShapeCards(getState()).find(option=>option.sides===card.sides)?.unlocked){onError(`通过${card.level}关解锁`);return;}
-      if(card.sides===0)onToggle(false);else onSides({sides:card.sides});
-      refresh();
-    });
-    shapeButtons.set(card.sides,button);$('shape-grid').append(button);
-  }
   for(const card of wardrobeAppearanceCards(getState())){
     const button=makeCard(card.label,appearancePreview(card.id),card.id==='big-eye'?'达26767分<br>解锁':'');
     button.id=`appearance-option-${card.id}`;button.setAttribute('data-appearance',card.id);
     button.addEventListener('click',()=>{
       if(transition)return;
-      if(!wardrobeAppearanceCards(getState()).find(option=>option.id===card.id)?.unlocked){onError('达26767分解锁');return;}
-      if(card.id==='custom'){file.value='';file.click();return;}
+      const state=getState(),current=wardrobeAppearanceCards(state).find(option=>option.id===card.id);
+      if(!current?.unlocked){onError('达26767分解锁');return;}
+      if(card.id==='custom'&&state.imageLoading&&!state.image)return;
+      // A saved image is reusable while another appearance is equipped.
+      // Reopening the picker never changes selection until a crop is applied.
+      if(card.id==='custom'&&(!state.image||current.selected)){file.value='';file.click();return;}
       onAppearance(card.id);refresh();
     });
     appearanceButtons.set(card.id,button);$('appearance-grid').append(button);
   }
   for(const card of wardrobeCompanionCards(getState())){
-    const button=makeCard(card.label,`<span class="companion-preview">${companionPreview(card.id,getState().playerColor??'#252720')}</span>`,`达${card.score}分<br>解锁`);
+    const button=makeCard(card.label,`<span class="companion-preview">${companionPreview(card.id,getState().playerColor??'#252720')}</span>`,`到达第 ${card.stage} 阶段<br>解锁`);
     button.id=`companion-option-${card.id}`;button.setAttribute('data-companion',card.id);
     button.addEventListener('click',()=>{
       if(transition)return;
-      if(!wardrobeCompanionCards(getState()).find(option=>option.id===card.id)?.unlocked){onError(`达${card.score}分解锁`);return;}
+      if(!wardrobeCompanionCards(getState()).find(option=>option.id===card.id)?.unlocked){onError(`到达第 ${card.stage} 阶段解锁`);return;}
       onCompanion(card.id);refresh();
     });
     companionButtons.set(card.id,button);$('companion-grid').append(button);
   }
   window.addEventListener('blur',()=>pointers.clear());
   document.addEventListener('visibilitychange',()=>{if(document.hidden)pointers.clear();});
-  $('shape-select').addEventListener('click',()=>navigate('shape'));
   $('appearance-select').addEventListener('click',()=>navigate('appearance'));
   $('companion-select').addEventListener('click',()=>navigate('companion'));
 
@@ -226,10 +197,6 @@ export function initWardrobe({getState,onToggle,onSides,onImage,onAppearance=()=
     if(canvas.width!==CROP_SIZE)canvas.width=CROP_SIZE;
     if(canvas.height!==CROP_SIZE)canvas.height=CROP_SIZE;
     crop={image,zoom:1,panX:0,panY:0};restoreFocus=appearanceButtons.get('custom');layer.hidden=false;document.body.classList.add('appearance-cropping');drawCrop();$('crop-cancel').focus({preventScroll:true});
-  });
-  $('appearance-clear').addEventListener('click',async()=>{
-    const button=$('appearance-clear');button.disabled=true;
-    try{await onImage(null);refresh();}catch(error){onError(error.message||'图片未能移除，请重试');}finally{button.disabled=false;}
   });
   $('crop-cancel').addEventListener('click',closeCrop);
   zoomControl.addEventListener('input',()=>setZoom(Number(zoomControl.value)));

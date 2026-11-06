@@ -3,7 +3,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {World} from '../dist/physics.js';
-import {CampaignWorld} from '../dist/campaign.js';
 import {UPGRADES} from '../dist/upgrades.js';
 
 // Execute the shipped scene; only its browser, audio and Phaser boundaries are stubbed.
@@ -35,9 +34,9 @@ globalThis.document={createElementNS:createSvgNode,readyState:'loading',hidden:f
 const entry=new URL('../dist/game.js',import.meta.url);
 const source=(await readFile(entry,'utf8')).replace(/from '(\.\/[^']+)'/g,(_,path)=>`from '${new URL(path,entry).href}'`);
 const app=await import('data:text/javascript;base64,'+Buffer.from(source+`
-export function seedBorder(graphics,mode='endless',strength=1){
+export function seedBorder(graphics,strength=1){
   viewport=displayMetrics(390,844,1);screen='play';modal=null;paused=false;result=null;drag=null;choicePress=null;
-  selectedMode=mode;world=mode==='campaign'?new CampaignWorld(390,844,1,()=>.5):new World(390,844,()=>.5,{spawnInitial:false});
+  world=new World(390,844,()=>.5,{spawnInitial:false});
   world.setFeedbackOptions({strength,reducedMotion});settings.juice=strength;settings.sound=true;
   world.events=[];world.spawnTimer=world.floorTimer=world.introTimer=Infinity;
   boot();scene=game.scene;scene.g=graphics;scene.clock=10;scene.hitSoundAt=0;
@@ -59,7 +58,7 @@ function graphics(){
     lineBetween(x1,y1,x2,y2){this.lines.push({...style,x1,y1,x2,y2});}};
   return new Proxy(g,{get:(target,key)=>key in target?target[key]:()=>{}});
 }
-function run(mode='endless',strength=1){const g=graphics();return {g,...app.seedBorder(g,mode,strength)};}
+function run(strength=1){const g=graphics();return {g,...app.seedBorder(g,strength)};}
 function hitWall(world,body=world.player,power=1,side='left'){
   const b=world.arenaBounds;Object.assign(body,{x:world.width/2,y:world.height/2,vx:0,vy:0});
   if(side==='left'){body.x=b.left+body.r-.01;body.vx=-world.baseSpeed*power;}
@@ -70,9 +69,9 @@ function hitWall(world,body=world.player,power=1,side='left'){
 }
 function draw(run){run.g.clear();run.scene.drawBorder(run.world.arenaBounds);}
 
-test('only real main-player exterior collisions deform the frame in endless and campaign',()=>{
-  for(const mode of ['endless','campaign']){
-    const state=run(mode),{world,scene,g}=state;
+test('only real main-player exterior collisions deform the endless frame',()=>{
+  {
+    const state=run(),{world,scene,g}=state;
     const event=hitWall(world);assert.equal(event.surface,'arena');scene.handleEvents();
     assert.equal(scene.wallBulges.length,1);draw(state);
     assert.equal(g.rectangles.length,0,'there is no undeformed outline beneath the bulge');
@@ -89,9 +88,9 @@ test('only real main-player exterior collisions deform the frame in endless and 
   }
 });
 
-test('low-speed outer-wall contacts are silent and have no visual response in either mode',()=>{
-  for(const mode of ['endless','campaign']){
-    const state=run(mode),{world,scene,wallSounds}=state;
+test('low-speed outer-wall contacts are silent and have no visual response',()=>{
+  {
+    const state=run(),{world,scene,wallSounds}=state;
     hitWall(world,world.player,.24);scene.handleEvents();draw(state);
     assert.equal(wallSounds.length,0);assert.equal(scene.wallBulges.length,0);
     assert.equal(state.g.strokes.length,0);assert.equal(state.g.lines.length,0);assert.equal(state.g.rectangles.length,1);
@@ -100,18 +99,27 @@ test('low-speed outer-wall contacts are silent and have no visual response in ei
   }
 });
 
-test('wall-triggered shockwaves retain their wave without an indirect border flash or clone bulge',()=>{
+test('wall-triggered shockwaves keep ordinary main-player bulges without adding border highlights or clone bulges',()=>{
   for(const auxiliary of [false,true]){
     const state=run(),{world,scene}=state;
     world.buffs.shockwave=1;world.shotWallCount=UPGRADES.shockwave.effect.everyWalls-1;
     const actor=auxiliary?Object.assign(world.makeBody(100,100,world.unit*.7,1),{isPlayer:true,isAuxiliary:true}):world.player;
     if(auxiliary)world.auxiliaries.push(actor);
-    hitWall(world,actor);assert.ok(world.events.some(event=>event.type==='shockwave'));
+    hitWall(world,actor);const event=world.events.find(event=>event.type==='shockwave');assert.ok(event);
     scene.handleEvents();draw(state);
-    assert.equal(scene.effects.filter(effect=>effect.type==='upgrade-wave').length,1);
+    const waves=scene.effects.filter(effect=>effect.type==='shockwave');assert.equal(waves.length,1);
+    near(waves[0].r,world.unit*4);near(waves[0].total,.39);
+    assert.equal(scene.effects.filter(effect=>effect.type==='upgrade-wave').length,0,'the local wave does not create a full-screen upgrade effect');
     assert.equal(scene.wallFlashes.length,0);
     assert.equal(scene.wallBulges.length,auxiliary?0:1);
-    for(const stroke of [...state.g.strokes,...state.g.rectangles]){near(stroke.width,1);near(stroke.alpha,.65);}
+    const ordinary=[...state.g.strokes,...state.g.rectangles].filter(stroke=>stroke.color===0xc8ccbd);
+    assert.equal(ordinary.length,1,'the full border is drawn only once at its ordinary intensity');
+    near(ordinary[0].width,1);near(ordinary[0].alpha,.65);
+    assert.equal(state.g.strokes.filter(stroke=>stroke.color===waves[0].color).length,0,'the wave adds no player-colored wall stroke');
+    if(!auxiliary)assert.ok(ordinary[0].points.some(point=>point.x<scene.lastBorder.left-.5),'ordinary collision deformation stays visible');
+    assert.equal(state.g.lines.length,0);assert.equal(scene.zoomPulse,null);assert.equal(scene.feedbackCamera,null);
+    scene.updateFeedback(.19);draw(state);assert.equal(scene.wallFlashes.length,0);
+    assert.equal(state.g.strokes.filter(stroke=>stroke.color===waves[0].color).length,0,'no delayed wall highlight appears');
   }
 });
 
@@ -137,8 +145,8 @@ test('a same-edge collision uses the current rebound magnitude without adding or
 });
 
 test('border clocks follow scaled motion time and subtract the exact local player hold',()=>{
-  for(const create of [()=>new World(900,700,()=>.5,{spawnInitial:false}),()=>new CampaignWorld(900,700,1,()=>.5)]){
-    const world=create();world.setFeedbackOptions({strength:1});world.spawnTimer=world.floorTimer=world.introTimer=Infinity;
+  {
+    const world=new World(900,700,()=>.5,{spawnInitial:false});world.setFeedbackOptions({strength:1});world.spawnTimer=world.floorTimer=world.introTimer=Infinity;
     Object.assign(world.player,{vx:0,vy:0});world.player.feedbackFreeze=.03;
     const start=world.borderTime;world.step(.005,false,{timeScale:.5});near(world.borderTime-start,0);
     world.step(.02,false,{timeScale:.5});near(world.borderTime-start,.01);
@@ -155,9 +163,9 @@ test('paused or hidden scenes do not consume pending border animation time',()=>
 });
 
 test('drawing and advancing a bulge cannot alter collision geometry or subsequent bounce results',()=>{
-  for(const mode of ['endless','campaign']){
-    const state=run(mode),{world,scene}=state;
-    const control=mode==='campaign'?new CampaignWorld(390,844,1,()=>.5):new World(390,844,()=>.5,{spawnInitial:false});
+  {
+    const state=run(),{world,scene}=state;
+    const control=new World(390,844,()=>.5,{spawnInitial:false});
     control.setFeedbackOptions({strength:1});control.spawnTimer=control.floorTimer=control.introTimer=Infinity;control.events=[];
     hitWall(world);hitWall(control);scene.handleEvents();control.events=[];
     const bounds=structuredClone(world.arenaBounds),geometry=structuredClone(world.arenaGeometry),player=structuredClone(world.player);

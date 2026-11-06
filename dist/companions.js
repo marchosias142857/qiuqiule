@@ -3,33 +3,44 @@ import {CometWorkspace,COMET_TRAIL} from './comet-trail.js';
 const TAU=Math.PI*2;
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const finite=(value,fallback=0)=>Number.isFinite(value)?value:fallback;
-export const COMPANION_STATE_VERSION=1;
-export const COMPANION_UNLOCK_STEP=8000;
+export const COMPANION_STATE_VERSION=2;
+export const COMPANION_UNLOCK_STEP=5;
 export const COMPANION_ORBIT={radius:1.5,size:.21,period:3.4,opacity:.60,tailOpacity:.24};
 const names=['一','二','三'];
 export const COMPANION_DEFINITIONS=Object.freeze(Array.from({length:9},(_,index)=>{
   const count=Math.floor(index/3)+1,shape=['sun','moon','star'][index%3];
   const label=['日','月','星'][index%3]+'·'+names[count-1];
-  return Object.freeze({id:shape+'-'+count,label,name:label,shape,count,score:(index+1)*COMPANION_UNLOCK_STEP});
+  return Object.freeze({id:shape+'-'+count,label,name:label,shape,count,stage:(index+1)*COMPANION_UNLOCK_STEP});
 }));
 
 function object(raw){
   if(typeof raw==='string'){try{raw=JSON.parse(raw);}catch{return {};}}
   return raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
 }
-function scoreCount(score){
-  if(typeof score!=='number'&&typeof score!=='string')return 0;
-  const value=Number(score);
+function stageCount(stage){
+  if(typeof stage!=='number'&&typeof stage!=='string')return 0;
+  const value=Number(stage);
   return Number.isFinite(value)?clamp(Math.floor(value/COMPANION_UNLOCK_STEP),0,9):0;
 }
-export function normalizeCompanionState(raw,{best=0}={}){
-  const saved=object(raw),unlocked=Math.max(clamp(Math.floor(finite(saved.unlocked)),0,9),scoreCount(best));
+export function normalizeCompanionState(raw,{highestStage=0}={}){
+  const saved=object(raw),owned=clamp(Math.floor(finite(saved.unlocked)),0,9);
+  const unlocked=Math.max(owned,stageCount(highestStage));
   const index=COMPANION_DEFINITIONS.findIndex(item=>item.id===saved.selected);
-  return {version:COMPANION_STATE_VERSION,unlocked,selected:index>=0&&index<unlocked?saved.selected:null};
+  const pending=new Set(Array.isArray(saved.pendingUnlocks)?saved.pendingUnlocks:[]);
+  // v1 ownership already includes its score rewards. Preserve it without
+  // replaying their celebrations; only newly earned stage rewards join the
+  // durable queue. Loading or selecting a companion never acknowledges it.
+  for(let i=owned;i<unlocked;i++)pending.add(COMPANION_DEFINITIONS[i].id);
+  const pendingUnlocks=COMPANION_DEFINITIONS.slice(0,unlocked).filter(item=>pending.has(item.id)).map(item=>item.id);
+  return {version:COMPANION_STATE_VERSION,unlocked,selected:index>=0&&index<unlocked?saved.selected:null,pendingUnlocks};
 }
-export function unlockCompanions(raw,score){
-  const before=normalizeCompanionState(raw),state=normalizeCompanionState(before,{best:score});
+export function unlockCompanions(raw,highestStage){
+  const before=normalizeCompanionState(raw),state=normalizeCompanionState(before,{highestStage});
   return {state,newlyUnlocked:COMPANION_DEFINITIONS.slice(before.unlocked,state.unlocked).map(item=>item.id)};
+}
+export function acknowledgeCompanionUnlock(raw,id){
+  const state=normalizeCompanionState(raw);
+  return {...state,pendingUnlocks:state.pendingUnlocks.filter(pending=>pending!==id)};
 }
 export function selectCompanion(raw,id){
   const state=normalizeCompanionState(raw);

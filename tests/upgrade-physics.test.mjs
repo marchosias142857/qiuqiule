@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World, length, BOSS_TIMING} from '../dist/physics.js';
-import {CampaignWorld} from '../dist/campaign.js';
 import {UPGRADES} from '../dist/upgrades.js';
 
 const near = (actual, expected, epsilon = 1e-7) => assert.ok(Math.abs(actual - expected) < epsilon, `${actual} != ${expected}`);
@@ -36,19 +35,31 @@ function splitShot(w) {
   return w.auxiliaries;
 }
 
-test('acquired caps and prerequisites control real energy, mass, radius and launch limits', () => {
+test('base upgrades retain their original layers and continue growing beyond them while finite upgrades keep their caps', () => {
   const w = run(), mass = w.player.mass;
   assert.equal(w.applyUpgrade('overspeed'), false); assert.equal(w.applyUpgrade('missing'), false);
-  gain(w, 'energy', 4); near(w.energy, 1.3 ** 4); assert.equal(w.applyUpgrade('energy'), false);
-  gain(w, 'overspeed', 2); assert.equal(w.applyUpgrade('overspeed'), false);
+  gain(w, 'energy', 4); near(w.energy, 1.3 ** 4);
+  gain(w, 'overspeed', 2);
   w.energy = 100; w.shoot(-w.maxPull, 0); near(length(w.player), w.unit * 76);
   gain(w, 'density', 5); near(w.density, 1.35 ** 5); near(w.player.mass, mass * 1.35 ** 5);
-  assert.equal(w.applyUpgrade('density'), false);
+  gain(w, 'energy'); near(w.energy, 1.3 ** 4 * 1.12);
+  gain(w, 'density'); near(w.density, 1.35 ** 5 * 1.15); near(w.player.mass, mass * w.density);
+  gain(w, 'overspeed'); near(w.launchCap / w.unit, 80);
   const grownMass = w.player.mass; gain(w, 'growth'); near(w.player.r, w.unit * 1.2);
   gain(w, 'growth'); near(w.player.r, w.unit * 1.4); near(w.player.mass, grownMass);
   assert.equal(w.applyUpgrade('growth'), false);
-  const campaign = new CampaignWorld(900, 700, 1, () => .5), oldEnergy = campaign.energy;
-  assert.equal(campaign.applyUpgrade('energy'), false); near(campaign.energy, oldEnergy);
+});
+
+test('many acquired base layers remain finite and produce playable high-speed collisions', () => {
+  const w = run(); gain(w, 'energy', 60); gain(w, 'density', 60); gain(w, 'overspeed', 60);
+  near(w.energy, 1.3 ** 4 * (1 + .12 * 56)); near(w.density, 1.35 ** 5 * (1 + .15 * 55));
+  near(w.launchCap / w.unit, 76 + 4 * Math.sqrt(58));
+  assert.ok([w.energy, w.density, w.player.mass, w.launchCap, w.maxPhysicsSpeed].every(Number.isFinite));
+  assert.equal(w.shoot(-w.maxPull, 0), true);
+  const target = enemy(w, {x: w.player.x + w.unit * 3, y: w.player.y, hp: 100000, maxHp: 100000});
+  w.step(.04);
+  assert.ok(target.hp < target.maxHp, 'substeps still detect an enemy at the increased launch speed');
+  assert.ok([w.player.x, w.player.y, w.player.vx, w.player.vy, target.hp].every(Number.isFinite));
 });
 
 test('normal offers contain three distinct unacquired upgrades and skipped offers do not consume layers', () => {
@@ -84,16 +95,54 @@ test('selection feedback boost survives tiny and reward shots and is consumed by
   assert.equal(boss.shoot(-boss.maxPull, 0), true); assert.equal(boss.pendingUpgradeBoost, false); assert.equal(boss.shotUpgradeBoost, true);
 });
 
-test('gambler raises only the next stage quota and grants only its following reward five choices', () => {
+test('gambler raises only the next stage quota and adds one three-choice reward before advancing', () => {
   const w = run(); w.phase = 'choose'; w.choose(UPGRADES.gambler); advance(w, 1.001);
   assert.equal(w.stage, 2); assert.equal(w.killTarget, 27); assert.equal(w.buffs.gambler, 1);
-  w.beginUpgrade(); assert.equal(w.choices.length, 5); assert.equal(new Set(w.choices.map(c => c.id)).size, 5);
-  const next = w.choices.find(c => c.id !== 'gambler'); w.phase = 'choose'; w.choose(next); advance(w, 1.001);
-  assert.equal(w.stage, 3); assert.equal(w.killTarget, 22);
-  w.beginUpgrade(); assert.equal(w.choices.length, 3);
+  w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 2); assert.equal(w.gamblerRewardPending, false);
+  for (let round = 1; round <= 2; round++) {
+    assert.equal(w.upgradeRound, round); assert.equal(w.choices.length, 3);
+    assert.equal(new Set(w.choices.map(c => c.id)).size, 3);
+    w.phase = 'choose'; w.choose(w.choices.find(c => c.id !== 'gambler')); advance(w, 1.001);
+    assert.equal(w.stage, round === 1 ? 2 : 3);
+  }
+  assert.equal(w.killTarget, 22); w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 1);
   w.phase = 'choose'; w.choose(UPGRADES.gambler); advance(w, 1.001);
   assert.equal(w.stage, 4); assert.equal(w.killTarget, 39); assert.equal(w.buffs.gambler, 2);
-  assert.equal(w.applyUpgrade('gambler'), false);
+  w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 2);
+  w.phase = 'choose'; assert.equal(w.choose(UPGRADES.gambler), true); advance(w, 1.001);
+  assert.equal(w.stage, 4); assert.equal(w.upgradeRound, 2); assert.equal(w.buffs.gambler, 3);
+  assert.ok(w.choices.every(c => c.id !== 'gambler'));
+  w.phase = 'choose'; w.choose(w.choices[0]); advance(w, 1.001);
+  assert.equal(w.stage, 5); assert.equal(w.killTarget, 45);
+  w.beginUpgrade({bypassBoss: true}); assert.equal(w.upgradeRoundTotal, 2);
+  for (let round = 1; round <= 2; round++) {
+    w.phase = 'choose'; w.choose(w.choices.find(c => c.id !== 'gambler')); advance(w, 1.001);
+  }
+  assert.equal(w.stage, 6); assert.equal(w.killTarget, 34);
+  w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 1); assert.equal(w.choices.length, 3);
+});
+
+test('a repeat wager cannot stack during three Boss rewards and becomes available after the next stage begins', () => {
+  const w = run(); w.stage = 19; w.phase = 'choose'; w.choose(UPGRADES.gambler); advance(w, 1.001);
+  assert.equal(w.stage, 20); assert.equal(w.gamblerRewardPending, true); assert.equal(w.gamblerTargetMultiplier, 1.5);
+  w.random = () => 0;
+  w.beginBoss(); w.boss.defeated = true; w.phase = 'boss-celebrate'; w.beginUpgrade({bypassBoss: true});
+  assert.equal(w.upgradeRoundTotal, 3); assert.equal(w.choices.length, 3); assert.equal(w.gamblerRewardPending, false);
+  assert.ok(w.choices.some(c => c.id === 'gambler'));
+  w.phase = 'choose'; assert.equal(w.choose(w.choices.find(c => c.id === 'gambler')), true); advance(w, 1.001);
+  for (let round = 2; round <= 3; round++) {
+    assert.equal(w.stage, 20); assert.equal(w.upgradeRound, round); assert.equal(w.choices.length, 3);
+    assert.equal(w.nextGambler, true); assert.ok(w.choices.every(c => c.id !== 'gambler'));
+    assert.ok(w.choices.some(c => c.kind !== 'risk'));
+    assert.equal(w.applyUpgrade('gambler'), false); assert.equal(w.buffs.gambler, 2);
+    w.phase = 'choose'; w.choose(w.choices[0]); advance(w, 1.001);
+  }
+  assert.equal(w.stage, 21); assert.equal(w.nextGambler, false); assert.equal(w.gamblerTargetMultiplier, 1.5);
+  assert.equal(w.killTarget, 141); assert.equal(w.gamblerRewardPending, true);
+  w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 2); assert.equal(w.choices.length, 3);
+  assert.ok(w.choices.some(c => c.id === 'gambler'));
+  w.phase = 'choose'; assert.equal(w.choose(w.choices.find(c => c.id === 'gambler')), true);
+  assert.equal(w.buffs.gambler, 3);
 });
 
 test('rubber raises the solved-direction retention floor while pierce keeps the incoming direction', () => {
@@ -107,19 +156,139 @@ test('rubber raises the solved-direction retention floor while pierce keeps the 
   near(w.player.vy, 0); assert.ok(w.player.vx >= 600 * .92); assert.equal(w.applyUpgrade('pierce'), false);
 });
 
-test('penetration restores speed only for the first direct kill and resets with a successful shot', () => {
+test('penetration recovers the release speed lost to friction only on the first kill of a successful shot', () => {
   const w = run(); gain(w, 'penetration'); w.shoot(-w.maxPull, 0);
-  const speed = w.unit * 30; headOn(w, enemy(w, {hp: 1}), speed); near(length(w.player), speed);
-  headOn(w, enemy(w, {hp: 1}), speed); near(length(w.player), speed * .85);
-  w.shoot(-w.maxPull, 0); headOn(w, enemy(w, {hp: 1}), speed); near(length(w.player), speed);
+  const released = length(w.player); advance(w, .7); const slowed = length(w.player);
+  assert.ok(slowed < released);
+  headOn(w, enemy(w, {hp: 1}), slowed); near(length(w.player), released);
+  headOn(w, enemy(w, {hp: 1}), slowed); near(length(w.player), slowed * .85);
+  assert.equal(w.shoot(1, 0), false);
+  headOn(w, enemy(w, {hp: 1}), slowed); near(length(w.player), slowed * .85);
+  assert.equal(w.shoot(-w.maxPull, 0), true); const nextRelease = length(w.player);
+  headOn(w, enemy(w, {hp: 1}), nextRelease * .5); near(length(w.player), nextRelease);
 });
 
-test('a pulse first kill spends penetration without restoring a nonlethal direct impact', () => {
+test('a pulse first kill recovers the main ball after a nonlethal direct impact and spends the only recovery', () => {
   const w = run(); gain(w, 'penetration'); gain(w, 'pulse');
+  w.shoot(-w.maxPull, 0); const released = length(w.player);
   const direct = enemy(w, {x: 5000, y: 4000}), nearby = enemy(w, {x: 5000 + w.unit * 2.5, y: 4000, hp: 1});
-  const speed = w.unit * 30; headOn(w, direct, speed);
-  assert.ok(direct.hp > 0); assert.ok(nearby.hp <= 0); assert.equal(w.shotKills, 1); near(length(w.player), speed * .7);
+  const speed = released * .6; headOn(w, direct, speed);
+  assert.ok(direct.hp > 0); assert.ok(nearby.hp <= 0); assert.equal(w.shotKills, 1); near(length(w.player), released);
   w.buffs.pulse = 0; headOn(w, enemy(w, {hp: 1}), speed); near(length(w.player), speed * .85);
+});
+
+test('penetration still recovers lost travel speed with four rubber layers and does not change impact damage', () => {
+  const withRecovery = run(), withoutRecovery = run();
+  for (const w of [withRecovery, withoutRecovery]) { gain(w, 'rubber', 4); w.shoot(-w.maxPull, 0); }
+  gain(withRecovery, 'penetration');
+  const released = length(withRecovery.player), speed = released * .55;
+  for (const w of [withRecovery, withoutRecovery]) headOn(w, enemy(w, {hp: 1}), speed);
+  near(length(withRecovery.player), released); near(length(withoutRecovery.player), speed);
+  const hit = w => w.events.filter(e => e.type === 'hit').at(-1);
+  assert.equal(hit(withRecovery).damage, hit(withoutRecovery).damage);
+});
+
+test('penetration records the actual short release and ignores hits or shield breaks without a kill', () => {
+  const w = run(); gain(w, 'penetration');
+  assert.equal(w.shoot(-w.maxPull * .35, 0), true);
+  const released = length(w.player), speed = released * .8;
+  assert.ok(released < w.baseSpeed * .5);
+  headOn(w, enemy(w), speed); near(length(w.player), speed * .7); assert.equal(w.shotKills, 0);
+  headOn(w, enemy(w, {shield: true, hp: 1}), speed); near(length(w.player), speed * .7); assert.equal(w.shotKills, 0);
+  headOn(w, enemy(w, {hp: 1}), speed); near(length(w.player), released);
+});
+
+test('penetration applies only the boomerang multiplier active at the kill without extending its timer', () => {
+  for (const activeAtShot of [false, true]) for (const activeAtKill of [false, true]) {
+    const w = run(); gain(w, 'penetration'); gain(w, 'boomerang');
+    if (activeAtShot) { bounce(w, w.unit * 10); w.player.x = 4000; }
+    w.shoot(-w.maxPull, 0);
+    const releaseBase = length(w.player) / (activeAtShot ? 1.3 : 1);
+    if (activeAtShot && !activeAtKill) w.advanceBoomerang(w.player, .8);
+    if (!activeAtShot && activeAtKill) bounce(w, releaseBase * .4);
+    const timeBefore = w.player.boomerangTime || 0;
+    headOn(w, enemy(w, {hp: 1}), releaseBase * .4 * (activeAtKill ? 1.3 : 1));
+    near(length(w.player), releaseBase * (activeAtKill ? 1.3 : 1));
+    near(w.player.boomerangTime || 0, timeBefore);
+    if (activeAtKill) { w.advanceBoomerang(w.player, timeBefore); near(length(w.player), releaseBase); }
+  }
+});
+
+test('penetration leaves a faster resolved velocity intact and consumes that shot recovery', () => {
+  const w = run(); gain(w, 'penetration'); w.shoot(-w.maxPull * .5, 0);
+  const released = length(w.player), fast = released * 2;
+  headOn(w, enemy(w, {hp: 1}), fast); near(length(w.player), fast * .85);
+  headOn(w, enemy(w, {hp: 1}), released * .5); near(length(w.player), released * .5 * .85);
+});
+
+test('penetration uses resized world units and the resolved collision direction', () => {
+  const w = run(); gain(w, 'penetration'); w.shoot(-w.maxPull, 0);
+  const releaseUnits = length(w.player) / w.unit, oldUnit = w.unit;
+  w.resize(400, 600); assert.ok(w.unit < oldUnit);
+  const heavy = enemy(w, {x: 240, y: 250, hp: 1, mass: 1000});
+  headOn(w, heavy, releaseUnits * w.unit * .5);
+  near(length(w.player), releaseUnits * w.unit);
+  assert.ok(w.player.vx < 0, 'the heavy-target rebound remains opposite to release aim'); near(w.player.vy, 0);
+});
+
+test('shockwave first kills recover only the main ball and use its current direction or stopped release aim', () => {
+  for (const stopped of [false, true]) {
+    const w = run(); gain(w, 'penetration'); gain(w, 'shockwave');
+    w.shoot(0, -w.maxPull); const released = length(w.player);
+    Object.assign(w.player, {vx: stopped ? 0 : -released * .4, vy: 0});
+    enemy(w, {x: w.player.x + w.unit * 2, y: w.player.y, hp: 1});
+    w.releaseShockwave(); assert.equal(w.shotKills, 1); near(length(w.player), released);
+    near(w.player.vx, stopped ? 0 : -released); near(w.player.vy, stopped ? released : 0);
+  }
+});
+
+test('auxiliary shockwave first kills restore the main ball without accelerating the split', () => {
+  const w = run(); gain(w, 'penetration'); gain(w, 'split'); gain(w, 'shockwave');
+  w.shoot(-w.maxPull, 0); const released = length(w.player);
+  w.spawnAuxiliaries({impactVx: released, impactVy: 0}); const child = w.auxiliaries[0];
+  const childSpeed = length(child); w.player.vx = released * .4;
+  enemy(w, {x: child.x + w.unit * 2, y: child.y, hp: 1});
+  w.releaseShockwave(child);
+  near(length(w.player), released); near(length(child), childSpeed); assert.equal(w.shotKills, 1);
+});
+
+test('a recovery kill keeps newly spawned splits at their original impact-speed fraction', () => {
+  const w = run(); gain(w, 'penetration'); gain(w, 'split'); w.shoot(-w.maxPull, 0);
+  const released = length(w.player), impactSpeed = released * .5;
+  headOn(w, enemy(w, {hp: 1}), impactSpeed);
+  near(length(w.player), released); assert.equal(w.auxiliaries.length, 2);
+  for (const child of w.auxiliaries) near(length(child), impactSpeed * .6);
+  const child = w.auxiliaries[0]; w.player.vx = released * .4;
+  headOn(w, enemy(w, {hp: 1}), impactSpeed * .6, child);
+  near(length(w.player), released * .4); near(length(child), impactSpeed * .6 * .85);
+});
+
+test('a Boss first kill recovers its resolved rebound and still follows the existing celebration brake', () => {
+  const w = run(); gain(w, 'penetration'); w.stage = 5; w.beginBoss(); advance(w, BOSS_TIMING.entry);
+  Object.assign(w.player, {vx: 0, vy: 0}); w.shoot(-w.maxPull, 0); const released = length(w.player);
+  const b = w.boss; Object.assign(b, {r: b.minRadius, stunned: true, hp: 1});
+  Object.assign(w.player, {x: b.x - b.r - w.player.r + .01, y: b.y, vx: released * .5, vy: 0});
+  w.collideBoss(); assert.equal(w.phase, 'boss-celebrate'); assert.equal(w.shotKills, 1);
+  near(w.player.vx, -released); near(w.player.vy, 0);
+  advance(w, w.bossVictorySlowTime + BOSS_TIMING.brake + .01); near(length(w.player), 0);
+});
+
+test('clearing a boomerang boost leaves the saved release base unchanged and cannot reset a spent recovery', () => {
+  const w = run(); gain(w, 'penetration'); gain(w, 'boomerang');
+  bounce(w, w.unit * 10); w.player.x = 4000; w.shoot(-w.maxPull, 0);
+  const releaseBase = length(w.player) / 1.3;
+  w.clearEnemies(); near(w.player.boomerangTime, 0); near(length(w.player), releaseBase);
+  headOn(w, enemy(w, {hp: 1}), releaseBase * .5); near(length(w.player), releaseBase);
+  w.clearEnemies(); headOn(w, enemy(w, {hp: 1}), releaseBase * .5);
+  near(length(w.player), releaseBase * .5 * .85);
+});
+
+test('penetration cannot fabricate a launch reference before any successful shot', () => {
+  const w = run(); gain(w, 'penetration');
+  assert.equal(w.shoot(1, 0), false);
+  const speed = w.unit * 20;
+  headOn(w, enemy(w, {hp: 1}), speed); near(length(w.player), speed * .85);
+  assert.equal(w.shotRelease, null);
 });
 
 test('boomerang refreshes its 0.8-second window without multiplying again on another wall', () => {
@@ -230,7 +399,7 @@ test('shockwave happens on every second actual wall and deals 75% full-pull dama
   const w = run(); gain(w, 'shockwave'); const anchor = w.inset + w.player.r;
   const first = enemy(w, {x: anchor + w.unit * 2, y: 4000, mass: .8});
   const second = enemy(w, {x: anchor, y: 4000 + w.unit * 2, mass: 2.5});
-  const outside = enemy(w, {x: anchor + w.unit * 3.1, y: 4000});
+  const outside = enemy(w, {x: anchor + w.unit * 4.1, y: 4000});
   bounce(w); assert.equal(first.hp, 10000); assert.equal(second.hp, 10000);
   bounce(w);
   for (const body of [first, second]) {
@@ -255,7 +424,7 @@ test('the shared second wall releases shockwave at the actual auxiliary and free
   const reducedMass = 1 / (1 / w.player.mass + 1 / nearChild.mass);
   assert.equal(300 - nearChild.hp, Math.round(.5 * reducedMass * 40 ** 2 * .31 * .75));
   assert.equal(nearMain.hp, 300, 'the primary player position is outside this auxiliary shockwave');
-  near(child.feedbackFreeze, .025); near(nearChild.feedbackFreeze, .025); near(w.player.feedbackFreeze || 0, 0);
+  near(child.feedbackFreeze, .035); near(nearChild.feedbackFreeze, .035); near(w.player.feedbackFreeze || 0, 0);
   const mainX = w.player.x, frozenX = child.x, frozenTargetX = nearChild.x;
   w.step(.01); assert.ok(w.player.x > mainX); near(child.x, frozenX); near(nearChild.x, frozenTargetX);
 });
@@ -271,24 +440,24 @@ test('effective area damage counts as a hit for missed-shot attribution while ze
   pulse.damage(pulseTarget, 1, {source: 'pulse'}); assert.equal(pulse.activeShot.hits, 1); assert.equal(pulse.resultMisses, 0);
 });
 
-test('risk scales and rounds each ordinary and clear award, including combo and bank bonuses', () => {
-  const w = run(); gain(w, 'risk', 2); bounce(w);
+test('removed risk cannot alter ordinary and clear awards, including combo and bank bonuses', () => {
+  const w = run(); w.buffs.risk = 2; assert.equal(w.applyUpgrade('risk'), false); bounce(w);
   w.damage(enemy(w, {hp: 1}), 1); w.damage(enemy(w, {hp: 1}), 1);
-  assert.deepEqual(w.events.filter(e => e.type === 'kill').map(e => e.value), [34, 68]); assert.equal(w.score, 102);
-  const clear = run(); gain(clear, 'risk', 2); clear.stageKills = clear.killTarget - 1;
+  assert.deepEqual(w.events.filter(e => e.type === 'kill').map(e => e.value), [15, 30]); assert.equal(w.score, 45);
+  const clear = run(); clear.buffs.risk = 2; clear.stageKills = clear.killTarget - 1;
   clear.damage(enemy(clear, {x: 4000, y: 3000, hp: 1}), 1);
   enemy(clear, {x: 4100, y: 3000}); enemy(clear, {x: 4200, y: 3000});
   while (clear.phase === 'battle' || clear.phase === 'clearing') clear.step(1 / 120);
-  assert.deepEqual(clear.events.filter(e => e.type === 'clearKill').map(e => e.value), [23, 23]);
-  assert.equal(clear.score, 69); assert.equal(clear.stageKills, 14);
+  assert.deepEqual(clear.events.filter(e => e.type === 'clearKill').map(e => e.value), [10, 10]);
+  assert.equal(clear.score, 30); assert.equal(clear.stageKills, 14);
 });
 
-test('risk scales each boss segment and final bonus independently while preserving the encounter', () => {
-  const w = run(); gain(w, 'risk', 2); w.stage = 10; w.beginBoss({type:'inflation'}); advance(w, BOSS_TIMING.entry);
+test('removed risk cannot alter boss segment and final rewards', () => {
+  const w = run(); w.buffs.risk = 2; w.stage = 10; w.beginBoss({type:'inflation'}); advance(w, BOSS_TIMING.entry);
   w.boss.r = w.boss.minRadius + .001; w.damageBoss(w.baseSpeed);
-  assert.equal(w.boss.stunned, true); assert.deepEqual(w.events.filter(e => e.type === 'bossScore').map(e => e.value), Array(5).fill(248));
+  assert.equal(w.boss.stunned, true); assert.deepEqual(w.events.filter(e => e.type === 'bossScore').map(e => e.value), Array(5).fill(110));
   w.damageBoss(w.baseSpeed * 20); assert.equal(w.phase, 'boss-celebrate');
-  assert.equal(w.events.find(e => e.type === 'bossDefeated').value, 1238); assert.equal(w.score, 2478);
+  assert.equal(w.events.find(e => e.type === 'bossDefeated').value, 550); assert.equal(w.score, 1100);
 });
 
 test('breath slows the wave start clock for 2.5 seconds and leaves in-wave spacing unchanged', () => {
@@ -301,13 +470,12 @@ test('breath slows the wave start clock for 2.5 seconds and leaves in-wave spaci
   w.advanceSpawning(2.3); near(w.breathTime, 0); near(w.spawnTimer, startTimer - .2 - 2.2 * 2 / 3 - .1);
 });
 
-test('risk preserves scheduled waves and frenzy adds two slots with a twelve-kill combo cap', () => {
-  const w = run(), interval = w.spawnInterval; gain(w, 'risk', 2); near(w.spawnInterval, interval);
-  gain(w, 'frenzy'); assert.equal(w.waveSize, 6); assert.equal(w.comboCap, 12);
-  w.spawnTimer = 0; w.advanceSpawning(.001); near(w.spawnTimer, w.waveSize * w.spawnInterval * .7 - .001);
+test('repeated frenzy stacks wave pressure and keeps a twelve-kill combo cap', () => {
+  const w = run(), interval = w.spawnInterval; gain(w, 'frenzy', 5); near(w.spawnInterval, interval); assert.equal(w.waveSize, 10); assert.equal(w.comboCap, 12);
+  w.spawnTimer = 0; w.advanceSpawning(.001); near(w.spawnTimer, w.waveSize * w.spawnInterval * .7 * .9 ** 4 - .001);
   w.enemies = []; w.wave = null; w.spawnTimer = Infinity;
   for (let i = 0; i < 13; i++) w.damage(enemy(w, {hp: 1}), 1);
-  assert.deepEqual(w.events.filter(e => e.type === 'kill').slice(-3).map(e => e.value), [371, 405, 405]);
+  assert.deepEqual(w.events.filter(e => e.type === 'kill').slice(-3).map(e => e.value), [165, 180, 180]);
   assert.equal(w.stageKills, 13); assert.equal(w.phase, 'battle');
 });
 
@@ -319,7 +487,7 @@ test('offer context survives the sweep and uses the widened efficiency window in
   enemy(w, {x: 4300, y: 3000}); enemy(w, {x: 4400, y: 3000});
   w.damage(enemy(w, {x: 4000, y: 3000, hp: 1}), 1); w.step(1 / 120);
   assert.equal(w.phase, 'clearing');
-  const expected = {hardEnemyShare: .5, nextBoss: true, completedShots: 10, averageKillsPerShot: 1.3};
+  const expected = {stage: 4, hardEnemyShare: .5, nextBoss: true, completedShots: 10, averageKillsPerShot: 1.3};
   assert.deepEqual(w.upgradeContext, expected);
   // This draw falls into pulse with the 1.3-kill efficiency boost, but pierce
   // without it; the snapshot must still drive the offer after all targets vanish.
@@ -330,29 +498,28 @@ test('offer context survives the sweep and uses the widened efficiency window in
   w.phase = 'choose'; w.choose(w.choices[0]); advance(w, 1.001); assert.equal(w.upgradeContext, null);
 });
 
-test('an exhausted upgrade pool skips selection through the usual reward rest without awarding a fake layer', () => {
+test('a late fully developed build keeps real upgrade choices without exhausting its pool', () => {
   const w = run();
   for (const upgrade of Object.values(UPGRADES)) {
-    if (upgrade.id === 'gambler') {
-      gain(w, 'gambler');
-      // The next-stage wager must be consumed before another can be acquired.
-      w.rewardSelectionsRemaining = 1; w.finishRewardRound();
-      assert.equal(w.nextGambler, false); assert.equal(w.gamblerTargetMultiplier, 1.5);
-      gain(w, 'gambler');
-    } else gain(w, upgrade.id, upgrade.maxStacks);
+    if (upgrade.id !== 'gambler') gain(w, upgrade.id, Number.isFinite(upgrade.maxStacks) ? upgrade.maxStacks : 60);
   }
-  const acquired = {...w.buffs}, stage = w.stage; w.beginUpgrade();
-  assert.equal(w.phase, 'reward'); assert.deepEqual(w.choices, []); assert.deepEqual(w.buffs, acquired);
-  assert.equal(w.events.filter(e => e.type === 'upgradeSkipped').length, 1);
-  assert.equal(w.events.filter(e => e.type === 'buff').length, 0); assert.equal(w.pendingUpgradeBoost, false);
-  advance(w, w.rewardTiming.rest - .01); assert.equal(w.phase, 'reward'); advance(w, .011);
-  assert.equal(w.phase, 'battle'); assert.equal(w.stage, stage + 1); assert.deepEqual(w.buffs, acquired); assert.equal(w.score, 0);
+  w.stage = 21;
+  const acquired = {...w.buffs}; w.beginUpgrade();
+  assert.equal(w.phase, 'transition'); assert.equal(w.choices.length, 3); assert.deepEqual(w.buffs, acquired);
+  assert.equal(new Set(w.choices.map(c => c.id)).size, 3);
+  assert.ok(w.choices.every(c => ['energy', 'density', 'overspeed', 'frenzy', 'gambler'].includes(c.id)));
+  assert.equal(w.events.filter(e => e.type === 'upgradeSkipped').length, 0);
+  w.phase = 'choose'; const choice = w.choices[0]; assert.equal(w.choose(choice), true);
+  assert.equal(w.buffs[choice.id], (acquired[choice.id] || 0) + 1);
+  advance(w, 1.001); assert.equal(w.phase, 'battle'); assert.equal(w.stage, 22); assert.equal(w.score, 0);
 });
 
-test('five-choice layouts fit narrow and landscape viewports with separate hit areas and player space', () => {
+
+
+test('each three-choice gambler reward fits narrow and landscape viewports with separate hit areas and player space', () => {
   for (const [width, height] of [[320, 568], [844, 390]]) {
     const w = new World(width, height, () => .5, {spawnInitial: false});
-    w.gamblerRewardPending = true; w.beginUpgrade(); assert.equal(w.choices.length, 5);
+    w.gamblerRewardPending = true; w.beginUpgrade(); assert.equal(w.choices.length, 3); assert.equal(w.upgradeRoundTotal, 2);
     const bounds = w.arenaBounds;
     for (const choice of w.choices) {
       assert.ok(choice.x - choice.r >= bounds.left); assert.ok(choice.x + choice.r <= bounds.right);
@@ -371,31 +538,10 @@ test('five-choice layouts fit narrow and landscape viewports with separate hit a
 });
 
 
-test('gambler places three offers above the player and two below across growth, short screens and rotations', () => {
-  for (const [width,height] of [[200,400],[320,568],[390,844],[844,390],[568,320],[600,240],[1364,936]]) for (const grown of [false,true]) {
-    const w=new World(width,height,()=>.5,{spawnInitial:false});
-    if(grown){w.applyUpgrade('growth');w.applyUpgrade('growth');}
-    w.gamblerRewardPending=true;w.beginUpgrade();advance(w,1.86);
-    const inspect=()=>{
-      const p=w.player,b=w.arenaBounds;near(p.x,w.width/2);near(p.y,w.choicePlayerY);
-      assert.equal(w.choices.filter(c=>c.y<p.y).length,3);assert.equal(w.choices.filter(c=>c.y>p.y).length,2);
-      for(const [index,c] of w.choices.entries()){
-        assert.ok(c.r>=1&&c.x-c.r*1.28>=b.left&&c.x+c.r*1.28<=b.right);
-        const font=Math.max(9,Math.min(17,Math.floor(c.labelWidth/c.name.length*.9))),outer=c.r*(1+.14*(c.rings||0));
-        assert.ok(c.y-outer>=b.top&&c.y+outer+14+font<b.bottom);
-        assert.ok(c.x-c.labelWidth/2>=b.left&&c.x+c.labelWidth/2<=b.right);
-        if(index<3)assert.ok(c.y+outer+14+font<=p.y-p.r+1e-7,`${width}x${height} upper label touches player`);
-        else assert.ok(c.y-outer>=p.y+p.r-1e-7,`${width}x${height} lower offer touches player`);
-      }
-      for(let i=0;i<5;i++)for(let j=i+1;j<5;j++){const a=w.choices[i],c=w.choices[j];assert.ok(Math.hypot(a.x-c.x,a.y-c.y)>1.2*(a.r+c.r));}
-    };
-    inspect();w.player.vx=w.unit*10;w.resize(height,width);inspect();near(length(w.player),0);
-    assert.equal(w.events.filter(e=>e.type==='buff').length,0);
-  }
-});
 
-test('each upper or lower gambler offer can be struck once and emits the common kill-fragment contact data',()=>{
-  for(const [width,height] of [[390,844],[844,390]])for(let index=0;index<5;index++){
+
+test('each three-choice gambler offer can be struck once and emits the common kill-fragment contact data',()=>{
+  for(const [width,height] of [[390,844],[844,390]])for(let index=0;index<3;index++){
     const w=new World(width,height,()=>.5,{spawnInitial:false});w.gamblerRewardPending=true;w.beginUpgrade();advance(w,1.86);
     const c={...w.choices[index]},p=w.player,score=w.score,kills=w.totalKills,stageKills=w.stageKills;
     const dx=c.x-p.x,dy=c.y-p.y,distance=Math.hypot(dx,dy);
@@ -420,32 +566,16 @@ test('normal three-choice rewards retain one upper row and produce the same cont
 });
 
 
-test('five-choice explicit preview limits contain rarity rings and complete names without expanding behind controls',()=>{
-  for(const [width,height,panelHeight] of [[390,844,40],[844,390,40],[320,568,40],[568,320,40],[600,240,40],[400,200,40]]){
-    const w=new World(width,height,()=>.5,{spawnInitial:false});w.gamblerRewardPending=true;w.beginUpgrade();
-    const top=w.arenaBounds.top+8,bottom=height-20-panelHeight-8;
-    w.layoutChoices({top,bottom});const py=w.choicePlayerY;
-    for(const [index,c] of w.choices.entries()){
-      const font=Math.max(9,Math.min(17,Math.floor(c.labelWidth/c.name.length*.9)));
-      // Exercise the maximum legal outer-ring count even if this draw is plain.
-      const outer=c.r*1.28;
-      assert.ok(c.y-outer>=top-1e-7,`${width}x${height}: outer ring above region`);
-      assert.ok(c.y+outer+14+font<=bottom+1e-7,`${width}x${height}: name behind controls`);
-      if(index<3)assert.ok(c.y+outer+14+font<=py-w.player.r+1e-7);
-      else assert.ok(c.y-outer>=py+w.player.r-1e-7);
-    }
-    near(py,(top+bottom)/2);
-  }
-});
 
-test('v7.3 risk raises newly spawned enemy HP once, leaves existing targets intact and keeps spawn cadence', () => {
+
+test('removed risk cannot raise enemy HP or affect split offspring and spawn cadence', () => {
   for (const layers of [1, 2]) {
     const w = run(); w.stage = 13; w.time = 91;
     const interval = w.spawnInterval, waveInterval = w.waveInterval;
     const existing = w.spawnEnemy(null, 'normal'), originalHp = existing.hp;
-    gain(w, 'risk', layers);
+    w.buffs.risk = layers;
     near(w.spawnInterval, interval); near(w.waveInterval, waveInterval); near(existing.hp, originalHp);
-    const next = w.spawnEnemy(null, 'normal'); near(next.maxHp, originalHp * 1.15 ** layers);
+    const next = w.spawnEnemy(null, 'normal'); near(next.maxHp, originalHp);
     const mother = w.spawnEnemy(null, 'split'); mother.born = 1; mother.solid = true;
     w.damage(mother, 1e9); w.flushFragments();
     const children = w.enemies.filter(body => body.enemyType === 'fragment');
@@ -454,17 +584,14 @@ test('v7.3 risk raises newly spawned enemy HP once, leaves existing targets inta
   }
 });
 
-test('v7.3 risk preserves Boss HP and campaign enemy HP while retaining its existing score multiplier', () => {
-  const plain = run(), risky = run(); gain(risky, 'risk', 2);
+test('removed risk remains inert in Boss calculations', () => {
+  const plain = run(), risky = run(); risky.buffs.risk = 2;
   for (const w of [plain, risky]) {
     w.stage = 10; w.beginBoss(); advance(w, BOSS_TIMING.entry);
     w.boss.r = w.boss.minRadius + .001; w.damageBoss(w.baseSpeed);
   }
   near(risky.boss.hp, plain.boss.hp); near(risky.boss.inflationRate, plain.boss.inflationRate);
-  assert.equal(risky.scoreValue(100), 225);
-  const campaign = run(); campaign.mode = 'campaign'; campaign.stage = 12; campaign.time = 91;
-  const profile = campaign.enemyProfile(), interval = campaign.spawnInterval;
-  campaign.buffs.risk = 2; assert.deepEqual(campaign.enemyProfile(), profile); near(campaign.spawnInterval, interval);
+  assert.equal(risky.scoreValue(100), 100);
 });
 
 test('v7.3 growth adds ten percent per layer to direct, pulse and full-pull area damage without changing mass or launch', () => {
@@ -485,7 +612,7 @@ test('v7.3 growth adds ten percent per layer to direct, pulse and full-pull area
   }
 });
 
-test('v7.3 growth reaches split-ball damage exactly once and leaves campaign damage scale at one', () => {
+test('v7.3 growth reaches split-ball damage exactly once', () => {
   for (const layers of [1, 2]) {
     const w = run(); gain(w, 'growth', layers); gain(w, 'density', 2);
     const [child] = splitShot(w), target = enemy(w, {mass: .8});
@@ -493,9 +620,6 @@ test('v7.3 growth reaches split-ball damage exactly once and leaves campaign dam
     headOn(w, target, w.unit * 30 * .6, child);
     assert.equal(10000 - target.hp, Math.round(.5 * reducedMass * 30 ** 2 * .31 * .6 * (1 + .1 * layers)));
   }
-  const campaign = run(); campaign.mode = 'campaign'; campaign.buffs.growth = 2;
-  const target = enemy(campaign); near(campaign.growthDamageScale, 1);
-  headOn(campaign, target); assert.equal(10000 - target.hp, Math.round(.5 * .75 * 30 ** 2 * .31));
 });
 
 test('v7.3 growth and shockwave use the same Boss HP reference and never spend bank charges on the area hit', () => {
@@ -534,8 +658,6 @@ test('v7.3 breath integrates a partial expiry on both refill clocks and refreshe
   near(whole.breathTime, 0); near(split.floorTimer, whole.floorTimer); near(split.spawnTimer, whole.spawnTimer);
   gain(whole, 'breath'); whole.damage(enemy(whole, {hp: 1}), 1); near(whole.breathTime, 2.5);
   whole.advanceSpawning(.2); whole.damage(enemy(whole, {hp: 1}), 1); near(whole.breathTime, 2.5);
-  const campaign = run(); campaign.mode = 'campaign'; campaign.buffs.breath = 1;
-  campaign.damage(enemy(campaign, {hp: 1}), 1); near(campaign.breathTime, 1.5);
 });
 
 test('v7.3 breath never slows capacity grace and boomerang cleanup removes only its temporary multiplier', () => {

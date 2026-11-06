@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {cropSourceRect,repeatDelay,loadAppearance,saveAppearance} from '../dist/wardrobe.js';
+import {cropSourceRect,loadAppearance,saveAppearance} from '../dist/wardrobe.js';
 import {HomeWorld,homeLayout} from '../dist/home.js';
 import {iconGeometry} from '../dist/icons.js';
 
@@ -16,32 +16,16 @@ test('image crops retain the maximum square and cannot expose empty edges',()=>{
     }
   }
 });
-test('holding a side button accelerates without an unbounded repeat rate',()=>{
-  assert.ok(repeatDelay(700)>repeatDelay(1600));
-  assert.ok(repeatDelay(1600)>repeatDelay(3000));
-  assert.equal(repeatDelay(100000),55);
-});
-test('wardrobe orbit preserves adjusted angles and spacing, increasing diameters and clear routes',()=>{
+test('wardrobe is the largest of the three home controls and remains directly reachable',()=>{
   for(const [width,height] of [[320,568],[390,844],[844,390],[1363,936],[768,1024]]){
-    const layout=homeLayout(width,height),[settings,mode,sound,wardrobe]=layout.others;
-    const angle=body=>Math.atan2(body.y-layout.player.y,body.x-layout.player.x);
-    const controls=[sound,settings,wardrobe,mode],sequence=controls.map(angle);
-    const angleGaps=[46,47,53];
-    const diameterStep=2*(mode.r-sound.r)/3;
-    for(let i=1;i<sequence.length;i++){
-      assert.ok(Math.abs(sequence[i]-sequence[i-1]-angleGaps[i-1]*Math.PI/180)<1e-9);
-      assert.ok(Math.abs(2*(controls[i].r-controls[i-1].r)-diameterStep)<1e-9);
-    }
-    const edgeGap=body=>Math.hypot(body.x-layout.player.x,body.y-layout.player.y)-body.r-layout.player.r;
-    assert.ok(Math.abs(edgeGap(settings)-edgeGap(wardrobe))<1e-9);
-    assert.ok(Math.abs(edgeGap(sound)-edgeGap(wardrobe)+layout.base*.05)<1e-9);
-    for(const id of ['sound','settings','wardrobe','mode']){
-      const world=new HomeWorld(width,height);world.launchTo(id);
-      assert.equal(world.target.id,id,`${width}x${height}: ${id} route is blocked`);
-      for(let i=0;i<300&&world.phase==='flight';i++)world.step(1/120);
-      assert.equal(world.action,id);
-      if(id==='wardrobe')assert.equal(world.phase,'external');
-    }
+    const layout=homeLayout(width,height),[settings,wardrobe,sound]=layout.others;
+    assert.equal(layout.others.length,3);
+    assert.ok(wardrobe.r>settings.r&&settings.r>sound.r);
+    const world=new HomeWorld(width,height);world.launchTo('wardrobe');
+    assert.ok(world.targets.every(target=>target.id!=='mode'));
+    assert.equal(world.target.id,'wardrobe',`${width}x${height}: wardrobe route is blocked`);
+    for(let i=0;i<300&&world.phase==='flight';i++)world.step(1/120);
+    assert.equal(world.action,'wardrobe');assert.equal(world.phase,'external');
   }
 });
 test('hanger geometry is rounded and contained in its control ball',()=>{

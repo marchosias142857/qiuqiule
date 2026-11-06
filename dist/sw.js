@@ -1,12 +1,12 @@
 const ROOT = new URL('./',self.location).href;
 const CACHE_PREFIX = 'qiuqiule-'+encodeURIComponent(new URL(ROOT).pathname)+'-';
-const CACHE = CACHE_PREFIX+'v8.1.1';
+const CACHE = CACHE_PREFIX+'v9.0.2';
 const urls = files => files.map(path => new URL(path,ROOT).href);
-const CORE = urls(['./','./index.html','./style.css','./game.js','./feedback.js','./border-bulge.js','./aim.js','./aim-metrics.js','./comet-trail.js','./rhythm-feedback.js','./enemies.js','./enemy-render.js','./upgrades.js','./upgrade-render.js','./physics.js','./campaign.js','./campaign-aim.js','./campaign-offer.js','./classes/wall-levels.js','./classes/pool-levels.js','./classes/merge-levels.js','./classes/golf-levels.js','./classes/peggle-levels.js','./campaign-layout.js','./campaign-collision.js','./campaign-progress.js','./campaign-render.js','./classes/legacy.js','./classes/wall.js','./classes/peggle.js','./classes/pool.js','./classes/golf.js','./classes/bowling.js','./classes/pinball.js','./classes/bricks.js','./classes/glass.js','./classes/merge.js','./classes/chain.js','./levels.js','./level-orbs.js','./home.js','./icons.js','./motion.js','./boss-visuals.js','./endless-progress.js','./skins.js','./skin-render.js','./photo-renderer.js','./wardrobe.js','./appearances.js','./big-eye.js','./companions.js','./skin-unlock.js','./skin-unlock.css','./audio.js','./music-player.js','./offline.js','./display.js','./vendor/phaser.min.js','./fonts/qiuqiule-ui.woff2']);
+const CORE = urls(['./','./index.html','./style.css','./game.js','./feedback.js','./border-bulge.js','./aim.js','./aim-metrics.js','./comet-trail.js','./rhythm-feedback.js','./enemies.js','./enemy-render.js','./upgrades.js','./upgrade-render.js','./shockwave-render.js','./run-upgrades.js','./stage-hud.js','./physics.js','./home.js','./icons.js','./motion.js','./boss-visuals.js','./endless-progress.js','./skins.js','./skin-render.js','./photo-renderer.js','./wardrobe.js','./appearances.js','./big-eye.js','./companions.js','./skin-unlock.js','./skin-unlock.css','./audio.js','./music-player.js','./offline.js','./display.js','./vendor/phaser.min.js','./fonts/qiuqiule-ui.woff2']);
 // Update these fingerprints when replacing a track; only identical cached audio may cross releases.
 const MUSIC_DIGESTS = new Map([
+  [new URL('./audio/boss.mp3',ROOT).href,'5d4e0fd3de4b403f764a8d64dc205bdbb7a59f841071e99b7ffd4338e0dc525d'],
   [new URL('./audio/endless.mp3',ROOT).href,'f06e05ee22385561fb0bb72359f46a0c10919f15e95c209e9b349fc7a9abbce1'],
-  [new URL('./audio/campaign.mp3',ROOT).href,'ecefee7b7748aca146c9ed1903a8a92c306b47f45f4177b857a67c66b91bb3ac'],
 ]);
 const MUSIC = [...MUSIC_DIGESTS.keys()];
 const EXTRA = [...urls(['./manifest.webmanifest','./icon.svg','./icons/icon-192.png','./icons/icon-512.png']),...MUSIC];

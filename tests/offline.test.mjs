@@ -5,9 +5,8 @@ import {webcrypto} from 'node:crypto';
 import {readFile,stat} from 'node:fs/promises';
 const root=new URL('../dist/',import.meta.url);
 const source=await readFile(new URL('sw.js',root),'utf8');
-const musicFiles=['audio/endless.mp3','audio/campaign.mp3'];
-const authoredModules=['campaign-aim.js','campaign-offer.js','classes/wall-levels.js','classes/pool-levels.js',
-  'classes/merge-levels.js','classes/golf-levels.js','classes/peggle-levels.js'];
+const musicFiles=['audio/endless.mp3','audio/boss.mp3'];
+const authoredModules=['run-upgrades.js','stage-hud.js','companions.js','skin-unlock.js'];
 
 function worker({failed=[],wrongType=[],partial=[],base='/'}={}){
   const handlers={},stores=new Map(),messages=[],requests=[];
@@ -53,15 +52,15 @@ test('core and warmed extras serve from cache with the network unavailable',asyn
     const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example'+path,mode:'navigate'}});
     assert.match(await response.text(),/id="game"/);
   }
-  for(const asset of [...authoredModules,'game.js','physics.js','campaign.js','campaign-collision.js','campaign-progress.js','campaign-render.js','classes/legacy.js','classes/wall.js','classes/peggle.js','classes/pool.js','classes/golf.js','classes/bowling.js','classes/pinball.js','classes/bricks.js','classes/glass.js','classes/merge.js','classes/chain.js','levels.js','home.js','icons.js','motion.js','boss-visuals.js','audio.js','music-player.js','offline.js',...musicFiles,'display.js','style.css','fonts/qiuqiule-ui.woff2','vendor/phaser.min.js','icons/icon-192.png']){
+  for(const asset of [...authoredModules,'game.js','physics.js','home.js','icons.js','motion.js','boss-visuals.js','audio.js','music-player.js','offline.js',...musicFiles,'display.js','style.css','fonts/qiuqiule-ui.woff2','vendor/phaser.min.js','icons/icon-192.png']){
     const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example/'+asset,mode:'cors'}});assert.ok((await response.arrayBuffer()).byteLength>0);
   }
   const state=await w.status();assert.equal(state.ready,true);assert.equal(state.musicReady,true);
   assert.deepEqual(w.requests.filter(({path})=>path.endsWith('.mp3')).map(({path})=>path).sort(),musicFiles.map(file=>'/'+file).sort());
   assert.ok(w.requests.every(request=>request.options.credentials==='same-origin'&&request.options.redirect==='error'));
 });
-test('missing a required music player or campaign module keeps the previous complete offline version',async()=>{
-  for(const module of ['music-player.js',...authoredModules,...['pool','golf','bowling','pinball','bricks','glass','merge','chain'].map(name=>`classes/${name}.js`)]){
+test('missing a required music player or progression module keeps the previous complete offline version',async()=>{
+  for(const module of ['music-player.js',...authoredModules,'physics.js']){
     const w=worker({failed:[`/${module}`]});
     const previous=new Map([['https://game.example/',new Response('v6.6.0 complete')]]);
     w.stores.set('qiuqiule-%2F-v6.6.0-campaign-batch1-1',previous);
@@ -75,15 +74,15 @@ test('failed music download cannot block offline game installation and can retry
   assert.equal(w.claimed,true);assert.equal(w.skipped,true);
   await w.event('message',{data:{type:'WARM_CACHE'}});let state=await w.status();
   assert.equal(state.ready,true);assert.equal(state.musicReady,false);assert.equal(state.extrasReady,false);
-  assert.equal(w.requests.filter(r=>r.path==='/audio/campaign.mp3').length,1);
+  assert.equal(w.requests.filter(r=>r.path==='/audio/boss.mp3').length,1);
   w.setOffline();const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example/',mode:'navigate'}});
   assert.match(await response.text(),/id="game"/);
   w.setOffline(false);w.failures.clear();await w.event('message',{data:{type:'WARM_CACHE'}});
   state=await w.status();assert.equal(state.musicReady,true);assert.equal(state.extrasReady,true);
-  assert.equal(w.requests.filter(r=>r.path==='/audio/campaign.mp3').length,1);
+  assert.equal(w.requests.filter(r=>r.path==='/audio/boss.mp3').length,1);
 });
-test('a partial track cannot mark both music files as ready',async()=>{
-  const partial=['/audio/campaign.mp3'];
+test('a partial track cannot mark all music files as ready',async()=>{
+  const partial=['/audio/boss.mp3'];
   const w=worker({partial});await w.event('install');await w.event('activate');
   await w.event('message',{data:{type:'WARM_CACHE'}});
   assert.equal((await w.status()).musicReady,false);
@@ -133,16 +132,15 @@ test('GitHub Pages repository subpaths keep assets scoped and preserve other rep
   }
 });
 
-test('an upgrade reuses identical music before claiming offline clients, even when split across two versions',async()=>{
+test('an upgrade reuses both current tracks but leaves retired campaign music behind',async()=>{
   const w=worker({base:'/qiuqiule/'}),origin='https://game.example/qiuqiule/';
   const paths=musicFiles.map(file=>origin+file);
   const buffers=await Promise.all(musicFiles.map(file=>readFile(new URL(file,root))));
-  w.stores.set('qiuqiule-%2Fqiuqiule%2F-v8.0.0',new Map([[paths[0],new Response(buffers[0])],[origin+'audio/boss.mp3',new Response('retired')]]));
-  w.stores.set('qiuqiule-%2Fqiuqiule%2F-v8.1.0',new Map([[paths[0],new Response('wrong edition')],[paths[1],new Response(buffers[1])]]));
+  w.stores.set('qiuqiule-%2Fqiuqiule%2F-v8.3.0',new Map([[paths[0],new Response(buffers[0])],[origin+'audio/campaign.mp3',new Response('retired')]]));
+  w.stores.set('qiuqiule-%2Fqiuqiule%2F-v8.4.0',new Map([[paths[0],new Response('wrong edition')],[paths[1],new Response(buffers[1])]]));
   await w.event('install');w.setOffline();await w.event('activate');
-  const state=await w.status();
-  assert.equal(state.musicReady,true);
-  assert.equal(w.stores.get(state.version).has(origin+'audio/boss.mp3'),false);
+  const state=await w.status();assert.equal(state.musicReady,true);
+  assert.equal(w.stores.get(state.version).has(origin+'audio/campaign.mp3'),false);
   for(const [i,url] of paths.entries()){
     const response=await w.event('fetch',{request:{method:'GET',url,mode:'cors'}});
     assert.deepEqual(Buffer.from(await response.arrayBuffer()),buffers[i]);
@@ -168,4 +166,25 @@ test('playback and background warmup retrieve each previously uncached track jus
   for(const result of [a,b])assert.deepEqual(Buffer.from(await result.arrayBuffer()),expected);
   assert.equal(w.requests.filter(r=>r.path==='/'+musicFiles[0]).length,1);
   assert.equal((await w.status()).musicReady,true);
+});
+
+test('every relative module reachable from the shipped entrypoints is bundled and precached offline',async()=>{
+  const html=await readFile(new URL('index.html',root),'utf8');
+  const modules=new Set(),pending=[...html.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)].map(match=>match[1].replace(/^\.\//,''));
+  while(pending.length){
+    const path=pending.pop();if(modules.has(path))continue;modules.add(path);
+    const code=await readFile(new URL(path,root),'utf8');
+    for(const match of code.matchAll(/(?:import|export)\s+(?:[^'";]+?\s+from\s*)?['"](\.[^'"]+\.js)['"]/g)){
+      const resolved=new URL(match[1],new URL(path,root));
+      assert.ok(resolved.href.startsWith(root.href),'relative modules stay in the shipped directory');
+      pending.push(resolved.href.slice(root.href.length));
+    }
+  }
+  assert.ok(modules.has('game.js')&&modules.has('companions.js')&&modules.has('wardrobe.js'));
+  assert.ok([...modules].every(path=>!/^campaign|^classes\/|^levels\.js$|^level-orbs\.js$/.test(path)));
+  const w=worker();await w.event('install');await w.event('activate');w.setOffline();
+  for(const path of modules){
+    const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example/'+path,mode:'cors'}});
+    assert.ok(response,`${path} is available offline`);assert.ok((await response.text()).length>0);
+  }
 });

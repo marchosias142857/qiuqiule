@@ -61,17 +61,30 @@ test('Boss hit-stop is local, respects strength zero and reduced motion, and ent
  const w=boss(5);w.setFeedbackOptions({strength:1});w.boss.r=w.boss.minRadius+.001;w.damageBoss(w.unit*30);near(w.player.feedbackFreeze,.15);assert.equal(w.boss.stunned,true);assert.equal(w.boss.stunDeadline,undefined);
 });
 
-test('victory has half a real second of slow motion before the old crown and two reward rounds',()=>{
+test('victory keeps the half-second slow motion and adds the wager to both Boss reward rounds',()=>{
  const w=boss(10);w.gamblerRewardPending=true;const e=body(w);w.player.vx=w.unit*10;
  Object.assign(w.boss,{stunned:true,r:w.boss.minRadius,hp:1,maxHp:1});w.damageBoss(w.unit*30);assert.equal(w.phase,'boss-celebrate');assert.ok(w.enemies.includes(e));
  w.step(.124,false,{timeScale:.25});assert.ok(w.bossVictorySlowTime>0);assert.equal(w.events.some(e=>e.type==='bossCelebrate'),false);
  w.step(.001,false,{timeScale:.25});assert.equal(w.bossVictorySlowTime,0);near(w.phaseTime,0);w.step(BOSS_TIMING.brake+BOSS_TIMING.spin+BOSS_TIMING.hold+BOSS_TIMING.fade+.001);
- assert.equal(w.rewardSelectionsRemaining,2);assert.equal(w.choices.length,5);assert.equal(w.enemies.length,0);assert.equal(w.stage,10);
- pick(w);assert.equal(w.stage,10);assert.equal(w.rewardSelectionsRemaining,1);assert.equal(w.choices.length,3);pick(w);assert.equal(w.stage,11);assert.equal(w.phase,'battle');
+ assert.equal(w.rewardSelectionsRemaining,3);assert.equal(w.choices.length,3);assert.equal(w.enemies.length,0);assert.equal(w.stage,10);
+ for(let round=0;round<3;round++){assert.equal(w.choices.length,3);pick(w);assert.equal(w.stage,round<2?10:11);assert.equal(w.rewardSelectionsRemaining,2-round);}
+ assert.equal(w.phase,'battle');assert.equal(w.events.filter(e=>e.type==='buff').length,3);
 });
 
-test('both exhausted Boss reward rounds finish without a fake upgrade or multiple stage increments',()=>{
- const w=boss(10);for(const d of UPGRADE_DEFINITIONS)w.buffs[d.id]=d.maxStacks;victory(w);assert.equal(w.phase,'reward');w.step(w.rewardTiming.rest-w.phaseTime);assert.equal(w.stage,10);assert.equal(w.phase,'reward');w.step(w.rewardTiming.rest);assert.equal(w.stage,11);assert.equal(w.phase,'battle');assert.equal(w.events.filter(e=>e.type==='upgradeSkipped').length,2);
+test('a fully developed late build receives both Boss rewards and advances the stage only once',()=>{
+ const w=boss(20);
+ for(const d of UPGRADE_DEFINITIONS)w.buffs[d.id]=Number.isFinite(d.maxStacks)?d.maxStacks:20;
+ const layers=()=>Object.values(w.buffs).reduce((sum,n)=>sum+n,0),before=layers();
+ victory(w);assert.equal(w.phase,'transition');assert.equal(w.rewardSelectionsRemaining,2);
+ for(let round=0;round<2;round++){
+  assert.equal(w.choices.length,3);assert.ok(w.choices.some(c=>c.kind==='regular'));
+  assert.ok(w.choices.every(c=>['energy','density','overspeed','gambler','frenzy'].includes(c.id)));
+  pick(w);assert.equal(layers(),before+round+1);
+  assert.equal(w.stage,round===0?20:21);
+ }
+ assert.equal(w.phase,'battle');assert.equal(w.events.filter(e=>e.type==='upgradeSkipped').length,0);
+ assert.equal(w.events.filter(e=>e.type==='buff').length,2);
+ assert.equal(w.events.filter(e=>e.type==='stage').length,1);
 });
 
 test('one regular starting choice immediately starts stage one with six enemies and the next-shot boost',()=>{

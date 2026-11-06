@@ -4,6 +4,31 @@ import {skinContour} from './skins.js';
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const ease=t=>1-(1-clamp(t,0,1))**3;
 const circle=Array.from({length:96},(_,i)=>({x:Math.cos(i/96*Math.PI*2),y:Math.sin(i/96*Math.PI*2)}));
+const appearances=Object.freeze({
+  regular:{color:0xc4dcaa,ink:0x35533e,shade:0x63874e,sides:3,radius:.38,angle:-Math.PI/2},
+  special:{color:0xbdaee2,ink:0x4f416e,shade:0x796693,sides:4,radius:.31,angle:Math.PI/4},
+  risk:{color:0xe8c17f,ink:0x704e2c,shade:0xa77b40,sides:5,radius:.285,angle:-Math.PI/2},
+});
+
+export function upgradeAppearance(choice,background=0xf4f3eb){
+  const kind=typeof choice==='string'?choice:choice?.kind||['regular','special','risk'][choice?.rings||0];
+  const style=appearances[kind]||appearances.regular;
+  const distance=Math.hypot(...[16,8,0].map(shift=>((style.color>>shift)&255)-((background>>shift)&255)));
+  return distance<65?{...style,color:style.shade,ink:0xfff9ed}:style;
+}
+
+function markerPoints(style){
+  return Array.from({length:style.sides},(_,i)=>{
+    const angle=style.angle+i/style.sides*Math.PI*2;
+    return {x:Math.cos(angle)*style.radius,y:Math.sin(angle)*style.radius};
+  });
+}
+
+export function upgradeIconMarkup(choice,background){
+  const style=upgradeAppearance(choice,background),hex=color=>'#'+color.toString(16).padStart(6,'0');
+  const points=markerPoints(style).map(p=>(12+p.x*10).toFixed(3)+','+(12+p.y*10).toFixed(3)).join(' ');
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" fill="${hex(style.color)}" stroke="none"/><polygon points="${points}" fill="${hex(style.ink)}" stroke="none"/></svg>`;
+}
 
 // Small, text-free diagrams in unit-ball coordinates. Dotted paths convey
 // movement; outlined small balls are targets and solid balls are the player.
@@ -27,8 +52,7 @@ export function upgradePreviewGeometry(id,time=0){
     case 'penetration':line([-.6,0],[.6,0]);dot(.1+wave*.32,0,.12);ring(-.2,0,.19);break;
     case 'boomerang':line([-.55,.32],[.45,-.32],[.1,.24],[-.36,-.1]);dot(-.55,.32,.1);line([.55,-.5],[.55,.2]);break;
     case 'shockwave':dot(0,0,.1);ring(0,0,.28);ring(0,0,.46+wave*.06);break;
-    case 'risk':dot(-.35,0,.14);for(const [x,y] of [[.1,-.3],[.38,0],[.1,.3]])ring(x,y,.1);line([-.1,0],[.25,0]);break;
-    case 'gambler':for(const x of [-.4,0,.4])ring(x,-.34,.085);for(const x of [-.24,.24])ring(x,.34,.085);dot(0,0,.12);line([0,-.15],[0,-.22]);break;
+    case 'gambler':for(const x of [-.4,0,.4])ring(x,-.34,.085);for(const x of [-.4,0,.4])ring(x,.34,.085);dot(0,0,.12);line([0,-.15],[0,-.22]);break;
     case 'frenzy':for(const x of [-.32,0,.32])for(const y of [-.2,.2])ring(x,y,.085);line([-.62,0],[.62,0]);dot(runner,0,.1);break;
     default:dot(0,0,.16);
   }
@@ -42,13 +66,15 @@ function path(g,points,color,alpha,width=0){
 }
 function disk(g,x,y,r,color,alpha,width=0){path(g,circle.map(p=>({x:x+p.x*r,y:y+p.y*r})),color,alpha,width);}
 
-export function drawUpgradeBall(g,choice,color,{alpha=1,preview=false,time=0,reducedMotion=false}={}){
+export function drawUpgradeBall(g,choice,background=0xf4f3eb,{alpha=1,preview=false,time=0,reducedMotion=false}={}){
   const appear=ease(choice.born??1),r=choice.r*appear,opacity=alpha*appear;
   if(r<1||opacity<=0)return;
+  const style=upgradeAppearance(choice,background),{color,ink}=style;
   disk(g,choice.x,choice.y,r,color,opacity);
-  for(let i=0;i<clamp(choice.rings||0,0,2);i++)disk(g,choice.x,choice.y,r*(1.14+i*.13),color,opacity*.85,1);
-  if(!preview)return;
-  const luminance=((color>>16)&255)*.299+((color>>8)&255)*.587+(color&255)*.114,ink=luminance<135?0xf4f3eb:0x252720;
+  if(!preview){
+    path(g,markerPoints(style).map(p=>({x:choice.x+p.x*r,y:choice.y+p.y*r})),ink,opacity);
+    return;
+  }
   for(const shape of upgradePreviewGeometry(choice.id,reducedMotion?0:time)){
     if(shape.type==='line'){
       for(let i=1;i<shape.points.length;i++){

@@ -1,0 +1,78 @@
+{
+  "title": "冠冕",
+  "sourceFile": "Boss.mp3",
+  "sourceSHA256": "b97f2d9172299c406419f5eaa242d140e66888e33c4a55f900b36c1e4c001b50",
+  "sourceDecodedDurationSeconds": 118.52,
+  "sourceLoudness": {
+    "integratedLUFS": -15.14,
+    "truePeakDBTP": -4.13,
+    "loudnessRangeLU": 6.0
+  },
+  "outputFile": "dist/audio/boss.mp3",
+  "outputSHA256": "5d4e0fd3de4b403f764a8d64dc205bdbb7a59f841071e99b7ffd4338e0dc525d",
+  "outputBytes": 2255180,
+  "codec": "MP3 192 kbps stereo 44100 Hz",
+  "encoderVersion": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "loopStart": 11.51721088435374,
+  "loopEnd": 93.30421768707482,
+  "loopDurationSeconds": 81.78700680272108,
+  "recipe": {
+    "gainDB": -3.34,
+    "normalization": "fixed gain; no dynamic compression",
+    "introRetained": true,
+    "nominalLoopStart": 11.52,
+    "nominalLoopEnd": 93.30700680272109,
+    "bridgeSeconds": 0.18,
+    "copiedContextBeforeSeamSeconds": 0.06,
+    "unusedTailSeconds": 0.6,
+    "quietPointOffsetSamples": -123,
+    "reason": "Approx. 36 bars of steady music; source weak outro starts around 94s."
+  },
+  "outputLoudness": {
+    "integratedLUFS": -18.29,
+    "truePeakDBTP": -7.34,
+    "loudnessRangeLU": 1.1
+  },
+  "loopLoudness": {
+    "integratedLUFS": -18.2,
+    "truePeakDBTP": -7.33,
+    "loudnessRangeLU": 0.9
+  },
+  "existingTracksLoudness": {
+    "endless": {
+      "integratedLUFS": -18.22,
+      "truePeakDBTP": -6.53,
+      "loudnessRangeLU": 2.2
+    },
+    "campaign": {
+      "integratedLUFS": -18.2,
+      "truePeakDBTP": -4.91,
+      "loudnessRangeLU": 2.4
+    }
+  },
+  "decodedMeasurements": {
+    "44100": {
+      "durationSeconds": 93.90700680272109,
+      "seamMaxChannelStep": 0.0008036717772483826,
+      "seamStepDBFS": -61.89842565274094,
+      "localAdjacentStepRMS": 0.025962909683585167,
+      "beforeSeam250msRMSDBFS": -21.74365234375,
+      "afterSeam250msRMSDBFS": -19.053647994995117,
+      "loopRMSDBFS": -20.330947875976562,
+      "lastLoopSecondRMSDBFS": -20.236665725708008,
+      "first650msRMSDBFS": -24.4156494140625
+    },
+    "48000": {
+      "durationSeconds": 93.90702083333333,
+      "seamMaxChannelStep": 0.0015339702367782593,
+      "seamStepDBFS": -56.28366133614186,
+      "localAdjacentStepRMS": 0.024205360561609268,
+      "beforeSeam250msRMSDBFS": -21.743778228759766,
+      "afterSeam250msRMSDBFS": -19.053667068481445,
+      "loopRMSDBFS": -20.330982208251953,
+      "lastLoopSecondRMSDBFS": -20.236736297607422,
+      "first650msRMSDBFS": -24.41565704345703
+    }
+  },
+  "verificationScope": "Decoded PCM and signal analysis; no claim of human listening."
+}

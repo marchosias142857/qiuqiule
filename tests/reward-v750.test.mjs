@@ -10,9 +10,11 @@ function world(width = 900, height = 700) {
   Object.assign(w.player, {x: width * .3, y: height * .3});
   return w;
 }
-function bossReward({exhausted = false, gambler = false} = {}) {
+function bossReward({lateBuild = false, gambler = false} = {}) {
   const w = world(390, 844); w.stage = 5; w.gamblerRewardPending = gambler;
-  if (exhausted) for (const definition of UPGRADE_DEFINITIONS) w.buffs[definition.id] = definition.maxStacks;
+  if (lateBuild) for (const definition of UPGRADE_DEFINITIONS) {
+    w.buffs[definition.id] = Number.isFinite(definition.maxStacks) ? definition.maxStacks : 20;
+  }
   w.beginBoss(); w.step(BOSS_TIMING.entry); w.defeatBoss();
   w.step(.5); assert.equal(w.bossVictorySlowTime, 0);
   return w;
@@ -83,7 +85,7 @@ test('v7.5 repeated resize during movement or settling does not replay old place
       near(w.player.squash, mapped.squash, .001);
     }
     w.step(w.rewardTransitionEnd - w.phaseTime);
-    assert.equal(w.phase, 'choose'); assert.equal(w.choices.length, 5);
+    assert.equal(w.phase, 'choose'); assert.equal(w.choices.length, 3); assert.equal(w.upgradeRoundTotal, 2);
     near(w.player.x, w.width / 2); near(w.player.y, w.choicePlayerY);
   }
 });
@@ -129,32 +131,39 @@ test('v7.5 an opening reward still applies once, resets battle age and spawns th
   assert.equal(w.rewardSelectionsRemaining, 0);
 });
 
-test('v7.5 the shortened Boss hold retains the full fade and both reward rounds including gambler five', () => {
+test('v7.5 the shortened Boss hold retains the full fade before three separate wagered Boss rewards', () => {
   const w = bossReward({gambler: true});
   w.step(celebrationDuration - .001); assert.equal(w.phase, 'boss-celebrate');
   assert.equal(w.choices.length, 0); near(w.player.roll, Math.PI * 2);
   const stopped = {...w.player}; w.step(.001);
   assert.equal(w.phase, 'transition'); near(w.phaseTime, 0);
   near(w.player.x, stopped.x); near(w.player.y, stopped.y);
-  assert.equal(w.rewardSelectionsRemaining, 2); assert.equal(w.choices.length, 5);
+  assert.equal(w.rewardSelectionsRemaining, 3); assert.equal(w.choices.length, 3);
   w.step(1.2); w.choose(w.choices[0]); assert.equal(w.arenaBlend, 0);
   w.step(.6); assert.equal(w.stage, 5); assert.equal(w.phase, 'transition'); near(w.phaseTime, 0);
   assert.equal(w.choices.length, 3); near(w.arenaBlend, 0);
   w.step(1.2); w.choose(w.choices[0]); w.step(.6);
+  assert.equal(w.phase, 'transition'); assert.equal(w.stage, 5); assert.equal(w.rewardSelectionsRemaining, 1);
+  assert.equal(w.choices.length, 3); near(w.arenaBlend, 0);
+  w.step(1.2); w.choose(w.choices[0]); w.step(.6);
   assert.equal(w.phase, 'battle'); assert.equal(w.stage, 6);
-  assert.equal(w.events.filter(e => e.type === 'buff').length, 2);
+  assert.equal(w.events.filter(e => e.type === 'buff').length, 3);
   assert.equal(w.events.filter(e => e.type === 'stage').length, 1);
 });
 
-test('v7.5 exhausted Boss rewards restore the arena continuously and advance the stage only once', () => {
-  const w = bossReward({exhausted: true}); w.step(celebrationDuration);
-  assert.equal(w.phase, 'reward'); near(w.arenaBlend, 1); const before = w.arenaBounds;
+test('late Boss rewards restore the arena continuously and still offer two real upgrades', () => {
+  const w = bossReward({lateBuild: true}); w.step(celebrationDuration);
+  assert.equal(w.phase, 'transition'); near(w.arenaBlend, 1); const before = w.arenaBounds;
   w.step(1e-6); near(w.arenaBounds.top, before.top, .001);
   w.step(.3 - 1e-6); assert.ok(w.arenaBlend > 0 && w.arenaBlend < 1);
-  w.step(.3); assert.equal(w.phase, 'reward'); assert.equal(w.stage, 5); near(w.arenaBlend, 0);
-  w.step(.6); assert.equal(w.phase, 'battle'); assert.equal(w.stage, 6); near(w.arenaBlend, 0);
-  assert.equal(w.events.filter(e => e.type === 'upgradeSkipped').length, 2);
-  assert.equal(w.events.filter(e => e.type === 'buff').length, 0);
+  w.step(.9); assert.equal(w.phase, 'choose'); assert.equal(w.stage, 5); near(w.arenaBlend, 0);
+  assert.equal(w.choices.length, 3); assert.ok(w.choices.some(c => c.kind === 'regular'));
+  assert.ok(w.choose(w.choices[0])); w.step(.6);
+  assert.equal(w.phase, 'transition'); assert.equal(w.stage, 5); near(w.arenaBlend, 0);
+  w.step(1.2); assert.ok(w.choose(w.choices[0])); w.step(.6);
+  assert.equal(w.phase, 'battle'); assert.equal(w.stage, 6); near(w.arenaBlend, 0);
+  assert.equal(w.events.filter(e => e.type === 'upgradeSkipped').length, 0);
+  assert.equal(w.events.filter(e => e.type === 'buff').length, 2);
   assert.equal(w.events.filter(e => e.type === 'stage').length, 1);
 });
 
