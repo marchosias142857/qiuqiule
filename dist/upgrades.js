@@ -140,10 +140,11 @@ function weightedChoice(candidates, context, counts, random) {
   return candidates.at(-1);
 }
 
-export function rollUpgrades({counts = {}, context = {}, random = Math.random, count = 3, exclude = []} = {}) {
+export function rollUpgrades({counts = {}, context = {}, random = Math.random, count = 3, exclude = [], maxRisks = 2} = {}) {
   const size = Number.isFinite(count) ? Math.max(0, Math.min(5, Math.floor(count))) : 3;
   const eligible = eligibleUpgrades({counts, exclude}), selected = [], used = new Set();
-  const late = lateProgress(context);
+  const late = lateProgress(context), riskLimit = Number.isFinite(maxRisks) ? Math.max(0, Math.floor(maxRisks)) : 2;
+  let selectedRisks = 0;
   for (let index = 0; index < size && used.size < eligible.length; index++) {
     // Starting with stage 12, every slot can favor risk. There is no regular
     // guarantee; distinct IDs naturally limit each offer to two risk upgrades.
@@ -155,11 +156,15 @@ export function rollUpgrades({counts = {}, context = {}, random = Math.random, c
     const pools = [poolName, ...['regular', 'special', 'risk'].filter(pool => pool !== poolName)];
     let candidates = [];
     for (const pool of pools) {
+      // A cooling offer keeps the same category draws and item weights, but
+      // once its one risk is filled, later risk slots fall back to non-risk.
+      if (pool === 'risk' && selectedRisks >= riskLimit) continue;
       candidates = eligible.filter(entry => entry.pool === pool && !used.has(entry.id));
       if (candidates.length) break;
     }
     if (!candidates.length) break;
     const choice = weightedChoice(candidates, context, counts, random);
+    if (choice.kind === 'risk') selectedRisks++;
     used.add(choice.id); selected.push(upgradeOffer(choice, counts));
   }
   // Return only real, distinct, eligible upgrades. An empty array tells physics

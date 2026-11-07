@@ -1,6 +1,6 @@
 // Appearance ownership is independent of polygon shapes and collision bodies.
 export const APPEARANCE_STATE_VERSION = 1;
-export const BIG_EYE_UNLOCK_SCORE = 26767;
+export const BIG_EYE_UNLOCK_SCORE = 233333;
 export const BIG_EYE_DEFAULT_COLOR = '#b8db8a';
 export const ORIGINAL_PLAYER_COLOR = '#252720';
 const validColor = color => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color);

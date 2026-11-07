@@ -77,12 +77,30 @@ function randomSeed() {
 
 function randomFor(seed) {
   let state = seed >>> 0;
-  return () => {
+  const random = () => {
     state = (state + 0x6d2b79f5) >>> 0;
     let value = Math.imul(state ^ state >>> 15, 1 | state);
     value ^= value + Math.imul(value ^ value >>> 7, 61 | value);
     return ((value ^ value >>> 14) >>> 0) / 4294967296;
   };
+  // Read without drawing another number. Resuming a run must continue the
+  // shared spawn/upgrade stream at exactly its captured position.
+  Object.defineProperty(random, 'getState', {value: () => state});
+  return random;
+}
+
+export function captureEndlessRun(run) {
+  if (!run || !validDateKey(run.key) || !Number.isInteger(run.seed) || run.seed < 0 || run.seed > 0xffffffff
+    || typeof run.random?.getState !== 'function') throw new TypeError('Invalid resumable run');
+  const state = run.random.getState();
+  if (!Number.isInteger(state) || state < 0 || state > 0xffffffff) throw new TypeError('Invalid random state');
+  return {key: run.key, seed: run.seed, state};
+}
+
+export function restoreEndlessRun(saved) {
+  if (!saved || !validDateKey(saved.key) || ![saved.seed, saved.state].every(value =>
+    Number.isInteger(value) && value >= 0 && value <= 0xffffffff)) throw new TypeError('Invalid saved run');
+  return Object.freeze({key: saved.key, seed: saved.seed, random: randomFor(saved.state)});
 }
 
 export function createEndlessRun(date = new Date(), seed = randomSeed()) {

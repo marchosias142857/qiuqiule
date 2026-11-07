@@ -76,14 +76,14 @@ test('rapid navigation or selection during a fade cannot change the appearance o
   assert.equal(view.node('wardrobe-content').inert,false);assert.equal(view.node('wardrobe-content').style.opacity,'1');
 });
 
-test('appearance gallery has exactly three choices and enforces the 26767 score lock',t=>{
-  const initial={appearanceId:'original',best:26766};
+test('appearance gallery has exactly three choices and enforces the 233333 score lock',t=>{
+  const initial={appearanceId:'original',best:233332};
   const view=wardrobe(t,initial);view.open('appearance');
   assert.equal(view.node('appearance-grid').children.length,3);
   const big=view.node('appearance-option-big-eye');
-  assert.equal(big.getAttribute('aria-disabled'),'true');assert.match(big.getAttribute('aria-label'),/26767/);
-  big.fire('click');assert.equal(view.state().appearanceId,'original');assert.equal(view.errors.at(-1),'达26767分解锁');
-  view.setState({...initial,best:26767});big.fire('click');assert.equal(view.state().appearanceId,'big-eye');
+  assert.equal(big.getAttribute('aria-disabled'),'true');assert.match(big.getAttribute('aria-label'),/233333/);
+  big.fire('click');assert.equal(view.state().appearanceId,'original');assert.equal(view.errors.at(-1),'达233333分解锁');
+  view.setState({...initial,best:233333});big.fire('click');assert.equal(view.state().appearanceId,'big-eye');
   assert.equal(big.getAttribute('aria-pressed'),'true');assert.equal(big.querySelector('.wardrobe-card-lock').hidden,true);
   view.node('appearance-option-original').fire('click');assert.equal(view.state().appearanceId,'original');
   assert.equal(big.getAttribute('aria-pressed'),'false');

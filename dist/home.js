@@ -53,7 +53,7 @@ export class HomeWorld {
     this.phase='idle';this.phaseTime=0;this.contactAction=null;
     Object.assign(this.player,this.layout.player,{vx:0,vy:0,squash:0,roll:0});
   }
-  get maxPull(){return clamp(Math.min(this.width,this.height)*.25,90,170);}
+  get maxPull(){return .9*clamp(Math.min(this.width,this.height)*.25,90,170);}
   get ready(){return this.phase==='idle';}
   get fade(){return this.phase==='entering'?1-ease(this.phaseTime/1.1):this.phase==='done'?0:1;}
   get hudOpacity(){return this.phase==='entering'?ease((this.phaseTime-.15)/1.05):this.phase==='done'?1:0;}

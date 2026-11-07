@@ -35,7 +35,7 @@ for (const wager of [false, true]) {
     assert.equal(w.upgradeRoundTotal, rounds); assert.equal(w.gamblerRewardPending, false);
     for (let round = 0; round < rounds; round++) {
       legal(w); assert.equal(w.upgradeRound, round + 1); assert.equal(w.rewardSelectionsRemaining, rounds - round);
-      pick(w, 'frenzy'); assert.equal(w.buffs.frenzy, round + 1);
+      pick(w, 'energy'); assert.equal(w.buffs.energy, round + 1);
       assert.equal(w.stage, round === rounds - 1 ? 21 : 20);
     }
     assert.equal(w.phase, 'battle'); assert.equal(w.events.filter(e => e.type === 'buff').length, rounds);
@@ -50,7 +50,7 @@ for (const inheritedWager of [false, true]) for (const chooseLast of [false, tru
     const rounds = inheritedWager ? 3 : 2, wagerRound = chooseLast ? rounds - 1 : 0;
     for (let round = 0; round < rounds; round++) {
       legal(w); assert.equal(w.upgradeRoundTotal, rounds);
-      pick(w, round === wagerRound ? 'gambler' : 'frenzy');
+      pick(w, round === wagerRound ? 'gambler' : 'energy');
       if (round >= wagerRound && round < rounds - 1) {
         assert.equal(w.nextGambler, true); assert.equal(w.applyUpgrade('gambler'), false);
         assert.ok(w.choices.every(c => c.id !== 'gambler'));
@@ -60,16 +60,23 @@ for (const inheritedWager of [false, true]) for (const chooseLast of [false, tru
     assert.equal(w.gamblerTargetMultiplier, 1.5); assert.equal(w.gamblerRewardPending, true);
     w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 2); legal(w);
     pick(w, 'gambler'); assert.equal(w.buffs.gambler, 2); assert.equal(w.upgradeRoundTotal, 2); legal(w);
-    pick(w, 'frenzy'); assert.equal(w.stage, 22); assert.equal(w.gamblerRewardPending, true);
+    pick(w, 'energy'); assert.equal(w.stage, 22); assert.equal(w.gamblerRewardPending, true);
     w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 2); legal(w);
-    pick(w, 'frenzy'); legal(w); pick(w, 'frenzy');
+    pick(w, 'energy'); legal(w); pick(w, 'energy');
     assert.equal(w.stage, 23); assert.equal(w.gamblerTargetMultiplier, 1); assert.equal(w.gamblerRewardPending, false);
     w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 1); legal(w);
   });
 }
 
 test('ordinary rewards and consecutive Bosses retain legal alternatives while frenzy repeats without a cap', () => {
-  const w = world(); w.gamblerRewardPending = true; defeatBoss(w);
+  const w = world(), offer = w.offerUpgradeRound.bind(w);
+  // Keep this stacking regression focused on frenzy while the new cooldown
+  // legitimately removes the other risk from every second offer.
+  w.offerUpgradeRound = () => {
+    let draw = 0; w.random = () => draw++ % 2 === 0 ? 0 : .999;
+    return offer();
+  };
+  w.gamblerRewardPending = true; defeatBoss(w);
   for (let round = 0; round < 3; round++) { legal(w); pick(w, 'frenzy'); }
   w.beginUpgrade(); assert.equal(w.upgradeRoundTotal, 1); legal(w); pick(w, 'frenzy');
   defeatBoss(w, 25); assert.equal(w.upgradeRoundTotal, 2);

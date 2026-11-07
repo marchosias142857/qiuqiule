@@ -70,6 +70,7 @@ export class World {
     this.upgradeRound = 0;
     this.upgradeRoundTotal = 0;
     this.startingUpgrades = false;
+    this.riskOfferCooldown = false;
     this.bossVictorySlowTime = 0;
     this.score = 0;
     // Retained for the existing Boss reward bookkeeping and campaign clients;
@@ -305,7 +306,7 @@ export class World {
     return true;
   }
   cancelPull() { this.pullStartSpeed = null; }
-  get maxPull() { return clamp(Math.min(this.width, this.height) * .25, 90, 170); }
+  get maxPull() { return .9 * clamp(Math.min(this.width, this.height) * .25, 90, 170); }
   get baseSpeed() { return this.unit * 40; }
   // Endless weight changes collision mass without taking launch energy away.
   // Campaign rules retain their established mass/speed trade-off.
@@ -1149,8 +1150,11 @@ export class World {
       while (offers.length < 3 && pool.length) offers.push(pool.splice(Math.min(pool.length - 1, Math.floor(this.random() * pool.length)), 1)[0]);
     } else {
       offers = rollUpgrades({counts: this.buffs, context: this.upgradeContext, random: this.random, count: 3,
-        exclude: this.nextGambler ? ['gambler'] : []});
+        exclude: this.nextGambler ? ['gambler'] : [], maxRisks: this.riskOfferCooldown ? 1 : 2});
     }
+    // Advance only when a new offer is generated, including each Boss/wager
+    // round. Choosing, pausing and saving never consume the pending cooldown.
+    this.riskOfferCooldown = offers.filter(buff => buff.kind === 'risk').length > 1;
     this.choices = offers.map(buff => ({...upgradeOffer(buff, this.buffs), x: 0, y: 0, r: this.unit * 2, born: 0}));
     this.layoutChoices();
     if (!this.choices.length) { this.phase = 'reward'; this.phaseTime = 0; this.rewardArenaFrom = this.arenaBlend; this.emit('upgradeSkipped'); }

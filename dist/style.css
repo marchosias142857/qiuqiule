@@ -30,7 +30,7 @@
 .feedback-demo.demo-compact>:not(.demo-actions),.feedback-demo.demo-compact .demo-actions button{display:none}
 .feedback-demo.demo-compact .demo-actions{margin:0}
 .feedback-demo.demo-compact .demo-actions button[data-demo=all-demos]{display:block;height:40px;padding:8px 16px}
-.pause-button{width:40px;height:40px}
+.pause-button{width:40px;height:40px;margin-left:auto}
 .pause-button,.pause-button:hover,.pause-button:active,.pause-button:focus{background:transparent}
 .pause-button svg{width:18px;height:18px;stroke-width:2.5}
 .choice-label{position:absolute;text-align:center;width:180px;transform:translateX(-50%)}
@@ -85,18 +85,18 @@
 .settings-heading .ball-anchor{width:38px;height:38px}
 .settings-heading .close-button{align-self:center}
 #pause-panel{width:min(510px,calc(100vw - 40px));padding:34px;display:grid;grid-template-columns:1fr auto;align-items:center;gap:30px;box-shadow:none}
-#pause-ball{width:64px;height:64px;justify-self:center}
+#pause-ball{width:64px;height:64px;justify-self:center;position:relative;left:8px}
 .pause-actions{display:grid;grid-template-columns:repeat(2,68px);gap:20px}
 .function-ball{width:68px;height:68px;border-radius:50%;padding:0;display:grid;place-items:center}
 .function-ball svg{width:100%;height:100%}
 .function-ball:hover{transform:scale(1.06)}.function-ball:active{transform:scale(.93)}
-.resume-ball{background:var(--play-ball,#9b89c5)}.settings-ball{background:#a9c575}.restart-ball{background:#e88c72}.home-ball{background:#91b8c7}
-#pause-panel{animation:menu-fade .16s ease-out}
+.resume-ball{background:var(--play-ball,#9b89c5)}.settings-ball{background:#a9c575}.restart-ball{background:#e88c72}.home-ball{background:#91b8c7}.leave-ball{background:#e5c684}
+#pause-panel{animation:menu-fade .3s ease-out both}
 @keyframes menu-fade{from{opacity:0}to{opacity:1}}
 @media(max-width:420px){#pause-panel{padding:28px 22px;gap:19px}.pause-actions{grid-template-columns:repeat(2,58px);gap:17px}.function-ball{width:58px;height:58px}#pause-ball{width:55px;height:55px}.settings-heading .ball-anchor{width:34px;height:34px}.settings-heading{gap:8px}}
 @media(max-height:520px) and (orientation:landscape){#pause-panel{padding:24px 34px}.pause-actions{gap:15px}.settings-heading h2{font-size:21px}}
 
-/* The three result balls share the same live transfer layer as other menus. */
+/* Result controls fade with this panel on voluntary settlement; defeat keeps its transfers. */
 .modal-layer:has(#over-panel:not([hidden])){background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
 #over-panel{width:min(610px,calc(100vw - 40px));padding:35px 38px 38px;overflow:visible;background:transparent;border:0;box-shadow:none;animation:menu-fade .3s ease-out}
 #over-panel .result-score{text-align:center;gap:11px;padding:0 0 62px}
@@ -120,6 +120,7 @@
 
 /* Both menus share a fixed banner; only the body scrolls. */
 #settings-panel,#help-panel,#menu-transition-panel{width:460px;max-width:calc(100vw - 40px);height:min(var(--menu-height,695px),calc(100dvh - 40px));display:flex;flex-direction:column;overflow:hidden;animation:none;opacity:1;background:var(--panel);padding-bottom:16px}
+#settings-panel.panel-fade-in{animation:menu-fade .3s ease-out both}
 .menu-panel .settings-heading{flex:0 0 auto;min-height:55px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--line)}
 .menu-panel .settings-heading h2{font-size:clamp(16px,4.5vw,22px);white-space:nowrap}
 .menu-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding:4px 6px 6px;margin:0 -6px}
@@ -207,7 +208,7 @@ h3,strong,b{font-weight:400}
 .pause-player-row{display:flex;align-items:center;justify-content:center;justify-self:center;gap:14px;min-width:0}
 .pause-player-row #pause-ball{flex-shrink:0}
 .upgrades-ball{width:52px;height:52px;flex-shrink:0;background:#a9bd8e}
-#run-upgrades-panel{width:min(460px,calc(100vw - 40px));height:min(660px,calc(100dvh - 56px));padding:26px 26px 0;overflow:hidden;display:flex;flex-direction:column;animation:menu-fade .18s ease-out}
+#run-upgrades-panel{width:min(460px,calc(100vw - 40px));height:min(660px,calc(100dvh - 56px));padding:26px 26px 0;overflow:hidden;display:flex;flex-direction:column;animation:menu-fade .3s ease-out both}
 .run-upgrades-heading{display:flex;align-items:center;gap:12px;flex-shrink:0;padding-bottom:22px;border-bottom:1px solid var(--line)}
 .run-upgrades-heading .ball-anchor{width:42px;height:42px}
 #run-upgrades-panel h2{font-size:22px;line-height:1.4;letter-spacing:-.6px;margin:0;flex:1}

@@ -1,12 +1,12 @@
 {
   "name": "qiuqiule",
-  "version": "10.0.5",
+  "version": "11.0.0",
   "private": true,
   "type": "module",
   "description": "\u7403\u7403\u4e86 \u2014 a tactile slingshot physics game",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/game.js && node --check dist/physics.js && node --check dist/home.js && node --check dist/icons.js && node --check dist/motion.js && node --check dist/audio.js && node --check dist/music-player.js && node --check dist/offline.js && node --check dist/display.js && node --check dist/sw.js && node --check dist/boss-visuals.js && node --check dist/skins.js && node --check dist/skin-render.js && node --check dist/wardrobe.js && node --check dist/skin-unlock.js && node --check dist/photo-renderer.js && node --check dist/feedback.js && node --check dist/aim.js && node --check dist/rhythm-feedback.js && node --check dist/enemies.js && node --check dist/enemy-render.js && node --check dist/upgrades.js && node --check dist/upgrade-render.js && node --check dist/shockwave-render.js && node --check dist/run-upgrades.js && node --check dist/stage-hud.js && node --check dist/endless-progress.js && node --check dist/aim-metrics.js && node --check dist/comet-trail.js && node --check dist/border-bulge.js && node --check dist/appearances.js && node --check dist/big-eye.js && node --check dist/companions.js",
+    "check": "node --check dist/game.js && node --check dist/physics.js && node --check dist/home.js && node --check dist/icons.js && node --check dist/motion.js && node --check dist/audio.js && node --check dist/music-player.js && node --check dist/offline.js && node --check dist/display.js && node --check dist/sw.js && node --check dist/boss-visuals.js && node --check dist/skins.js && node --check dist/skin-render.js && node --check dist/wardrobe.js && node --check dist/skin-unlock.js && node --check dist/photo-renderer.js && node --check dist/feedback.js && node --check dist/aim.js && node --check dist/rhythm-feedback.js && node --check dist/enemies.js && node --check dist/enemy-render.js && node --check dist/upgrades.js && node --check dist/upgrade-render.js && node --check dist/shockwave-render.js && node --check dist/run-upgrades.js && node --check dist/stage-hud.js && node --check dist/endless-progress.js && node --check dist/aim-metrics.js && node --check dist/comet-trail.js && node --check dist/border-bulge.js && node --check dist/appearances.js && node --check dist/big-eye.js && node --check dist/companions.js && node --check dist/run-save.js && node --check dist/run-choice.js",
     "sync:engine": "node scripts/sync-engine.mjs",
     "native:sync": "cap sync",
     "native:android": "cap add android",

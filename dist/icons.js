@@ -13,6 +13,15 @@ export function iconGeometry(type,muted=false){
   const key=type+muted;if(geometries.has(key))return geometries.get(key);
   const fills=[],strokes=[];let width=.075;
   if(type==='play')fills.push(rounded([[.54,0],[-.36,.522],[-.36,-.522]],.24));
+  if(type==='continue'){
+    // Two filled forward triangles share the same softened tips as play.
+    for(const x of [-.28,.28])fills.push(rounded([[x+.25,0],[x-.25,.40],[x-.25,-.40]],.20));
+  }
+  if(type==='leave'){
+    // A rounded rightwards arrow ending at a separate vertical bar: ⇥.
+    width=.085;
+    strokes.push([[-.48,0],[.19,0]],[[-.06,-.24],[.19,0],[-.06,.24]],[[.43,-.42],[.43,.42]]);
+  }
   if(type==='sound'){
     fills.push(rounded([[-.44,-.17],[-.22,-.17],[.04,-.39],[.04,.39],[-.22,.17],[-.44,.17]],.17));
     strokes.push(arc(.02,0,.23,-.8,.8),arc(.02,0,.43,-.8,.8));

@@ -8,7 +8,7 @@ const source=await readFile(new URL('sw.js',root),'utf8');
 const musicFiles=['audio/endless.mp3','audio/boss.mp3'];
 const authoredModules=['run-upgrades.js','stage-hud.js','companions.js','skin-unlock.js'];
 
-function worker({failed=[],wrongType=[],partial=[],base='/'}={}){
+function worker({failed=[],wrongType=[],partial=[],redirects={},base='/'}={}){
   const handlers={},stores=new Map(),messages=[],requests=[];
   const failures=new Set(failed),wrong=new Set(wrongType);let offline=false,claimed=false,skipped=false;
   const key=url=>typeof url==='string'?url:url.url;
@@ -24,6 +24,15 @@ function worker({failed=[],wrongType=[],partial=[],base='/'}={}){
   const fetch=async(url,options)=>{
     const parsed=new URL(key(url));requests.push({path:parsed.pathname,options});
     if(offline||failures.has(parsed.pathname))throw new Error('network unavailable');
+    if(redirects[parsed.pathname]){
+      // Real hosting canonicalizes index.html and redirects unauthenticated assets.
+      // Fetch with redirect:error rejects before exposing either redirect response.
+      if(options?.redirect==='error')throw new TypeError('Redirect disallowed');
+      const response=new Response('<html>redirect destination</html>',{headers:{'content-type':'text/html'}});
+      Object.defineProperty(response,'redirected',{value:true});
+      Object.defineProperty(response,'url',{value:new URL(redirects[parsed.pathname],parsed).href});
+      return response;
+    }
     if(partial.includes(parsed.pathname))return new Response('short slice',{status:206,headers:{'content-range':'bytes 100-110/1000','content-type':'audio/mpeg'}});
     if(wrong.has(parsed.pathname))return new Response('<html>Please sign in</html>',{headers:{'content-type':'text/html'}});
     const relative=parsed.pathname.slice(base.length);
@@ -58,6 +67,33 @@ test('core and warmed extras serve from cache with the network unavailable',asyn
   const state=await w.status();assert.equal(state.ready,true);assert.equal(state.musicReady,true);
   assert.deepEqual(w.requests.filter(({path})=>path.endsWith('.mp3')).map(({path})=>path).sort(),musicFiles.map(file=>'/'+file).sort());
   assert.ok(w.requests.every(request=>request.options.credentials==='same-origin'&&request.options.redirect==='error'));
+});
+for(const base of ['/','/qiuqiule/']){
+  test(`canonical index redirect at ${base} does not block installation or offline entry`,async()=>{
+    const index=base+'index.html';
+    const w=worker({base,redirects:{[index]:base}});
+    await w.event('install');await w.event('activate');
+    assert.equal(w.skipped,true);assert.equal(w.claimed,true);
+    assert.equal((await w.status()).ready,true);
+    assert.equal(w.requests.some(request=>request.path===index),false,'only the canonical game shell needs downloading');
+    const requestCount=w.requests.length;w.setOffline();
+    for(const path of [base,index,base+'?from=homescreen',index+'?from=homescreen']){
+      const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example'+path,mode:'navigate'}});
+      assert.match(await response.text(),/id="game"/);
+    }
+    assert.equal(w.requests.length,requestCount,'both entry aliases are entirely local');
+  });
+}
+test('authentication redirects still reject installation and preserve the prior offline game',async()=>{
+  for(const path of ['/','/game.js']){
+    const w=worker({redirects:{[path]:'/signin-with-chatgpt'}});
+    w.stores.set('qiuqiule-%2F-v10.0.5',new Map([['https://game.example/',new Response('previous working game')]]));
+    await assert.rejects(w.event('install'),/Core cache incomplete/);
+    assert.equal(w.skipped,false);assert.equal(w.claimed,false);assert.equal(w.stores.size,1);
+    assert.equal(await w.stores.get('qiuqiule-%2F-v10.0.5').get('https://game.example/').text(),'previous working game');
+    const attempts=w.requests.filter(request=>request.path===path);
+    assert.equal(attempts.length,2);assert.ok(attempts.every(request=>request.options.redirect==='error'));
+  }
 });
 test('missing a required music player or progression module keeps the previous complete offline version',async()=>{
   for(const module of ['music-player.js',...authoredModules,'physics.js']){

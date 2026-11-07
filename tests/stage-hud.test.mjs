@@ -66,7 +66,7 @@ function realHud() {
   const functions = source.slice(source.indexOf('function setHudText('), source.indexOf('\nfunction polygon('));
   const build = new Function('StageHud', 'nodes', `
     const $=id=>nodes[id],document={createElement:()=>({className:'',setAttribute(){}})};
-    let world=null,scene=null,feedbackDemo=true,runNewRecord=false,runBest=0,recordCue=0,recordPulse=0,reducedMotion=true,lastScore=-1;
+    let world=null,scene=null,feedbackDemo=true,runNewRecord=false,runBest=0,recordCue=0,recordPulse=0,reducedMotion=true,lastScore=-1,scoreRevealTime=1.2;
     const settings={juice:0},pad=value=>String(Math.floor(value)).padStart(4,'0'),clamp=(n,a,b)=>Math.max(a,Math.min(b,n)),smooth=n=>n;
     const grantEndlessAppearance=()=>{},grantEndlessCompanions=()=>{},tone=()=>{},saveEndlessProgress=()=>{},updateChoices=()=>{};
     const scoreFeedback={set(){},step(){return {value:world.score,scale:1}}};

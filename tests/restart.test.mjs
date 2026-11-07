@@ -39,7 +39,7 @@ globalThis.window={innerWidth:390,innerHeight:844,devicePixelRatio:2,
   removeEventListener(type,fn){windowListeners.set(type,(windowListeners.get(type)||[]).filter(handler=>handler!==fn));}};
 // Reuse the window-listener fixture so fresh game instances also isolate navigation handlers.
 window.navigation={addEventListener:(type,fn)=>window.addEventListener('navigation:'+type,fn)};
-globalThis.localStorage={getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(k,v)};
+globalThis.localStorage={getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(k,v),removeItem:k=>saved.delete(k)};
 globalThis.Phaser={AUTO:0,Scale:{NONE:0},Scene:class{constructor(){this.cameras={main:{setBackgroundColor(){}}};}},Game:class{constructor(config){this.scene=new config.scene();}}};
 window.Phaser=globalThis.Phaser;
 globalThis.matchMedia=()=>({matches:false});
@@ -59,7 +59,7 @@ const adapter=`
 export function seedRestart(origin){
   aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
   endlessProgress=normalizeEndless(null,best);runDay=createEndlessRun('2030-01-01');runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';
-  world=new World(viewport.width,viewport.height);
+  world=new World(viewport.width,viewport.height,runDay.random);
   Object.assign(world,{stage:16,time:180,score:7650,stageKills:32,density:3,energy:4,breathTime:1,bank:2,pullStartSpeed:5});
   world.buffs={growth:2,energy:4,density:3,breath:1};world.player.r*=1.4;
   world.enemies.forEach(b=>{b.born=1;b.solid=true;});world.phase=origin==='over'?'over':'battle';
@@ -73,7 +73,11 @@ export function seedRestart(origin){
 export const advanceUi=updateUiBall;
 export const sourcePose=currentPlayerPose;
 export function readRestart(){return {world,scene,screen,modal,paused,result,transfer,controlFlight,uiAnchor,releaseOverlay,pauseOnArrival,drag,choicePress};}
-export function seedRenderer(graphics,width=390,height=844,arena=false){
+export function seedRenderer(graphics,width=390,height=844,arena=false,keepSave=false){
+  if(!keepSave&&typeof runSaveStore!=='undefined')runSaveStore.remove();
+  if(typeof pendingRunSnapshot!=='undefined')pendingRunSnapshot=null;
+  if(typeof restoredView!=='undefined')restoredView=null;
+  if(typeof resumeSlowRemaining!=='undefined')resumeSlowRemaining=0;
   companionState=normalizeCompanionState({unlocked:9});companionTween=null;companionOverride=null;companionClock=0;resetCompanionTrails();
   clearChoicePress();aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
   $('#feedback-demo').testViewport={width,height};
@@ -82,7 +86,7 @@ export function seedRenderer(graphics,width=390,height=844,arena=false){
   endlessProgress=normalizeEndless(null,best);runDay=createEndlessRun('2030-01-01');runBest=Number.MAX_SAFE_INTEGER;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';feedbackDemo=false;
   menuTransition=null;
   viewport=displayMetrics(width,height,1);home=new HomeWorld(width,height);
-  world=arena?new World(width,height):null;screen=arena?'play':'home';
+  world=arena?new World(width,height,runDay.random):null;screen=arena?'play':'home';
   modal=null;paused=false;transfer=null;controlFlight=null;uiAnchor=null;result=null;drag=null;releaseOverlay=0;pauseOnArrival=false;homeReveal=1;
   settings.expressions=false;boot();scene=game.scene;scene.g=graphics;scene.testLabels=[];
   scene.add={text(x,y,text,style){
@@ -216,6 +220,20 @@ export function recordCompanionDraws(){
 
 
 export const startWithFont=bootWithFont;
+export const saveRunForTest=()=>saveCurrentRun();
+export const leaveRunForTest=()=>leaveGame();
+export const continueRunForTest=()=>continueSavedRun();
+export const chooseRunForTest=id=>chooseRun(id);
+export const showRunChoiceForTest=()=>showRunChoice();
+export const savedRunForTest=()=>runSaveStore.read();
+export const decodedRunForTest=()=>restoreRunSnapshot(runSaveStore.read());
+export const removeRunForTest=()=>runSaveStore.remove();
+export const resumeSecondsForTest=()=>resumeSlowRemaining;
+export function seedRunMetadataForTest(){
+  runBest=2400;runNewRecord=true;recordPulse=.21;recordCue=.16;recordedStatsKey='saved-stats-key';runAimHoldDuration=.9;
+}
+export const readRunMetadataForTest=()=>({runBest,runNewRecord,recordPulse,recordCue,recordedStatsKey,runAimHoldDuration});
+
 `;
 const app=await import('data:text/javascript;base64,'+Buffer.from(source+adapter).toString('base64'));
 
@@ -3645,14 +3663,14 @@ test('the final Boss collision sprays proportionally more enemy shards from its 
     advanceScene(scene,.65);assert.equal(scene.effects.filter(effect=>effect.type==='shard').length,0,'victory slow motion does not retain particles indefinitely');
   }
 });
-test('endless appearance unlocks at 26767 without interrupting battle or Boss and ignores demo scores',t=>{
+test('endless appearance unlocks at 233333 without interrupting battle or Boss and ignores demo scores',t=>{
   const prior=saved.get('qiuqiule-appearance-state');
   t.after(()=>{app.seedCircle();if(prior===undefined)saved.delete('qiuqiule-appearance-state');else saved.set('qiuqiule-appearance-state',prior);});
   for(const phase of ['battle','boss']){
     const {world}=controlRun();app.seedEndless();app.seedCircle();app.seedAppearanceState();
     if(phase==='boss'){world.stage=5;world.beginBoss();world.phase='boss';world.events=[];}
-    world.score=26766;app.updateScoreHud();assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false);
-    world.score=26767;app.updateScoreHud();
+    world.score=233332;app.updateScoreHud();assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false);
+    world.score=233333;app.updateScoreHud();
     const state=app.readAppearancePresentation().state;
     assert.equal(state.bigEyeUnlocked,true);assert.equal(state.pendingUnlock,true);assert.equal(state.selected,'original');
     assert.equal(app.readRestart().paused,false);assert.equal(app.readRestart().modal,null);assert.equal(world.phase,phase);
@@ -3661,7 +3679,7 @@ test('endless appearance unlocks at 26767 without interrupting battle or Boss an
     app.updateScoreHud();assert.deepEqual(app.readAppearancePresentation().state,state,'repeated HUD frames cannot re-award or auto-equip');
   }
   app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedAppearanceState();app.runFeedbackDemo('steer');
-  app.readRestart().world.score=99999;app.updateScoreHud();app.grantAppearanceForTest();
+  app.readRestart().world.score=999999;app.updateScoreHud();app.grantAppearanceForTest();
   assert.equal(app.readAppearancePresentation().state.bigEyeUnlocked,false,'trial scenes do not alter ownership');
 });
 
@@ -3670,7 +3688,7 @@ test('v7.9 endless appearance reward uses the animated unlock route and returns 
   app.seedAppearanceState();
   const original=app.readPlayerShape().playerContour,ink=app.playerInk();
   t.after(()=>{app.seedCircle();app.setPlayerInk('#252720');});
-  world.score=26767;app.updateScoreHud();world.phase='over';app.showResultForTest();
+  world.score=233333;app.updateScoreHud();world.phase='over';app.showResultForTest();
   let state=app.readRestart(),reward=app.readPlayerShape().skinUnlock;
   assert.equal(state.modal,'skin-unlock');assert.equal(state.paused,true);assert.equal(state.result,null);
   assert.deepEqual(reward.queue,[{kind:'appearance',id:'big-eye'}]);assert.equal(reward.ready,false);
@@ -3691,7 +3709,7 @@ test('v7.9 endless appearance reward uses the animated unlock route and returns 
   assert.equal(app.readRestart().uiAnchor,'over');assertSameContour(app.readPlayerShape().active,original);
   assert.ok(app.readAppearancePresentation().layers.every(layer=>layer.id==='original'));
   const earned={...app.readAppearancePresentation().state};
-  const next=controlRun().world;app.seedAppearanceState(earned);next.score=30000;next.phase='over';app.showResultForTest();
+  const next=controlRun().world;app.seedAppearanceState(earned);next.score=300000;next.phase='over';app.showResultForTest();
   assert.equal(app.readPlayerShape().skinUnlock,null,'later qualifying runs never replay an acknowledged unlock');
   assert.ok(app.readRestart().result);
 });
@@ -3701,7 +3719,7 @@ test('a queued appearance and three stage companions require one ready acknowled
   app.seedCompanions({unlocked:1,selected:'sun-1'});
   const photo=app.recordCompositePhotos(true),image=app.readAppearance().appearance,originalInk=app.playerInk();
   t.after(()=>{photo.restore();app.seedCircle();document.hidden=false;saved.clear();for(const [key,value]of stored)saved.set(key,value);});
-  Object.assign(world,{score:26767,stage:20,maxStage:20});app.updateScoreHud();
+  Object.assign(world,{score:233333,stage:20,maxStage:20});app.updateScoreHud();
   assert.equal(app.readRestart().modal,null);assert.deepEqual(app.readCompanions().state.pendingUnlocks,['moon-1','star-1','sun-2']);
   world.phase='over';app.showResultForTest();
   const reward=app.readPlayerShape().skinUnlock,queue=[{kind:'appearance',id:'big-eye'},...['moon-1','star-1','sun-2'].map(id=>({kind:'companion',id}))];
@@ -4418,4 +4436,261 @@ test('run inventory refreshes its acquired entries and empty state without dupli
   element('#run-upgrades-body').scrollTop=200;clickAction('close');app.advanceUi(.42);clickAction('run-upgrades');app.advanceUi(.42);
   assert.equal(element('#run-upgrades-list').children.length,2);assert.equal(element('#run-upgrades-body').scrollTop,0);
   assert.equal(app.readRestart().world,world);assert.equal(app.readRestart().paused,true);
+});
+
+const RUN_SAVE_KEY='qiuqiule-run-save';
+function runSimulationState(world){const {random,...state}=world;return structuredClone(state);}
+function persistenceRun(module=app){
+  const run=feedbackRun(module,.6),{world,scene}=run;
+  Object.assign(world,{stage:23,maxStage:23,score:8765,stageKills:11,stageKillCarry:2,saveUsed:true,overTimer:.27,breathTime:.4,pulseCooldown:.18});
+  world.buffs={energy:4,density:2,frenzy:2,penetration:1};
+  Object.assign(world.player,{x:91.25,y:267.5,vx:27.125,vy:-31.75,feedbackFreeze:.017,pendingVx:1.25,pendingVy:-.75});
+  world.enemies.forEach((body,index)=>Object.assign(body,{born:1,solid:true,hp:31+index,maxHp:94+index,vx:index*.3,vy:-index*.4}));
+  world.events=[];scene.accumulator=.003;scene.timeSlices=[{world:.003,scale:1}];
+  module.seedRunMetadataForTest();return run;
+}
+function finishPausedTransfer(module=app){module.advanceUi(.7);}
+function finishResumeTransfer(module=app){if(module.readRestart().transfer)module.advanceUi(.7);}
+function latestAction(action){listeners.get('click').at(-1)({target:{closest:()=>({dataset:{action}})},detail:1});}
+
+test('v10.1 pause swaps settlement and rounded leave controls without retaining a pause restart action',async()=>{
+  const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
+  const pause=html.slice(html.indexOf('id="pause-panel"'),html.indexOf('</section>',html.indexOf('id="pause-panel"')));
+  assert.doesNotMatch(pause,/data-action="restart"/);
+  assert.ok(pause.indexOf('data-action="home"')<pause.indexOf('data-action="leave"'));
+  assert.match(pause,/data-icon="leave"/);assert.match(pause,/暂离/);assert.match(pause,/结算/);
+});
+
+test('v10.1 a fresh home and an already settled run never produce a resumable save',()=>{
+  app.seedRenderer(graphicsRecorder());assert.equal(app.savedRunForTest(),null);
+  assert.equal(app.saveRunForTest(),false);assert.equal(saved.has(RUN_SAVE_KEY),false);
+  const {world}=persistenceRun();world.phase='over';
+  assert.equal(app.saveRunForTest(),false);assert.equal(saved.has(RUN_SAVE_KEY),false);
+});
+
+test('v10.1 pause saves the complete current run and ordinary resume consumes that checkpoint',()=>{
+  const {world}=persistenceRun();clickAction('pause');
+  assert.ok(saved.has(RUN_SAVE_KEY));assert.ok(app.savedRunForTest());
+  const before=runSimulationState(world);finishPausedTransfer();clickAction('resume');
+  assert.equal(saved.has(RUN_SAVE_KEY),false);assert.equal(app.savedRunForTest(),null);
+  finishResumeTransfer();assert.equal(app.readRestart().paused,false);
+  assert.deepEqual(runSimulationState(world),before);
+  world.player.x+=13;clickAction('pause');assert.ok(saved.has(RUN_SAVE_KEY),'a later pause writes a new checkpoint');
+});
+
+test('v10.1 every interruption route saves before leaving, including while a pause transfer is unfinished',()=>{
+  for(const kind of ['blur','pagehide','visibilitychange']){
+    const {world}=persistenceRun();
+    if(kind==='visibilitychange'){document.hidden=true;listeners.get(kind).forEach(fn=>fn());document.hidden=false;}
+    else windowListeners.get(kind).forEach(fn=>fn());
+    assert.ok(saved.has(RUN_SAVE_KEY),kind);assert.ok(app.savedRunForTest(),kind);assert.equal(app.readRestart().paused,true,kind);
+    const before=runSimulationState(world);
+    windowListeners.get('pagehide').forEach(fn=>fn());
+    assert.ok(app.savedRunForTest(),'pagehide retains a checkpoint even with its pause flight/modal active');
+    assert.deepEqual(runSimulationState(world),before);
+  }
+});
+
+test('v10.1 leaving preserves the paused run and returns home without settlement or a new game',()=>{
+  const {world}=persistenceRun();clickAction('pause');finishPausedTransfer();
+  const before=runSimulationState(world);clickAction('leave');
+  assert.ok(saved.has(RUN_SAVE_KEY));assert.equal(app.readRestart().screen,'home');assert.equal(app.readRestart().result,null);
+  assert.deepEqual(runSimulationState(world),before);assert.notEqual(world.phase,'over');
+  app.advanceUi(.7);assert.equal(app.readRestart().world,null);
+});
+
+test('v10.1 starting with a save enters the two-ball choice without overwriting the old world',()=>{
+  const {world}=persistenceRun();clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);
+  const stored=saved.get(RUN_SAVE_KEY),original=runSimulationState(world);
+  const home=app.readHome(),scene=app.readRestart().scene;home.launchToPlay();advanceScene(scene,3);
+  const choice=app.readRestart().world;
+  assert.equal(choice.isRunChoice,true);assert.deepEqual(choice.choices.map(c=>c.id),['new-run','continue-run']);
+  assert.deepEqual(choice.choices.map(c=>c.name),['新的一局','继续上局']);
+  assert.equal(saved.get(RUN_SAVE_KEY),stored);assert.deepEqual(runSimulationState(world),original);
+  document.hidden=true;listeners.get('visibilitychange').forEach(fn=>fn());document.hidden=false;
+  windowListeners.get('pagehide').forEach(fn=>fn());
+  assert.equal(saved.get(RUN_SAVE_KEY),stored,'a temporary choice scene never replaces the real run');
+});
+
+test('v10.1 choosing a new run discards the old checkpoint and begins exactly one starting reward round',()=>{
+  persistenceRun();clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);
+  app.showRunChoiceForTest();
+  const {world:menu,scene}=app.readRestart();advanceScene(scene,1.3);
+  const choice=menu.choices.find(item=>item.id==='new-run');
+  Object.assign(menu.player,{x:choice.x-choice.r-menu.player.r+.1,y:choice.y,vx:menu.baseSpeed,vy:0});
+  advanceScene(scene,.5);
+  const {world}=app.readRestart();assert.notEqual(world.isRunChoice,true);assert.equal(saved.has(RUN_SAVE_KEY),false);
+  assert.equal(world.stage,1);assert.equal(world.score,0);assert.equal(world.startingUpgrades,true);
+  assert.equal(world.rewardSelectionsRemaining,1);assert.deepEqual(world.buffs,{});assert.equal(world.choices.length,3);
+});
+
+test('v10.1 continue restores exact simulation state, run metadata and substep time before physics resumes',()=>{
+  const {world,scene}=persistenceRun();
+  const mother=world.enemies[0];Object.assign(mother,{enemyType:'split',splitFamilyId:mother.id,hp:0});
+  world.enemyDeath(mother);world.enemies=world.enemies.filter(body=>body.hp>0);world.events=[];
+  assert.equal(world.fragmentQueue.length,3,'exercise the real mother split queue schema');
+  const shot={time:world.feedbackTime,hits:2};world.activeShot=shot;world.shotHistory=[shot];
+  world.seenEnemyKills=new Set(['split','ring','magnet']);
+  clickAction('pause');const before=runSimulationState(world),metadata=app.readRunMetadataForTest();finishPausedTransfer();
+  clickAction('leave');app.advanceUi(.7);const nextRandom=Array.from({length:16},()=>world.random());
+  assert.equal(app.continueRunForTest(),true);
+  const restored=app.readRestart().world;
+  assert.notEqual(restored,world);assert.deepEqual(runSimulationState(restored),before);
+  assert.equal(restored.activeShot,restored.shotHistory[0]);assert.ok(restored.seenEnemyKills instanceof Set);
+  assert.deepEqual(Array.from({length:16},()=>restored.random()),nextRandom,'future random draws continue at the captured state');
+  const afterMetadata=app.readRunMetadataForTest();
+  assert.deepEqual({...afterMetadata,recordedStatsKey:metadata.recordedStatsKey},metadata);
+  assert.equal(afterMetadata.recordedStatsKey,[before.score,before.maxStage,before.maxCombo,'2030-01-01'].join(':'));
+  finishResumeTransfer();near(scene.accumulator,.003);assert.deepEqual(scene.timeSlices,[{world:.003,scale:1}]);
+  assert.equal(saved.has(RUN_SAVE_KEY),false);near(app.resumeSecondsForTest(),1);near(scene.timeScale,.3);
+});
+
+test('v10.1 a fresh page can discover the checkpoint and restore Boss state without rerolling or awarding rewards',async()=>{
+  const {world}=persistenceRun();world.stage=world.maxStage=10;world.beginBoss();world.phase='boss';world.arenaBlend=1;
+  world.boss.born=1;world.boss.stunned=true;world.boss.stunnedHp=123.5;world.boss.stunnedTime=.45;world.boss.contacts=new Set([world.player.id]);world.events=[];
+  clickAction('pause');const before=runSimulationState(world);assert.ok(app.savedRunForTest(),'Boss pause creates a valid checkpoint');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);
+  assert.ok(app.savedRunForTest(),'Boss checkpoint survives leaving');
+  await withReloadedEntry(null,false,async fresh=>{
+    await fresh.startWithFont();const scene=fresh.mountInitialScene({style:{},addEventListener(){}},graphicsRecorder()).scene;
+    assert.ok(fresh.savedRunForTest());fresh.showRunChoiceForTest();assert.equal(fresh.readRestart().world.isRunChoice,true);
+    assert.equal(fresh.continueRunForTest(),true);assert.deepEqual(runSimulationState(fresh.readRestart().world),before);
+    const restored=fresh.readRestart().world;assert.equal(restored.boss.contacts.has(restored.player.id),true);
+    finishResumeTransfer(fresh);assert.equal(restored.phase,'boss');assert.equal(restored.score,before.score);
+    assert.ok(scene);assert.equal(saved.has(RUN_SAVE_KEY),false);
+  });
+});
+
+test('v10.1 restored entry slow motion lasts one active second and pauses its allowance with the game',()=>{
+  persistenceRun();clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);app.continueRunForTest();finishResumeTransfer();
+  const {scene,world}=app.readRestart();world.enemies=[];world.fragmentQueue=[];world.player.vx=world.player.vy=0;
+  advanceScene(scene,.45);near(scene.timeScale,.3);near(app.resumeSecondsForTest(),.55);
+  clickAction('pause');advanceScene(scene,2);near(app.resumeSecondsForTest(),.55);
+  finishPausedTransfer();clickAction('resume');finishResumeTransfer();advanceScene(scene,.54);near(scene.timeScale,.3);
+  advanceScene(scene,.02);near(app.resumeSecondsForTest(),0);near(scene.timeScale,1);
+});
+
+test('v10.1 an actual pull seamlessly takes over entry slow motion while a quick tap leaves it intact',()=>{
+  persistenceRun();clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);app.continueRunForTest();finishResumeTransfer();
+  const {scene,world}=app.readRestart(),pointer=inputCanvas(),p=world.player;world.enemies=[];world.fragmentQueue=[];p.vx=p.vy=0;
+  pointer('pointerdown',p.x,p.y);advanceScene(scene,.05);pointer('pointerup',p.x,p.y);scene.update(0,0);
+  assert.ok(app.resumeSecondsForTest()>.9);near(scene.timeScale,.3);
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+20,p.y);scene.update(0,0);
+  near(app.resumeSecondsForTest(),0);near(scene.timeScale,.3);assert.equal(app.readRestart().drag.pending,false);
+  advanceScene(scene,.3);near(scene.timeScale,.3,'gesture keeps its own independent slow-time budget');
+  pointer('pointercancel');scene.update(0,0);near(scene.timeScale,1);
+});
+
+test('v10.1 reduced-motion restoration uses the same 0.6 scale as reduced-motion aiming',async()=>{
+  persistenceRun();clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);
+  await withReloadedEntry(null,true,async fresh=>{
+    await fresh.startWithFont();const {scene}=fresh.mountInitialScene({style:{},addEventListener(){}},graphicsRecorder());
+    fresh.continueRunForTest();finishResumeTransfer(fresh);near(scene.timeScale,.6);
+    advanceScene(scene,.5);near(scene.timeScale,.6);
+  });
+});
+
+test('v10.1 settlement and actual failure remove the checkpoint and interruptions cannot resurrect it',()=>{
+  for(const reason of ['settlement','failure']){
+    const {world,scene}=persistenceRun();clickAction('pause');finishPausedTransfer();assert.ok(saved.has(RUN_SAVE_KEY));
+    if(reason==='settlement')clickAction('home');
+    else {clickAction('resume');finishResumeTransfer();world.phase='over';world.emit('over');scene.handleEvents();}
+    assert.equal(saved.has(RUN_SAVE_KEY),false,reason);
+    windowListeners.get('pagehide').forEach(fn=>fn());assert.equal(saved.has(RUN_SAVE_KEY),false,reason);
+  }
+});
+
+test('v10.1 failed checkpoint writes keep the player in the current paused run',t=>{
+  const {world}=persistenceRun();const original=localStorage.setItem;
+  t.mock.method(localStorage,'setItem',function(key,value){if(key===RUN_SAVE_KEY)throw Error('Quota exceeded');return original.call(this,key,value);});
+  clickAction('pause');finishPausedTransfer();clickAction('leave');
+  assert.equal(app.readRestart().screen,'play');assert.equal(app.readRestart().modal,'pause');assert.equal(app.readRestart().world,world);
+  assert.equal(app.readRestart().paused,true);assert.equal(saved.has(RUN_SAVE_KEY),false);
+  assert.match(element('#toast').textContent,/保存|存储/);
+});
+
+
+test('v10.1 restored clearing keeps entry slow motion through its first simulation frame',()=>{
+  const {world,scene}=persistenceRun();
+  world.stageKills=world.killTarget;world.beginClearing();world.events=[];world.clearing.elapsed=.1;
+  clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);
+  assert.equal(app.continueRunForTest(),true);finishResumeTransfer();
+  assert.equal(app.readRestart().world.phase,'clearing');near(scene.timeScale,.3);near(app.resumeSecondsForTest(),1);
+  scene.update(0,1);
+  assert.equal(app.readRestart().world.phase,'clearing');near(scene.timeScale,.3);near(app.resumeSecondsForTest(),.999);
+});
+
+test('v10.1 a new run saves before its first event drain without retaining the previous reward world',()=>{
+  const {world:oldWorld,scene}=persistenceRun();
+  scene.rewardVisuals={world:oldWorld,flightAt:oldWorld.feedbackTime};
+  clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);
+  app.showRunChoiceForTest();assert.equal(app.chooseRunForTest('new-run'),true);
+  const current=app.readRestart().world;
+  assert.notEqual(current,oldWorld);assert.equal(current.startingUpgrades,true);
+  assert.ok(current.events.some(event=>event.type==='upgrade'),'the opening reward event has not yet drained');
+  windowListeners.get('pagehide').forEach(fn=>fn());
+  const decoded=app.decodedRunForTest();assert.ok(decoded);
+  assert.equal(decoded.world.score,0);assert.equal(decoded.world.startingUpgrades,true);
+  assert.deepEqual(runSimulationState(decoded.world),runSimulationState(current));
+  assert.notEqual(scene.rewardVisuals?.world,oldWorld);
+});
+
+test('v10.1 pagehide during saved-run arrival re-saves the exact restored world before gameplay starts',()=>{
+  persistenceRun();clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);
+  assert.equal(app.continueRunForTest(),true);
+  const state=app.readRestart(),before=runSimulationState(state.world);
+  assert.equal(state.transfer.target,'arena');assert.equal(saved.has(RUN_SAVE_KEY),false);
+  windowListeners.get('pagehide').forEach(fn=>fn());
+  const decoded=app.decodedRunForTest();assert.ok(decoded);assert.deepEqual(runSimulationState(decoded.world),before);
+  assert.equal(app.readRestart().pauseOnArrival,true);finishResumeTransfer();
+  assert.equal(app.readRestart().paused,true);assert.equal(app.readRestart().modal,'pause');
+  assert.deepEqual(runSimulationState(app.readRestart().world),before);
+});
+
+test('v10.1 pagehide refreshes the checkpoint from a settings subpage of the pause menu',t=>{
+  const {world}=persistenceRun();clickAction('pause');finishPausedTransfer();clickAction('settings');app.advanceUi(.6);
+  assert.equal(app.readRestart().modal,'settings');assert.equal(app.readRestart().paused,true);
+  const before=runSimulationState(world),original=localStorage.setItem,writes=[];
+  t.mock.method(localStorage,'setItem',function(key,value){writes.push(key);return original.call(this,key,value);});
+  windowListeners.get('pagehide').forEach(fn=>fn());
+  assert.ok(writes.includes(RUN_SAVE_KEY));assert.equal(app.readRestart().modal,'settings');
+  const decoded=app.decodedRunForTest();assert.ok(decoded);assert.deepEqual(runSimulationState(decoded.world),before);
+});
+
+test('v10.1 pulling in a restored reward choice ends the entry allowance without granting combat aim slow motion',()=>{
+  const {world,scene}=persistenceRun();world.beginStartingUpgrades();
+  for(let step=0;step<200&&world.phase!=='choose';step++)world.step(1/120);
+  assert.equal(world.phase,'choose');world.events=[];
+  clickAction('pause');finishPausedTransfer();clickAction('leave');app.advanceUi(.7);
+  assert.equal(app.continueRunForTest(),true);finishResumeTransfer();
+  const restored=app.readRestart().world,pointer=inputCanvas(),p=restored.player;
+  near(app.resumeSecondsForTest(),1);near(scene.timeScale,.3);
+  pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+20,p.y);scene.update(0,0);
+  assert.ok(app.readRestart().drag);near(app.resumeSecondsForTest(),0);near(scene.timeScale,1);
+  assert.equal(restored.phase,'choose');assert.equal(restored.choices.length,3);
+  pointer('pointercancel');
+});
+
+test('v10.1 failed checkpoint deletion keeps voluntary settlement in pause until it can safely retry',t=>{
+  const {world}=persistenceRun();clickAction('pause');finishPausedTransfer();
+  const before=runSimulationState(world),original=localStorage.removeItem;
+  const removal=t.mock.method(localStorage,'removeItem',()=>{throw Error('Storage removal unavailable');});
+  clickAction('home');
+  assert.equal(app.readRestart().modal,'pause');assert.equal(app.readRestart().paused,true);assert.equal(app.readRestart().result,null);
+  assert.deepEqual(runSimulationState(world),before);assert.ok(app.savedRunForTest());
+  assert.match(element('#toast').textContent,/存档|结算/);
+  removal.mock.restore();assert.equal(localStorage.removeItem,original);
+  clickAction('home');assert.equal(world.phase,'over');assert.equal(app.savedRunForTest(),null);
+});
+
+test('v10.1 automatic failure invalidates an undeletable checkpoint and still reaches settlement',t=>{
+  const {world,scene}=persistenceRun();assert.equal(app.saveRunForTest(),true);
+  assert.ok(app.savedRunForTest());
+  t.mock.method(localStorage,'removeItem',()=>{throw Error('Storage removal unavailable');});
+  world.phase='over';world.emit('over');scene.handleEvents();
+  assert.equal(app.savedRunForTest(),null);
+  assert.equal(JSON.parse(saved.get(RUN_SAVE_KEY)).format,'qiuqiule-run-ended');
+  assert.ok(scene.ending);advanceScene(scene,.61);
+  assert.equal(app.readRestart().modal,'over');assert.ok(app.readRestart().result);
+  assert.equal(app.savedRunForTest(),null);
+  windowListeners.get('pagehide').forEach(fn=>fn());assert.equal(app.savedRunForTest(),null);
 });

@@ -1,4 +1,5 @@
 import {COMPANION_DEFINITIONS,normalizeCompanionState,companionPreview} from './companions.js';
+import {BIG_EYE_UNLOCK_SCORE} from './appearances.js';
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const IMAGE_KEY='qiuqiule-appearance';
@@ -65,7 +66,7 @@ const ease=value=>{const t=clamp(value,0,1);return t*t*(3-2*t);};
 
 export function wardrobeAppearanceCards(state){
   const selected=state.appearanceId||(state.image?'custom':'original');
-  const unlocked=state.appearanceUnlocked===true||Number(state.best)>=26767;
+  const unlocked=state.appearanceUnlocked===true||Number(state.best)>=BIG_EYE_UNLOCK_SCORE;
   return [{id:'original',label:'原汁原味',unlocked:true},{id:'custom',label:'自定义',unlocked:true},
     {id:'big-eye',label:'大眼萌',unlocked}].map(card=>({...card,selected:card.id===selected}));
 }
@@ -119,7 +120,7 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=(
       const button=appearanceButtons.get(card.id);button.setAttribute('aria-pressed',String(card.selected));
       button.setAttribute('aria-disabled',String(!card.unlocked||!!waitingForImage));
       button.setAttribute('aria-busy',String(!!waitingForImage));
-      button.setAttribute('aria-label',card.label+(waitingForImage?'，图片读取中':card.unlocked?'':'，达26767分解锁'));
+      button.setAttribute('aria-label',card.label+(waitingForImage?'，图片读取中':card.unlocked?'':`，达${BIG_EYE_UNLOCK_SCORE}分解锁`));
       button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
     }
     const color=state.playerColor??'#252720';
@@ -138,12 +139,12 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=(
     return button;
   };
   for(const card of wardrobeAppearanceCards(getState())){
-    const button=makeCard(card.label,appearancePreview(card.id),card.id==='big-eye'?'达26767分<br>解锁':'');
+    const button=makeCard(card.label,appearancePreview(card.id),card.id==='big-eye'?`达${BIG_EYE_UNLOCK_SCORE}分<br>解锁`:'');
     button.id=`appearance-option-${card.id}`;button.setAttribute('data-appearance',card.id);
     button.addEventListener('click',()=>{
       if(transition)return;
       const state=getState(),current=wardrobeAppearanceCards(state).find(option=>option.id===card.id);
-      if(!current?.unlocked){onError('达26767分解锁');return;}
+      if(!current?.unlocked){onError(`达${BIG_EYE_UNLOCK_SCORE}分解锁`);return;}
       if(card.id==='custom'&&state.imageLoading&&!state.image)return;
       // A saved image is reusable while another appearance is equipped.
       // Reopening the picker never changes selection until a crop is applied.
