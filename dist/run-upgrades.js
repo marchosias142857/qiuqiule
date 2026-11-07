@@ -30,7 +30,7 @@ function summaryFor(definition, stacks, world) {
   if (id === 'overspeed') return `弹射速度上限 ${number(60 + upgradeStat(id, stacks))} u/s（基础 60 + 强化 ${number(upgradeStat(id, stacks))}）。`;
   if (id === 'rubber') return `撞击保速下限：未击杀 ${percent(Math.min(1, .70 + effect.retentionBonus * stacks))}%，直接击杀 ${percent(Math.min(1, .85 + effect.lethalRetentionBonus * stacks))}%。`;
   if (id === 'growth') return `直径为初始的 ${number(effect.radiusScales[stacks - 1])} 倍，伤害 +${percent(effect.damageBonus * stacks)}%；质量不变。`;
-  if (id === 'magnet') return `击杀后 ${number(effect.pullDuration)} 秒内，将最近敌球拉近 ${number(effect.pullDistance * stacks)}u。`;
+  if (id === 'magnet') return `击杀后 ${number(effect.pullDuration)} 秒内牵引敌球，优先前方路线；每颗最多移动 ${number(effect.pullDistance * stacks)}u，同时最多 2 颗。`;
   if (id === 'gambler') return gamblerSummary(world);
   if (id === 'frenzy') return `超过 ${effect.comboDamageThreshold} 连击后，每击杀使后续伤害 +${percent(effect.comboDamagePerKill * stacks)}%，最多 +${percent(effect.comboDamageCap * stacks)}%，连击中断重置。`
     + `每波 +${effect.waveSizeBonus + effect.extraWaveSizeBonus * (stacks - 1)} 颗；波间休止 ×${number(effect.restMultiplier * effect.extraRestMultiplier ** (stacks - 1))}；连击倍率上限 ${effect.comboCap}。`;

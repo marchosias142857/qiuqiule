@@ -26,7 +26,7 @@ test('base upgrade summaries show acquired cumulative effects rather than a futu
   assert.equal(entries.density.summary, '质量约为初始的 5.16 倍，同样拉伸不降低弹射速度。');
   assert.equal(entries.overspeed.summary, '弹射速度上限 80 u/s（基础 60 + 强化 20）。');
   assert.equal(entries.growth.summary, '直径为初始的 1.4 倍，伤害 +20%；质量不变。');
-  assert.equal(entries.magnet.summary, '击杀后 0.6 秒内，将最近敌球拉近 5u。');
+  assert.equal(entries.magnet.summary, '击杀后 0.25 秒内牵引敌球，优先前方路线；每颗最多移动 6u，同时最多 2 颗。');
   assert.doesNotMatch(entries.energy.summary, /12%|下一/);
   assert.doesNotMatch(entries.density.summary, /15%|下一/);
   assert.doesNotMatch(entries.overspeed.summary, /\+4 u/);

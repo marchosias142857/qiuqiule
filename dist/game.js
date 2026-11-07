@@ -2136,7 +2136,7 @@ function startUpgradeDemo(kind){
   }
   if(['breath','frenzy'].includes(id))world.spawnTimer=.45;
   if(id!=='gravity')world.shoot(world.maxPull*(['bank','boomerang','shockwave'].includes(id)?1:-1),0);
-  const hints={energy:'强化后的这一发更快；可继续拖拽发射',overspeed:'弹性已达4层；这一发能越过原来的速度上限',density:'重量级碰撞更有分量；继续试着撞开敌球',rubber:'碰撞后保留更多速度，可连续弹射',growth:'玩家已经大一圈，伤害也提高了10%',magnet:'击杀后，最近的敌球会被拉近',pierce:'撞击后仍沿原方向，试着穿过一排',pulse:'重击会震伤附近敌球并将它们推开',bank:'先撞墙，下一次撞击更有力量',gravity:'附近敌球正向玩家聚拢，可继续拖拽发射',breath:'击杀后刷新会短暂放慢',split:'这一发首杀后会分出两颗辅助球',penetration:'这一发首杀后恢复出手速度',boomerang:'撞墙后0.8秒，球会加速30%',shockwave:'每第2次撞墙会释放冲击波',frenzy:'每波更多球；同一发超过6连击后，每次连击增加15%伤害，单层最多60%'};
+  const hints={energy:'强化后的这一发更快；可继续拖拽发射',overspeed:'弹性已达4层；这一发能越过原来的速度上限',density:'重量级碰撞更有分量；继续试着撞开敌球',rubber:'碰撞后保留更多速度，可连续弹射',growth:'玩家已经大一圈，伤害也提高了10%',magnet:'击杀后快速牵引敌球，优先前方路线；最多同时牵引两颗',pierce:'撞击后仍沿原方向，试着穿过一排',pulse:'重击会震伤附近敌球并将它们推开',bank:'先撞墙，下一次撞击更有力量',gravity:'附近敌球正向玩家聚拢，可继续拖拽发射',breath:'击杀后刷新会短暂放慢',split:'这一发首杀后会分出两颗辅助球',penetration:'这一发首杀后恢复出手速度',boomerang:'撞墙后0.8秒，球会加速30%',shockwave:'每第2次撞墙会释放冲击波',frenzy:'每波更多球；同一发超过6连击后，每次连击增加15%伤害，单层最多60%'};
   if(hint)hint.textContent=hints[id]||'选择场景，可继续拖拽弹射';
   updateHud();
 }

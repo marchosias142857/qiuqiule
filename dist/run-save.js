@@ -110,7 +110,7 @@ const finiteFields = ['width', 'height', 'unit', 'inset', 'time', 'feedbackTime'
   'feedbackKills', 'feedbackFreezeUsed'];
 const booleanFields = ['startingUpgrades', 'shotRecoveryUsed', 'shotBanked', 'shotSplitUsed', 'pendingUpgradeBoost',
   'shotUpgradeBoost', 'nextGambler', 'gamblerRewardPending', 'saveUsed', 'riskOfferCooldown'];
-const nullableFields = ['shotRelease', 'magnetPull', 'upgradeContext', 'activeShot', 'clearing', 'pendingClearing',
+const nullableFields = ['shotRelease', 'magnetPull', 'magnetPullSecond', 'upgradeContext', 'activeShot', 'clearing', 'pendingClearing',
   'wave', 'floorCluster', 'boss', 'bossCelebration'];
 function validBody(body) {
   return plain(body) && Number.isSafeInteger(body.id) && body.id > 0 &&
@@ -123,6 +123,10 @@ function validateWorld(world) {
   require(finiteFields.every(key => own(world, key) && Number.isFinite(world[key])));
   require(booleanFields.every(key => typeof world[key] === 'boolean'));
   require(nullableFields.every(key => own(world, key) && (world[key] === null || plain(world[key]))));
+  const pulls = [world.magnetPull, world.magnetPullSecond].filter(Boolean);
+  require(pulls.every(pull => Number.isSafeInteger(pull.bodyId) && pull.bodyId > 0
+    && ['remainingTime', 'remainingDistance', 'speed'].every(key => Number.isFinite(pull[key]) && pull[key] >= 0)));
+  require(new Set(pulls.map(pull => pull.bodyId)).size === pulls.length);
   require(['spawnTimer', 'floorTimer', 'introTimer'].every(key => typeof world[key] === 'number' && !Number.isNaN(world[key])));
   require(world.width > 0 && world.height > 0 && world.width <= 100000 && world.height <= 100000 && world.unit > 0);
   require(Number.isSafeInteger(world.stage) && world.stage >= 1 && Number.isSafeInteger(world.maxStage) && world.maxStage >= 1);
@@ -167,6 +171,12 @@ export function restoreRunSnapshot(raw) {
       const visible = ['transition', 'choose'].includes(root.world.phase) && Array.isArray(root.world.choices);
       root.world.riskOfferCooldown = visible && new Set(root.world.choices
         .filter(choice => UPGRADES[choice?.id]?.kind === 'risk').map(choice => choice.id)).size > 1;
+    }
+    if (!own(root.world, 'magnetPullSecond')) root.world.magnetPullSecond = null;
+    for (const pull of [root.world.magnetPull, root.world.magnetPullSecond]) {
+      // Old snapshots contain a single radial pull. Keep its remaining
+      // lifetime and distance, deriving its original speed only once.
+      if (plain(pull) && !own(pull, 'speed')) pull.speed = pull.remainingTime > 0 ? pull.remainingDistance / pull.remainingTime : 0;
     }
     validateWorld(root.world); root.world.random = runDay.random;
     return {world: root.world, runDay, extra: root.extra};

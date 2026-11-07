@@ -50,7 +50,7 @@ test('core tuning is fixed across stages and all documented effect constants are
   assert.deepEqual(UPGRADES.density.effect, {densityMultiplier: 1.35});
   assert.deepEqual(UPGRADES.rubber.effect, {retentionBonus: .08, lethalRetentionBonus: .04});
   assert.deepEqual(UPGRADES.growth.effect, {radiusScales: [1.2, 1.4], damageBonus: .1});
-  assert.deepEqual(UPGRADES.magnet.effect, {pullDuration: .6, pullDistance: 2.5});
+  assert.deepEqual(UPGRADES.magnet.effect, {pullDuration: .25, pullDistance: 3});
   assert.deepEqual(UPGRADES.pierce.effect, {retention: .92});
   assert.deepEqual(UPGRADES.pulse.effect, {radius: 4, damageRatio: .3});
   assert.deepEqual(UPGRADES.bank.effect, {damageBonus: .6, maxCharges: 2});

@@ -89,6 +89,7 @@ export class World {
     this.pendingUpgradeBoost = false;
     this.shotUpgradeBoost = false;
     this.magnetPull = null;
+    this.magnetPullSecond = null;
     this.stageShots = 0;
     this.stageRealKills = 0;
     this.upgradeContext = null;
@@ -468,7 +469,9 @@ export class World {
         const mapped = mapPoint(part, this.unit * 3.5); part.x = mapped.x; part.y = mapped.y;
       }
     }
-    if (this.magnetPull) this.magnetPull.remainingDistance *= k;
+    for (const pull of [this.magnetPull, this.magnetPullSecond]) if (pull) {
+      pull.remainingDistance *= k; pull.speed *= k;
+    }
     for (const child of this.fragmentQueue) { child.x *= rx; child.y *= ry; }
     if (this.phase === 'transition') {
       // Continue from the mapped pose, using only the remaining movement time.
@@ -807,29 +810,99 @@ export class World {
     this.emit('playerSplit', {x: p.x, y: p.y, bodyIds: this.auxiliaries.map(b => b.id)});
   }
 
+  magnetLane() {
+    const p = this.player, speed = length(p);
+    if (speed < this.unit * 8) return null;
+    const nx = p.vx / speed, ny = p.vy / speed, bounds = this.arenaBounds;
+    // Predict only the next short, straight leg. Stop at the first wall;
+    // the next physics substep will follow the actual reflected direction.
+    let distance = Math.min(speed * UPGRADES.magnet.effect.pullDuration, this.unit * 8);
+    if (nx > 1e-8) distance = Math.min(distance, (bounds.right - p.r - p.x) / nx);
+    if (nx < -1e-8) distance = Math.min(distance, (bounds.left + p.r - p.x) / nx);
+    if (ny > 1e-8) distance = Math.min(distance, (bounds.bottom - p.r - p.y) / ny);
+    if (ny < -1e-8) distance = Math.min(distance, (bounds.top + p.r - p.y) / ny);
+    return distance > 1e-8 ? {nx, ny, distance, speed} : null;
+  }
+
+  magnetAimPoint(body, lane = this.magnetLane()) {
+    const p = this.player, bounds = this.arenaBounds;
+    const ahead = lane ? clamp((body.x - p.x) * lane.nx + (body.y - p.y) * lane.ny, 0, lane.distance) : 0;
+    return {x: clamp(p.x + (lane?.nx || 0) * ahead, bounds.left + body.r, bounds.right - body.r),
+      y: clamp(p.y + (lane?.ny || 0) * ahead, bounds.top + body.r, bounds.bottom - body.r)};
+  }
+
+  pruneMagnetPulls() {
+    const valid = pull => pull && pull.remainingTime > 1e-8 && pull.remainingDistance > 1e-8
+      && this.enemies.some(b => b.id === pull.bodyId && b.hp > 0 && b.solid);
+    if (!valid(this.magnetPull)) this.magnetPull = null;
+    if (!valid(this.magnetPullSecond) || this.magnetPullSecond?.bodyId === this.magnetPull?.bodyId) this.magnetPullSecond = null;
+    if (!this.magnetPull) { this.magnetPull = this.magnetPullSecond; this.magnetPullSecond = null; }
+  }
+
   startMagnetPull() {
     if (this.mode === 'campaign' || !this.buffs.magnet || this.pendingClearing) return;
-    const p = this.player, candidates = this.enemies.filter(b => b.hp > 0 && b.solid);
-    candidates.sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
-    this.magnetPull = candidates.length ? {bodyId: candidates[0].id, remainingTime: UPGRADES.magnet.effect.pullDuration,
-      remainingDistance: this.unit * UPGRADES.magnet.effect.pullDistance * this.buffs.magnet} : null;
+    this.pruneMagnetPulls();
+    if (this.magnetPullSecond) return;
+    const p = this.player, lane = this.magnetLane(), effect = UPGRADES.magnet.effect;
+    const budget = this.unit * effect.pullDistance * this.buffs.magnet, speed = budget / effect.pullDuration;
+    let nearest = null, nearestDistance = Infinity, forward = null, forwardScore = Infinity, forwardNeedsPull = false;
+    for (const body of this.enemies) {
+      if (body.hp <= 0 || !body.solid || body.id === this.magnetPull?.bodyId) continue;
+      const dx = body.x - p.x, dy = body.y - p.y, distance = Math.hypot(dx, dy);
+      if (distance < nearestDistance) { nearest = body; nearestDistance = distance; }
+      if (!lane) continue;
+      const ahead = dx * lane.nx + dy * lane.ny, side = Math.abs(dx * lane.ny - dy * lane.nx);
+      if (ahead <= 0 || ahead > lane.distance) continue;
+      // Prefer a near-future encounter whose side gap can close before the
+      // player passes, rather than chasing the closest enemy behind them.
+      const gap = Math.max(0, side - p.r - body.r);
+      if (gap > speed * Math.min(effect.pullDuration, ahead / lane.speed)) continue;
+      const score = ahead + side * 1.5, needsPull = gap > 1e-8;
+      // A ball already in the collision corridor needs no assistance. Give
+      // a reachable near-miss priority, retaining natural hits as a fallback.
+      if (!forward || needsPull && !forwardNeedsPull || needsPull === forwardNeedsPull && score < forwardScore) {
+        forward = body; forwardScore = score; forwardNeedsPull = needsPull;
+      }
+    }
+    const body = forward || nearest;
+    if (!body) return;
+    const pull = {bodyId: body.id, remainingTime: effect.pullDuration, remainingDistance: budget, speed};
+    if (!this.magnetPull) this.magnetPull = pull; else this.magnetPullSecond = pull;
   }
 
   advanceMagnetPull(dt, activeTimes = null) {
-    const pull = this.magnetPull;
-    if (!pull || !this.combatActive) return;
-    const body = this.enemies.find(b => b.id === pull.bodyId && b.hp > 0 && b.solid);
-    if (!body) { this.magnetPull = null; return; }
-    // Integrate only the part left by this specific target's local hit-stop.
-    dt = Math.min(dt, activeTimes?.get(body.id) ?? dt);
-    if (body.feedbackFreeze > 1e-10 || dt <= 1e-10) return;
-    const p = this.player, dx = p.x - body.x, dy = p.y - body.y, distance = Math.hypot(dx, dy);
-    const duration = Math.min(dt, pull.remainingTime);
-    const move = Math.min(pull.remainingDistance * duration / Math.max(1e-8, pull.remainingTime),
-      Math.max(0, distance - p.r - body.r - .001));
-    if (distance > 1e-8) { body.x += dx / distance * move; body.y += dy / distance * move; }
-    pull.remainingDistance -= move; pull.remainingTime -= duration;
-    if (pull.remainingTime <= 1e-8 || distance - move <= p.r + body.r + .0011) this.magnetPull = null;
+    if (!this.combatActive) return;
+    this.pruneMagnetPulls();
+    const p = this.player, lane = this.magnetLane();
+    for (const pull of [this.magnetPull, this.magnetPullSecond]) {
+      if (!pull) continue;
+      const body = this.enemies.find(b => b.id === pull.bodyId && b.hp > 0 && b.solid);
+      const activeDt = Math.min(dt, activeTimes?.get(body.id) ?? dt);
+      if (body.feedbackFreeze > 1e-10 || activeDt <= 1e-10) continue;
+      const duration = Math.min(activeDt, pull.remainingTime), aim = this.magnetAimPoint(body, lane);
+      const dx = aim.x - body.x, dy = aim.y - body.y, distance = Math.hypot(dx, dy);
+      // A fixed speed prevents an obstructed pull from banking unused motion
+      // and releasing it as a large jump near the end of its lifetime.
+      let move = Math.min(pull.speed * duration, pull.remainingDistance, distance);
+      if (distance > 1e-8 && move > 0) {
+        let mx = dx / distance * move, my = dy / distance * move;
+        const rx = body.x - p.x, ry = body.y - p.y, safe = p.r + body.r + .001;
+        const c = rx * rx + ry * ry - safe * safe;
+        if (c <= 0) move = 0;
+        else {
+          // Clip the entire displacement segment at its first contact with
+          // the player, even if the requested endpoint lies beyond the ball.
+          const a = mx * mx + my * my, b = 2 * (rx * mx + ry * my), discriminant = b * b - 4 * a * c;
+          if (b < 0 && discriminant >= 0) {
+            const contact = (-b - Math.sqrt(discriminant)) / (2 * a);
+            if (contact >= 0 && contact < 1) move *= contact;
+          }
+        }
+        body.x += dx / distance * move; body.y += dy / distance * move;
+      } else move = 0;
+      pull.remainingDistance = Math.max(0, pull.remainingDistance - move); pull.remainingTime -= duration;
+    }
+    this.pruneMagnetPulls();
   }
 
   advanceBoomerang(body, dt) {
@@ -1033,7 +1106,7 @@ export class World {
   beginClearing() {
     if (this.mode === 'campaign' || this.phase !== 'battle') return;
     this.upgradeContext = this.captureUpgradeContext();
-    this.clearAuxiliaries(); this.magnetPull = null; this.shotUpgradeBoost = false;
+    this.clearAuxiliaries(); this.magnetPull = this.magnetPullSecond = null; this.shotUpgradeBoost = false;
     const origin = this.pendingClearing || this.player;
     this.clearing = {x: origin.x, y: origin.y, radius: 0, elapsed: 0, count: 0};
     this.pendingClearing = null;
@@ -1103,7 +1176,7 @@ export class World {
   }
 
   clearEnemies() {
-    this.clearAuxiliaries(); this.magnetPull = null; this.shotUpgradeBoost = false;
+    this.clearAuxiliaries(); this.magnetPull = this.magnetPullSecond = null; this.shotUpgradeBoost = false;
     if (this.player.boomerangTime > 0) { this.player.vx /= UPGRADES.boomerang.effect.speedMultiplier; this.player.vy /= UPGRADES.boomerang.effect.speedMultiplier; this.player.boomerangTime = 0; }
     for (const b of this.enemies) if (b.hp > 0) this.emit('shatter', {x:b.x, y:b.y, r:b.r * ease(b.born), vx:b.vx, vy:b.vy, enemyType:b.enemyType || 'normal', shield:!!b.shield});
     this.enemies = [];

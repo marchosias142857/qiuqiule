@@ -376,11 +376,11 @@ test('auxiliaries expire after continuous low speed and leave with a new shot or
 test('magnet pulls the nearest solid enemy by the layered distance and never crosses the player boundary', () => {
   for (const layers of [1, 2]) {
     const w = run(); gain(w, 'magnet', layers); const x = w.player.x;
-    const target = enemy(w, {x: x + w.unit * 8, y: w.player.y});
-    const other = enemy(w, {x: x - w.unit * 10, y: w.player.y});
+    const target = enemy(w, {x: x + w.unit * 9, y: w.player.y});
+    const other = enemy(w, {x: x - w.unit * 11, y: w.player.y});
     enemy(w, {x: x + w.unit, y: w.player.y, born: 0, solid: false});
     w.damage(enemy(w, {hp: 1}), 1); const otherX = other.x;
-    advance(w, .6); near(target.x, x + w.unit * (8 - 2.5 * layers)); near(other.x, otherX);
+    advance(w, .25); near(target.x, x + w.unit * (9 - 3 * layers)); near(other.x, otherX);
     const close = enemy(w, {x: x + w.player.r + w.unit + 1, y: w.player.y});
     w.damage(enemy(w, {hp: 1}), 1); advance(w, .6);
     assert.ok(Math.hypot(close.x - w.player.x, close.y - w.player.y) >= close.r + w.player.r);
