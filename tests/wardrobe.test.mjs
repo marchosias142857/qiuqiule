@@ -34,7 +34,7 @@ test('hanger geometry is rounded and contained in its control ball',()=>{
   assert.ok(geometry.strokes.some(points=>points.length>60));
 });
 
-function appearanceStorage(t,{image=null,fallback=null,failWrites=false,failFallback=false}={}){
+function appearanceStorage(t,{image=null,fallback=null,failWrites=false,failFallback=false,failReads=false}={}){
   const key='qiuqiule-appearance',local=new Map();if(fallback!==null)local.set(key,fallback);
   const state={image,failWrites,reads:0};
   const previous=Object.fromEntries(['indexedDB','localStorage'].map(name=>[name,Object.getOwnPropertyDescriptor(globalThis,name)]));
@@ -48,8 +48,8 @@ function appearanceStorage(t,{image=null,fallback=null,failWrites=false,failFall
     const request={result:{close(){},transaction(){
       const tx={error:new Error('IndexedDB write failed'),objectStore(){return {
         get(){
-          state.reads++;const result={result:state.image};
-          queueMicrotask(()=>{result.onsuccess();tx.oncomplete?.();});return result;
+          state.reads++;const result={result:state.image,error:failReads?new Error('IndexedDB read failed'):null};
+          queueMicrotask(()=>{if(failReads)result.onerror();else result.onsuccess();tx.oncomplete?.();});return result;
         },
         put(value){queueMicrotask(()=>{if(state.failWrites)tx.onerror();else{state.image=value;tx.oncomplete();}});},
         delete(){queueMicrotask(()=>{if(state.failWrites)tx.onerror();else{state.image=null;tx.oncomplete();}});}
@@ -89,4 +89,19 @@ test('failed database and fallback writes report failure without claiming the ol
   appearanceStorage(t,{image:oldImage,failWrites:true,failFallback:true});
   await assert.rejects(saveAppearance(null),/图片未能保存/);
   assert.equal(await loadAppearance(),oldImage);
+});
+
+test('startup strict reads distinguish a storage failure from an absent saved image',async t=>{
+  appearanceStorage(t,{image:oldImage,failReads:true});
+  await assert.rejects(loadAppearance({strict:true}),/IndexedDB read failed/);
+  assert.equal(await loadAppearance(),null,'ordinary callers retain the existing best-effort read contract');
+});
+
+test('startup strict reads still accept a genuinely absent image and an authoritative fallback',async t=>{
+  const {local,key}=appearanceStorage(t);
+  assert.equal(await loadAppearance({strict:true}),null);
+  local.set(key,JSON.stringify({version:1,image:oldImage}));
+  assert.equal(await loadAppearance({strict:true}),oldImage);
+  local.set(key,JSON.stringify({version:1,image:null}));
+  assert.equal(await loadAppearance({strict:true}),null);
 });

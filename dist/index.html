@@ -28,6 +28,8 @@
   <link rel="preload" href="./fonts/qiuqiule-ui.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./skin-unlock.css">
+  <link rel="stylesheet" href="./help-guide.css">
+  <link rel="stylesheet" href="./onboarding.css">
   <script defer src="./vendor/phaser.min.js"></script>
   <script type="module" src="./game.js"></script>
   <script type="module" src="./offline.js"></script>
@@ -117,17 +119,39 @@
     <section id="help-panel" class="panel help-panel menu-panel" hidden role="dialog" aria-modal="true" aria-labelledby="help-title">
       <div class="panel-heading settings-heading"><span id="help-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="help-title">弹出点名堂</h2><button class="close-button" data-action="close" aria-label="返回设置"><svg class="return-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v8H6m5-5-5 5 5 5"/></svg></button></div>
       <div class="menu-body">
-      <p>首页向后拉、反向弹：撞播放球开始游戏；撞红色喇叭球切换静音并弹回；撞绿色齿轮球进入设置；撞衣架球进入换装。未瞄准功能球或力度不足时，会留在原地回弹。暂停菜单的四颗球依次为继续、设置、重开和主页，点击即可。无尽暂停时，玩家球左侧的三箭头球可查看本局已获得的强化、层数与当前效果；查看期间游戏保持暂停。点击主页球会先结算本局，再从结算页返回主界面。设置中可分别调节背景音乐和音效音量，拉到最左侧即可单独静音。还可开启拖拽表情：主页原地回弹结束后恢复常态，其余情况松手立即恢复。</p>
-      <ol class="help-steps"><li><b>01</b><div><strong>边飞边瞄，随时接手。</strong><p>无尽模式中，球高速飞行时也能按住屏幕任意位置拖动。拖拽不再额外刹车，球与敌球以 0.3 倍速继续运动；慢放最多维持 1.2 秒，再用 0.5 秒恢复正常。轻点不会发射。子弹时间独立于反馈强度；系统开启“减少动态效果”时为 0.6 倍速。瞄准记录只保存在本机；记录显示经常长时间瞄准时，后续新局的慢放窗口会缩至 0.9 秒，本局时限保持不变。</p></div></li><li><b>02</b><div><strong>向后拉，转向继续弹。</strong><p>无尽普通战斗中，松手沿拖动的反方向转向，不再额外降低当前速度；球慢时，拉伸能补充弹射能量。七个提示点与箭头始终一起显示松手后的发射方向。普通命中至少保留 70% 速度，击杀至少保留 85%；重量级提高质量，不降低无尽弹射速度。高速时，玩家球和分身会带有柔和的半透明拖尾，越快越长，减速后自然消退。</p></div></li><li><b>03</b><div><strong>连杀清场，再选强化。</strong><p>每种敌球有自己的基础分，普通球为 10 分。同一发的第 1、2、3 次击杀分别乘 1、2、3，最多乘 8，获得“狂潮”后最多乘 12；第 3 次击杀起再额外乘 1.5。“狂潮”还会在同一发超过6连击后，每次连击增加15%伤害，单层最多增加60%；层数加算，额外刷怪压力只生效一份。这一发碰过墙或重球，之后的击杀也乘 1.5，可与连杀倍率叠加，最后将单次得分四舍五入为整数。下一发重新计算连击。本阶段击杀达标后，从最后一杀的位置向外连锁清场，剩余敌球每颗基础加 10 分。首阶段需击杀 14 颗，之后每阶段多 4 颗；分数只记成绩。清场完毕，小球自动就位，撞向三颗奖励球之一，0.6 秒后进入新阶段。长按奖励球可查看球内的小图示，松开后隐藏。</p></div></li></ol>
-      <p class="help-rule"><strong>换装</strong>：在“你的外观”中选择原汁原味、裁剪自定义图片或装备大眼萌。达到233333分解锁大眼萌。切换其他外观会保留已设置的自定义图片，切回自定义即可继续使用；已选中自定义时再次点击可重新选图。装备大眼萌默认将小球颜色切换为浅绿色，之后可在设置中修改。每到达5个阶段依次解锁一种星迹，门槛为第5、10…45阶段。解锁后会在本局结算前展示奖励弹窗，一次解锁多种星迹时按门槛从低到高展示。换装只改变外观，碰撞和玩法不变。</p>
-      <div class="buff-legend"><span><i data-upgrade-kind="regular" aria-hidden="true"></i> 常规</span><span><i data-upgrade-kind="special" aria-hidden="true"></i> 特殊</span><span><i data-upgrade-kind="risk" aria-hidden="true"></i> 风险</span></div>
-      <p>无尽模式每5阶段先完成清场，再收拢为正方形战斗场地，只挑战带恶魔角的膨胀Boss，不再刷新普通敌球。撞击会让Boss缩小，眩晕后继续撞击才能击败；膨胀到上限时会失败，狭小屏幕和大尺寸玩家会保留可活动的空间。玩家会沿四面边界真实反弹，仍可随时拖拽转向。最后一击会让边框短促震动，随后保留胜利慢放和王冠庆祝，再连续选择两次强化，两次奖励中至少一次包含非风险强化。边框反馈不改变球的位置和碰撞边界，也不产生全屏震动或白闪。</p>
-      <p class="help-rule"><strong>强化选择</strong>：常规强化可叠加，其中弹性十足、重量级和超速没有层数上限；特殊强化每种一次，风险强化同时增加压力与收益。奖励球分别用薄荷绿与三角形、薰衣草紫与正方形、杏金色与正五边形区分这三类，球下只显示名称；长按球体可看点线示意。候选会避开已满级的强化，并根据刚结束阶段的敌球和发射情况调整权重。若一组三选一同时出现赌徒和狂潮，下一组最多出现一个风险强化，之后恢复正常抽取；连续奖励同样遵守此规则。获得“赌徒”后，下一阶段需要多击杀 50%，完成后的奖励改为连续两轮三选一；若完成的是Boss阶段，则连续选择三轮。每轮先选完、短暂休息，再出现下一组三颗奖励球。所有奖励球被撞中时，都会发出清脆音效，并像敌球被击破一样爆出碎片。每次选完强化，下一次战斗发射的击杀碎片和音阶会稍微加强。</p>
-      <div id="buff-guide" class="buff-guide"></div>
-      <p class="help-rule">无尽普通战斗开场有 <strong>6 颗</strong>敌球，之后成簇刷新；场上数量不足时会补充，随阶段提高至至少 14 颗。敌球受伤会略微缩小，碰撞范围不变。判定满场时，母球和它分裂出的三颗小球共享 1 个名额，最后一颗子球被击杀才释放；其他敌球各占 1 个名额。达到 24 个名额时，原边框上叠加红色呼吸提示，26 个时增强；碰撞范围不变，转场时红色随呼吸消失。到达 <strong>28 个名额</strong>后有 0.8 秒宽限，及时击杀降到 27 个即可解围；每局还有一次保命，会在宽限结束时自动清掉最老的 3 个名额，同一母球的剩余子球一并清除，不计分。保命用完后再次超时，本局结束。血量与密度随阶段及局内时间提高；暂停时不计时。</p>
-      <p class="help-rule"><strong>七种敌球</strong>随无尽阶段逐步加入：第 3 阶段的空心环轻且弹，第 6 阶段的重球更硬、可当墙借力，第 8 阶段的分裂球被击破后分成三颗小球，第 10 阶段的游走球会自行移动，第 12 阶段的簇长吸引同簇伙伴，第 13 阶段的磁球吸引附近玩家、破裂时推开邻球，第 16 阶段的护盾球先挡下一次有效攻击。首次出现时会先单独展示前三颗，同屏种类随阶段最多升至五种。空心环、重球、分裂球、游走球、簇长、磁球、护盾球的基础分依次为 15、30、20、20、30、25、20，分裂小球为 5；自动清场仍每颗固定 10 分。</p>
-      <p class="help-rule"><strong>纪录与下一局</strong>：超过本机最佳时分数会弹一下并保持玩家色。分数下十个小点显示阶段进度。每局的敌球刷新与强化抽取都会重新随机。每局开局固定选择一个常规强化，与历史最高阶段无关。只要本局击败过Boss，结算球就会持续戴着小王冠；单发连击至少6次也可获得这一表现。结算显示最大连击、到达阶段、分数和纪录；点击空白处可快速重开，功能球仍可正常使用。</p>
-      <p class="game-version">球球了 · 11.4.1</p>
+        <p class="help-intro">弹射小球，击碎敌球，挑战更高阶段，别让场地被填满！</p>
+        <ol class="help-steps">
+          <li><b aria-hidden="true">01</b><div><h3>向后拉，反向弹</h3><p>按住屏幕任意位置拖动，松手后沿提示方向弹出，飞行中也能重新瞄准；瞄准时会短暂慢放，但不会一直等待，轻点不会发射。</p></div></li>
+          <li><b aria-hidden="true">02</b><div><h3>连着击碎，分数更高</h3><p>同一发连续击碎敌球，得分会越来越高，先撞墙或重球，再击碎敌球，还能获得额外加分；再次发射会重新计算连击。</p></div></li>
+          <li><b aria-hidden="true">03</b><div><h3>清场升级，继续挑战</h3><p>开局先选一项强化，普通阶段完成击杀目标后会自动清场，再撞中一颗奖励球，选择强化进入下一阶段；分数下方的小点表示当前阶段进度。</p></div></li>
+          <li><b aria-hidden="true">04</b><div><h3>别让敌球挤满场地</h3><p>敌球越来越多时，边框会变红，计数达到28后，会有短暂的解围时间，赶快击碎敌球！每局有一次自动救场机会，用完后再次满场超时，本局结束。</p></div></li>
+          <li><b aria-hidden="true">05</b><div><h3>每五阶段，挑战魔王球</h3><p>每5阶段，清场后迎战魔王球，不断撞击让它缩小，眩晕后继续攻击即可击败；别让它膨胀到极限，胜利后可连续选择两次强化。</p></div></li>
+          <li><b aria-hidden="true">06</b><div><h3>暂停、结算与暂离</h3><p>暂停后可继续游戏、调整设置或查看本局强化，点击房子球结束并结算，点击暂离球保存进度、返回首页；下次开始时可选择“继续上局”，选择“新的一局”会放弃暂存进度。</p></div></li>
+          <li><b aria-hidden="true">07</b><div><h3>你的球，你的风格</h3><p>在首页撞击衣架球，即可更换外观、设置自定义图片或选择星迹，解锁条件可在换装中查看，外观不会影响战斗。</p></div></li>
+        </ol>
+        <details class="help-reference">
+          <summary>强化说明</summary>
+          <div class="help-reference-body">
+            <p>常规强化可以叠加，特殊强化每种只能获得一次，风险强化会增加挑战，也带来额外收益；暂停时可查看本局已获得的强化及当前效果。</p>
+            <div class="buff-legend"><span><i data-upgrade-kind="regular" aria-hidden="true"></i> 常规</span><span><i data-upgrade-kind="special" aria-hidden="true"></i> 特殊</span><span><i data-upgrade-kind="risk" aria-hidden="true"></i> 风险</span></div>
+            <div id="buff-guide" class="buff-guide"></div>
+          </div>
+        </details>
+        <details class="help-reference">
+          <summary>敌球说明</summary>
+          <div class="help-reference-body">
+            <dl class="enemy-guide">
+              <div><dt><span class="enemy-guide-icon" data-help-enemy="ring" aria-hidden="true"></span>空心环</dt><dd>更轻、更弹，留意碰撞后的方向。</dd></div>
+              <div><dt><span class="enemy-guide-icon" data-help-enemy="heavy" aria-hidden="true"></span>重球</dt><dd>更难击碎，也能像墙一样借力。</dd></div>
+              <div><dt><span class="enemy-guide-icon" data-help-enemy="split" aria-hidden="true"></span>分裂球</dt><dd>击碎后分成三颗小球，整组清完才释放一个场上名额。</dd></div>
+              <div><dt><span class="enemy-guide-icon" data-help-enemy="walker" aria-hidden="true"></span>游走球</dt><dd>会自行移动，瞄准时注意它的位置。</dd></div>
+              <div><dt><span class="enemy-guide-icon" data-help-enemy="leader" aria-hidden="true"></span>簇长</dt><dd>会吸引同簇的伙伴，让敌球聚在一起。</dd></div>
+              <div><dt><span class="enemy-guide-icon" data-help-enemy="magnet" aria-hidden="true"></span>磁球</dt><dd>吸引附近的玩家球，破裂时推开周围敌球。</dd></div>
+              <div><dt><span class="enemy-guide-icon" data-help-enemy="shield" aria-hidden="true"></span>护盾球</dt><dd>护盾会挡下一次有效攻击，打破后才能伤到本体。</dd></div>
+              <div><dt><span class="enemy-guide-icon" data-help-enemy="boss" aria-hidden="true"></span>魔王球</dt><dd>每5阶段登场，撞击能让它缩小，眩晕后继续攻击即可击败——别让它膨胀到极限！</dd></div>
+            </dl>
+          </div>
+        </details>
       </div>
     </section>
     <section id="over-panel" class="panel over-panel" hidden role="dialog" aria-modal="true" aria-label="本局结算">

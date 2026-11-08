@@ -2,6 +2,8 @@ import {World, clamp, ease, lerp} from './physics.js';
 
 import {displayMetrics, pointerPosition} from './display.js';
 import {HomeWorld} from './home.js';
+import {createOnboarding} from './onboarding.js';
+import {HELP_UPGRADE_DESCRIPTIONS,helpEnemyMarkup} from './help-guide.js';
 import {drawFunctionalBall,iconMarkup} from './icons.js';
 import {smooth,pullBallPoint,faceTarget,smoothFace,transferPose,resultBounce,strainedEyeOutline,usesStrainedEyes,playerVisualState,relaxedEyeOutline} from './motion.js';
 import {GameAudio,audioLevel} from './audio.js';
@@ -77,6 +79,7 @@ const savedAppearanceState=storage.read('qiuqiule-appearance-state',null);
 let appearanceState=normalizeAppearanceState(savedAppearanceState,{best});
 let appearanceTween=null,appearanceOverride=null;
 let appearanceRevision=0,appearanceRequest=0;
+let appearanceHydration=null,startupAppearanceError=null;
 let starTrailState=normalizeStarTrailState(storage.read('qiuqiule-star-trails',null),{highestStage:endlessProgress.maxStage});
 let starTrailTween=null,starTrailOverride=null;
 let wardrobeShowcase=null;
@@ -104,9 +107,11 @@ let toastTimer;
 let homePlayColor = 0x9b89c5;
 let homeSoundColor = 0xe88c72;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const onboarding=createOnboarding({document,storage,experienced:best>0||endlessProgress.maxStage>0||!!runSaveStore.read()});
 const scoreFeedback=new ScoreFeedback();
 let feedbackDemo=false;
 let runBest=best;
+let helpEnemyColor=null;
 
 function isDark(color) {const n=hex(color);return ((n>>16)*.299+((n>>8)&255)*.587+(n&255)*.114)<135;}
 // Gameplay information shares the score's ink, independent of body appearance.
@@ -125,6 +130,10 @@ function applyTheme() {
   for (const [key,value] of Object.entries(vars)) document.documentElement.style.setProperty('--'+key,value);
   for(const effect of scene?.effects||[])if(effect.type==='label')effect.label.setColor?.(vars.ink);
   $$('[data-upgrade-kind]').forEach(node=>node.innerHTML=upgradeIconMarkup(node.dataset.upgradeKind,hex(settings.bg)));
+  if(helpEnemyColor!==settings.enemy){
+    helpEnemyColor=settings.enemy;
+    $$('[data-help-enemy]').forEach(node=>node.innerHTML=helpEnemyMarkup(node.dataset.helpEnemy,hex(settings.enemy)));
+  }
   $('meta[name=theme-color]').content = settings.bg;
   document.documentElement.style.colorScheme=dark?'dark':'light';
   for (const key of ['player','enemy','bg']) {$('#'+key+'-color').value=settings[key];$('#'+key+'-hex').textContent=settings[key].toUpperCase();}
@@ -171,7 +180,7 @@ function updateChoicePress(now=scene?.inputClock||0){
   if(paused||modal||screen!=='play'||world?.phase!=='choose'||!world.choices.some(c=>c.id===choicePress.choiceId)){clearChoicePress();return;}
   choicePress.active ||= now-choicePress.startedAt>=.3-1e-9;
 }
-function cancelDrag(){resultBlankPointer=null;clearChoicePress();sound.stopCharge();drag?.aim?.cancel();drag=null;world?.cancelPull();if(scene)scene.timeScale=1;}
+function cancelDrag(){resultBlankPointer=null;clearChoicePress();sound.stopCharge();drag?.aim?.cancel();drag=null;world?.cancelPull();if(scene)scene.timeScale=1;syncOnboarding();}
 function aimInputTime(event){
   const clock=scene?.inputClock||0,stamp=Number(event?.timeStamp)/1000;
   if(drag?.aim&&Number.isFinite(stamp)&&Number.isFinite(drag.startStamp))return Math.max(clock,drag.aim.startedAt+Math.max(0,stamp-drag.startStamp));
@@ -385,13 +394,22 @@ function drawPlayerPhoto(contour,pose,ui=false,auxiliarySlot=null,alpha=1,baseCo
   if(auxiliarySlot!==null)return auxiliaryPhotos?.draw(auxiliarySlot,contour,pose,options)===true;
   return photoRenderer.draw(contour,pose,options)===true;
 }
-async function setAppearance(url,persist=false,revision=null){
+async function setAppearance(url,persist=false,revision=null,signal=null){
   // A replacement only retires startup hydration after it is saved. If decode
   // or storage fails, the old saved picture can still finish loading normally.
   const request=revision===null?++appearanceRequest:null;
   const current=()=>request===null?revision===appearanceRevision:request===appearanceRequest;
   let image=null;
-  if(url){image=new Image();image.src=url;await image.decode();}
+  if(url){
+    image=new Image();image.src=url;
+    const decoded=image.decode();
+    if(signal)await new Promise((resolve,reject)=>{
+      const cancel=()=>{image.src='';reject(new Error('Image loading cancelled'));};
+      const finish=(callback,value)=>{signal.removeEventListener('abort',cancel);callback(value);};
+      decoded.then(()=>finish(resolve),error=>finish(reject,error));
+      if(signal.aborted)cancel();else signal.addEventListener('abort',cancel,{once:true});
+    });else await decoded;
+  }
   if(!current())return;
   if(persist)await saveAppearance(url);
   if(!current())return;
@@ -405,6 +423,38 @@ async function setAppearance(url,persist=false,revision=null){
   if(!image)clearPhoto();
   wardrobeUi?.refresh();
 }
+// Read and decode once, before the first frame when the saved picture is equipped.
+// Explicit original/Big Eye choices keep loading unused photos in the background.
+function hydrateAppearance(){
+  if(appearanceHydration)return appearanceHydration;
+  const revision=appearanceRevision,controller=new AbortController();
+  let timer;
+  const work=loadAppearance({strict:true}).then(async url=>{
+    if(revision!==appearanceRevision)return;
+    appearanceUrl=url;wardrobeUi?.refresh();
+    await setAppearance(url,false,revision,controller.signal);
+    if(revision!==appearanceRevision)return;
+    const latest=storage.read('qiuqiule-appearance-state',savedAppearanceState);
+    appearanceState=normalizeAppearanceState(latest,{best,hasImage:!!appearance});
+    persistAppearanceState();wardrobeUi?.refresh();
+  });
+  const deadline=new Promise((_,reject)=>{
+    timer=setTimeout(()=>{controller.abort();reject(new Error('Saved image timed out'));},5000);
+  });
+  appearanceHydration=Promise.race([work,deadline]).catch(()=>{
+    if(revision!==appearanceRevision)return;
+    // A late read/decode must not swap the fallback after play has begun.
+    // Keep the saved preference and bytes so a temporary failure can recover.
+    appearanceRevision++;appearanceLoading=false;
+    if(!appearance)appearanceUrl=null;
+    wardrobeUi?.refresh();
+    if(appearanceState.selected==='custom'){
+      const message='图片暂时无法读取，请重新选取';
+      if(wardrobeUi)toast(message);else startupAppearanceError=message;
+    }
+  }).finally(()=>clearTimeout(timer));
+  return appearanceHydration;
+}
 function initializeSkins(){
   const panel=createUnlockPanel(document);$('#modal-layer').append(panel);
   panel.addEventListener('click',dismissSkinUnlock);
@@ -413,6 +463,7 @@ function initializeSkins(){
   Object.assign(photoCanvas.style,{position:'fixed',left:'0',top:'0',pointerEvents:'none',zIndex:'3'});
   photoCanvas.width=photoCanvas.height=1;photoCanvas.hidden=true;
   document.body.append(photoCanvas);photoRenderer=new PhotoRenderer(photoCanvas);
+  photoRenderer.setImage(appearance);
   auxiliaryPhotos?.dispose();
   auxiliaryPhotos=new AuxiliaryPhotoPool(document,{before:photoCanvas,maxPixels:512,maxSlots:20});
   auxiliaryPhotos.setImage(appearance);
@@ -425,10 +476,8 @@ function initializeSkins(){
     onAppearance:chooseAppearance,onStarTrail:chooseStarTrail,onNavigate:navigateWardrobePreview,
     onImage:url=>setAppearance(url,true),onError:message=>toast(message)});
   storage.write('qiuqiule-star-trails',starTrailState);
-  const revision=appearanceRevision;
-  loadAppearance().then(async url=>{if(revision!==appearanceRevision)return;appearanceUrl=url;wardrobeUi?.refresh();await setAppearance(url,false,revision);if(revision!==appearanceRevision)return;
-    const latest=storage.read('qiuqiule-appearance-state',savedAppearanceState);
-    appearanceState=normalizeAppearanceState(latest,{best,hasImage:!!appearance});persistAppearanceState();wardrobeUi?.refresh();}).catch(()=>{if(revision!==appearanceRevision)return;appearanceLoading=false;wardrobeUi?.refresh();toast('图片暂时无法读取，请重新选取');});
+  hydrateAppearance();
+  if(startupAppearanceError){toast(startupAppearanceError);startupAppearanceError=null;}
 }
 function fitMenuHeight(){
   const panel=$('#settings-panel'),hidden=panel.hidden;
@@ -467,12 +516,18 @@ function updateMenuTransition(dt){
   if(move.elapsed<duration*2)return;
   const target=move.target;showPanel(target,{fade:false});uiAnchor=target;paintUiBall(anchorPose(target));
 }
+function syncOnboarding(){
+  if(!scene||screen!=='home'||modal||transfer||controlFlight||document.hidden||!document.hasFocus()||!home.ready){onboarding.suspend();return;}
+  const {player,play}=home.layout,dx=player.x-play.x,dy=player.y-play.y;
+  const distance=Math.hypot(dx,dy);
+  onboarding.show({x:player.x,y:player.y,dx:dx/distance*home.maxPull,dy:dy/distance*home.maxPull});
+}
 function syncInputs(){
   const moving=!!transfer||!!controlFlight||!!wardrobeShowcase&&wardrobeShowcase.phase!=='idle';
   $('#modal-layer').inert=moving;
   $('#home').inert=!!modal||moving||screen==='entering';
   $('#hud').inert=!!modal||moving||screen==='entering';
-  ;
+  syncOnboarding();
 }
 function showPanel(name,{fade=true}={}){
   resetMenuTransition();cancelDrag();sound.clearEnd();modal=name;paused=screen==='play';
@@ -989,6 +1044,7 @@ function saveEndlessProgress(){
 }
 
 function startGame(){
+  onboarding.complete();
   pendingRunSnapshot=runSaveStore.read();
   if(pendingRunSnapshot){showRunChoice();return;}
   hidePanel();prepareGame();paused=false;syncInputs();tone(280,.12,'sine',.04,1.5);
@@ -1402,6 +1458,7 @@ function bindInput(canvas){
 
     if(!drag||drag.id!==e.pointerId)return;
     const p=position(e);drag.dx=p.x-drag.x;drag.dy=p.y-drag.y;
+    if(screen==='home')onboarding.previewDrag(Math.hypot(drag.dx,drag.dy));
     if(screen==='play'&&!drag.aim&&resumeSlowRemaining>0&&Math.hypot(drag.dx,drag.dy)>=6){resumeSlowRemaining=0;scene.timeScale=1;}
     if(drag.aim){const now=aimInputTime(e);drag.aim.move(p.x,p.y,now);updateAim(now);}
     updateChargeFeedback();e.preventDefault();
@@ -1411,6 +1468,7 @@ function bindInput(canvas){
 
     if(!drag||drag.id!==e.pointerId)return;
     const p=position(e);drag.dx=p.x-drag.x;drag.dy=p.y-drag.y;
+    if(screen==='home')onboarding.previewDrag(Math.hypot(drag.dx,drag.dy));
     if(screen==='play'&&!drag.aim&&resumeSlowRemaining>0&&Math.hypot(drag.dx,drag.dy)>=6){resumeSlowRemaining=0;scene.timeScale=1;}
     let shouldShoot=true,releasedAim=null;
     if(drag.aim){
@@ -1476,7 +1534,7 @@ function boot(){
           }
           this.ending=ending;ending.resumePending=true;this.timeScale=reducedMotion||!settings.juice?1:.25;
         }
-        layoutHomeControl();
+        layoutHomeControl();syncOnboarding();
         if(['settings','help','menu-transition'].includes(modal))fitMenuHeight();
       };
       resize();
@@ -1822,7 +1880,7 @@ function boot(){
       }
       layoutHomeControl();
       if(before!=='entering'&&home.phase==='entering'){
-        screen='entering';cancelDrag();syncInputs();
+        onboarding.complete();screen='entering';cancelDrag();syncInputs();
         sound.setMusicScene('endless');
         pendingRunSnapshot=runSaveStore.read();
         $('.pause-button').hidden=!!pendingRunSnapshot;
@@ -1831,6 +1889,7 @@ function boot(){
         clearChoiceLabels();$('.pause-button').disabled=true;
         tone(420,.24,'sine',.055,1.7);
       }
+      if(before!==home.phase)syncOnboarding();
       if(screen==='entering'){
         $('#home').style.opacity=home.fade;$('#hud').style.opacity=home.hudOpacity;
       }
@@ -2297,7 +2356,7 @@ document.addEventListener('keydown',e=>{
     if(modal&&modal!=='over')closePanel();else if(screen==='play'&&world.phase!=='over')setPanel('pause');
   }
   if(e.key==='Tab'&&modal){
-    const elements=[...$('#'+modal+'-panel').querySelectorAll('button,input')].filter(element=>!element.hidden&&!element.disabled),first=elements[0],last=elements.at(-1);
+    const elements=[...$('#'+modal+'-panel').querySelectorAll('button,input,summary')].filter(element=>!element.hidden&&!element.disabled),first=elements[0],last=elements.at(-1);
     if(e.shiftKey&&document.activeElement===first){last.focus();e.preventDefault();}
     else if(!e.shiftKey&&document.activeElement===last){first.focus();e.preventDefault();}
   }
@@ -2313,6 +2372,7 @@ function pauseForInterruption(){
   if(transfer){paused=true;pauseOnArrival=true;saveCurrentRun();}else openPause();
 }
 function resumeEnding(){
+  syncOnboarding();
   if(!document.hidden&&document.hasFocus()&&world?.isRunChoice&&!modal)paused=false;
   if(scene?.ending&&!document.hidden&&document.hasFocus()){scene.ending.suspended=false;scene.ending.resumePending=true;scene.timeScale=reducedMotion||!settings.juice?1:.25;}
 }
@@ -2329,13 +2389,15 @@ window.addEventListener('beforeunload',pauseForInterruption);
 window.addEventListener('pageshow',()=>{sound.setHidden(document.hidden);resumeEnding();});
 window.addEventListener('blur',pauseForInterruption);
 window.addEventListener('focus',resumeEnding);
-$('#buff-guide').innerHTML=UPGRADE_DEFINITIONS.map(b=>`<article class="buff-explanation"><span aria-hidden="true" data-upgrade-kind="${b.kind}">${upgradeIconMarkup(b,hex(settings.bg))}</span><div><h3>${b.name}<small>${b.short}</small></h3><p>${b.detail}</p></div></article>`).join('');
+$('#buff-guide').innerHTML=UPGRADE_DEFINITIONS.map(b=>`<article class="buff-explanation"><span aria-hidden="true" data-upgrade-kind="${b.kind}">${upgradeIconMarkup(b,hex(settings.bg))}</span><div><h3>${b.name}</h3><p>${HELP_UPGRADE_DESCRIPTIONS[b.id]}</p></div></article>`).join('');
 $$('[data-icon]').forEach(button=>button.innerHTML=iconMarkup(button.dataset.icon));
 applyTheme();sound.setMusicScene('home');
 sound.setHidden(document.hidden);
 if(!document.hidden)sound.tryAutoplay();
 layoutHomeControl();
 async function bootWithFont(){
+  const needsSavedPhoto=appearanceState.selected==='custom'||savedAppearanceState?.selected===undefined;
+  const hydration=hydrateAppearance();
   // Canvas and Phaser retain metrics from the first draw. Load the same face
   // used by the DOM before creating the scene so numbers never start in a fallback.
   try{
@@ -2344,6 +2406,7 @@ async function bootWithFont(){
   }catch{
     // Font failures and older WebViews still get a playable game.
   }
+  if(needsSavedPhoto)await hydration;
   boot();
 }
 if(document.readyState==='complete')bootWithFont();else window.addEventListener('load',bootWithFont,{once:true});

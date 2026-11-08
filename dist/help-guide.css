@@ -1,0 +1,28 @@
+/* Keep the first read short; reference lists expand only when requested. */
+#help-panel .help-intro{color:var(--ink);font-size:13px;line-height:1.85;margin-bottom:24px}
+#help-panel .help-steps{margin:0 0 24px}
+#help-panel .help-steps li{gap:14px;margin-bottom:22px}
+#help-panel .help-steps li>b{font-size:11px;line-height:1.8;font-weight:400;flex-shrink:0}
+#help-panel .help-steps h3{font-size:13px;line-height:1.8;margin:0;font-weight:600}
+#help-panel .help-steps p{font-size:12px;line-height:1.85;margin:5px 0 0}
+.help-reference{border-top:1px solid var(--line)}
+.help-reference:last-child{border-bottom:1px solid var(--line)}
+.help-reference>summary{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:52px;padding:13px 2px;cursor:pointer;list-style:none;font-size:13px;font-weight:600;touch-action:manipulation}
+.help-reference>summary::-webkit-details-marker{display:none}
+.help-reference>summary::after{content:"";width:7px;height:7px;flex-shrink:0;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg);margin-right:4px}
+.help-reference[open]>summary::after{transform:translateY(2px) rotate(225deg)}
+.help-reference>summary:focus-visible{outline:2px solid var(--ink);outline-offset:-2px;border-radius:4px}
+.help-reference-body{padding:0 2px 15px}
+#help-panel .help-reference-body>p{font-size:12px;line-height:1.85;margin:0 0 16px}
+#help-panel .buff-explanation p{font-size:12px;line-height:1.85}
+#help-panel .buff-explanation:last-child{border-bottom:0;padding-bottom:0}
+.enemy-guide{margin:0}
+.enemy-guide>div{position:relative;min-height:49px;padding:15px 0 15px 38px;border-top:1px solid var(--line)}
+.enemy-guide>div:first-child{padding-top:0;border-top:0}
+.enemy-guide dt{font-size:13px;font-weight:600;line-height:1.8}
+.enemy-guide dd{font-size:12px;line-height:1.85;color:var(--muted);margin:4px 0 0}
+@media(max-width:360px){#help-panel .help-steps li{gap:10px}}
+
+.enemy-guide-icon{position:absolute;left:-4.5px;top:13px;display:block;width:34px;height:34px;pointer-events:none}
+.enemy-guide>div:first-child .enemy-guide-icon{top:-2px}
+.enemy-guide-icon svg{display:block;width:100%;height:100%;stroke:none}

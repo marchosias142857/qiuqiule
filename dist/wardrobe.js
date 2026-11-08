@@ -22,7 +22,7 @@ function appearanceDatabase(){
     request.onblocked=()=>reject(new Error('Image storage busy'));
   });
 }
-export async function loadAppearance(){
+export async function loadAppearance({strict=false}={}){
   // A fallback is the latest successful write when IndexedDB could not be
   // updated. Its explicit null also prevents an undeleted old image returning.
   try{
@@ -41,7 +41,7 @@ export async function loadAppearance(){
       tx.oncomplete=()=>db.close();tx.onabort=()=>{db.close();reject(tx.error);};
     });
     return value;
-  }catch{}
+  }catch(error){if(strict)throw error;}
   return null;
 }
 export async function saveAppearance(dataURL){

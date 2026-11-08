@@ -20,7 +20,7 @@ function element(selector){
   const classes=new Set();
   const e={hidden:false,inert:false,children:[],dataset:{},listeners:new Map(),style:{setProperty(name,value){this[name]=value;},removeProperty(name){delete this[name];}},
     classList:{add:(...names)=>names.forEach(x=>classes.add(x)),remove:(...names)=>names.forEach(x=>classes.delete(x)),contains:x=>classes.has(x),toggle(x,on){on?classes.add(x):classes.delete(x);}},
-    attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k]??null;},removeAttribute(k){delete this.attributes[k];},addEventListener(type,fn){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(fn);},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},
+    attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k]??null;},removeAttribute(k){delete this.attributes[k];},addEventListener(type,fn){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(fn);},focus(){},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},remove(){document.body.children=document.body.children.filter(child=>child!==this);},
     firstElementChild:{style:{}},lastElementChild:{style:{}},
     querySelector:child=>element(selector+' '+child),
     getBoundingClientRect(){
@@ -58,10 +58,12 @@ globalThis.matchMedia=()=>({matches:false});
 globalThis.getComputedStyle=()=>({paddingTop:'0',paddingBottom:'0',borderTopWidth:'0',borderBottomWidth:'0',marginBottom:'0'});
 globalThis.requestAnimationFrame=fn=>fn();
 let createdElementCount=0;
-globalThis.document={createElementNS:createSvgNode,readyState:'loading',hidden:false,hasFocus:()=>true,documentElement:element('html'),createElement:tag=>element(`created-${tag}-${++createdElementCount}`),
+globalThis.document={createElementNS:createSvgNode,readyState:'loading',hidden:false,hasFocus:()=>true,body:element('body'),documentElement:element('html'),createElement:tag=>{const node=element(`created-${tag}-${++createdElementCount}`);if(tag==='canvas')node.getContext=()=>null;return node;},
+  getElementById:id=>element('#'+id),
   querySelector:element,
   querySelectorAll:selector=>selector==='.menu-panel'?['#settings-panel','#help-panel','#menu-transition-panel'].map(element):[],
-  addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn);}};
+  addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn);},
+  removeEventListener(type,fn){listeners.set(type,(listeners.get(type)||[]).filter(listener=>listener!==fn));}};
 if(!globalThis.navigator)globalThis.navigator={};
 
 const entry=new URL('../dist/game.js',import.meta.url);
@@ -118,6 +120,8 @@ export function enterFromHome(){
 }
 export const bindCanvas=bindInput;
 export const readHome=()=>home;
+export const readOnboardingForTest=()=>({active:onboarding.active,done:onboarding.done});
+export function setOnboardingPanelForTest(name){if(name)showPanel(name);else hidePanel();}
 export const expressionEnabled=()=>settings.expressions;
 export const setExpressionEnabled=value=>{settings.expressions=value;};
 export const playerInk=()=>hex(settings.player);
@@ -195,6 +199,8 @@ export function mountInitialScene(canvas,graphics){
 }
 export const applyAppearance=setAppearance;
 export function hydrateAppearanceForTest(url){appearanceLoading=true;return setAppearance(url,false,appearanceRevision);}
+export const hydrateAppearanceForStartupTest=hydrateAppearance;
+export function initializePhotoBoundaryForTest(){initializeSkins();return {image:photoRenderer.image,auxiliaryImage:auxiliaryPhotos.image};}
 export const imageIsLoadingForTest=()=>appearanceLoading;
 export const hidePhotoForFrame=clearPhoto;
 export function readAppearance(){return {appearance,appearanceUrl};}
@@ -4998,4 +5004,194 @@ test('v10.1 automatic failure invalidates an undeletable checkpoint and still re
   assert.equal(app.readRestart().modal,'over');assert.ok(app.readRestart().result);
   assert.equal(app.savedRunForTest(),null);
   windowListeners.get('pagehide').forEach(fn=>fn());assert.equal(app.savedRunForTest(),null);
+});
+
+const ONBOARDING_SAVE_KEY='qiuqiule-onboarding-v1';
+async function withFreshOnboarding(callback){
+  const previousSave=new Map(saved),previousChildren=[...document.body.children];
+  for(const key of [ONBOARDING_SAVE_KEY,'qiuqiule-best','qiuqiule-endless','qiuqiule-run-save'])saved.delete(key);
+  try{await callback();}finally{
+    saved.clear();for(const [key,value] of previousSave)saved.set(key,value);
+    document.body.replaceChildren(...previousChildren);
+  }
+}
+
+test('first-visit input keeps taps and cancelled tiny drags visible, then persists any real drag before release',async t=>{
+  const previousWidth=window.innerWidth,previousHeight=window.innerHeight;
+  t.after(()=>{window.innerWidth=previousWidth;window.innerHeight=previousHeight;});
+  for(const [width,height] of [[390,844],[844,390]])await withFreshOnboarding(async()=>{
+    window.innerWidth=width;window.innerHeight=height;
+    await withReloadedEntry(null,false,async fresh=>{
+      await fresh.startWithFont();
+      const pointer=inputCanvas(width,height,fresh);
+      const {home,scene}=fresh.mountInitialScene(pointer.canvas,graphicsRecorder());
+      assert.deepEqual(fresh.readOnboardingForTest(),{active:true,done:false});
+      pointer('pointerdown',100,150);pointer('pointerup',100,150);
+      assert.equal(fresh.readOnboardingForTest().active,true);
+      assert.equal(saved.has(ONBOARDING_SAVE_KEY),false);
+      pointer('pointerdown',100,150);pointer('pointermove',104,154);pointer('pointercancel');
+      assert.equal(fresh.readOnboardingForTest().active,true);
+      assert.equal(saved.has(ONBOARDING_SAVE_KEY),false);
+      // Deliberately move away from Start: completing the lesson requires the
+      // input gesture itself, not winning a collision or finishing a launch.
+      pointer('pointerdown',100,150);pointer('pointermove',108,150);
+      assert.deepEqual(fresh.readOnboardingForTest(),{active:false,done:true});
+      assert.equal(JSON.parse(saved.get(ONBOARDING_SAVE_KEY)),true);
+      assert.equal(home.phase,'idle','completion happens while the pointer is still held');
+      assert.equal(fresh.readRestart().world,undefined);
+      pointer('pointercancel');scene.update(0,0);
+      assert.deepEqual(fresh.readOnboardingForTest(),{active:false,done:true});
+    });
+    await withReloadedEntry(null,false,async fresh=>{
+      await fresh.startWithFont();
+      fresh.mountInitialScene(inputCanvas(width,height,fresh).canvas,graphicsRecorder());
+      assert.deepEqual(fresh.readOnboardingForTest(),{active:false,done:true},'reloading without ever starting a run must still remember the lesson');
+    });
+  });
+});
+
+test('first-visit overlay suspends for menus and backgrounding without being marked complete',async()=>{
+  await withFreshOnboarding(()=>withReloadedEntry(null,false,async fresh=>{
+    await fresh.startWithFont();
+    fresh.mountInitialScene(inputCanvas(390,844,fresh).canvas,graphicsRecorder());
+    fresh.setOnboardingPanelForTest('help');
+    assert.deepEqual(fresh.readOnboardingForTest(),{active:false,done:false});
+    fresh.setOnboardingPanelForTest(null);
+    assert.equal(fresh.readOnboardingForTest().active,true);
+    try{
+      document.hidden=true;for(const handler of [...listeners.get('visibilitychange')])handler();
+      assert.equal(fresh.readOnboardingForTest().active,false);
+      document.hidden=false;for(const handler of [...listeners.get('visibilitychange')])handler();
+      assert.equal(fresh.readOnboardingForTest().active,true);
+      assert.equal(saved.has(ONBOARDING_SAVE_KEY),false);
+    }finally{document.hidden=false;}
+  }));
+});
+
+test('a release-only gesture and keyboard Start both dismiss the first-visit lesson',async()=>{
+  for(const keyboard of [false,true])await withFreshOnboarding(()=>withReloadedEntry(null,false,async fresh=>{
+    await fresh.startWithFont();
+    const pointer=inputCanvas(390,844,fresh),{home,scene}=fresh.mountInitialScene(pointer.canvas,graphicsRecorder());
+    if(keyboard){
+      listeners.get('click').at(-1)({target:{closest:()=>({dataset:{action:'home-launch'}})},detail:0});
+      advanceScene(scene,1.6);
+      assert.ok(['entering','play'].includes(fresh.readRestart().screen));
+    }else{
+      pointer('pointerdown',100,150);pointer('pointerup',100,158);
+      assert.ok(['wobble','flight'].includes(home.phase),'the release still reaches normal home shooting');
+      assert.equal(fresh.readRestart().world,undefined,'completion does not depend on entering gameplay');
+    }
+    assert.deepEqual(fresh.readOnboardingForTest(),{active:false,done:true});
+    assert.equal(JSON.parse(saved.get(ONBOARDING_SAVE_KEY)),true);
+  }));
+});
+
+const flushStartup=async()=>{for(let i=0;i<16;i++)await Promise.resolve();};
+function startupImageFixture(t,{selection='custom',read='pending',decode='pending'}={}){
+  const stored=new Map(saved),oldImage=globalThis.Image,oldDatabase=globalThis.indexedDB,oldFonts=document.fonts,OriginalGame=Phaser.Game;
+  const url='data:image/png;base64,c3RhcnR1cA==',reads=[],decodes=[],images=[],constructed=[];
+  let opens=0,decodeCount=0,observed=null;
+  for(const key of ['qiuqiule-appearance','qiuqiule-appearance-state','qiuqiule-best','qiuqiule-endless','qiuqiule-run-save'])saved.delete(key);
+  saved.set(ONBOARDING_SAVE_KEY,'true');
+  if(selection!==undefined)saved.set('qiuqiule-appearance-state',JSON.stringify({selected:selection,bigEyeUnlocked:selection==='big-eye'}));
+  delete document.fonts;
+  globalThis.Image=class{
+    constructor(){this.naturalWidth=this.naturalHeight=64;images.push(this);}
+    decode(){
+      decodeCount++;
+      if(decode==='reject')return Promise.reject(Error('Image cannot be decoded'));
+      if(decode==='ready')return Promise.resolve();
+      return new Promise(resolve=>decodes.push(resolve));
+    }
+  };
+  globalThis.indexedDB={open(){
+    opens++;
+    const request={result:{close(){},transaction(){
+      const tx={objectStore(){return {get(){
+        const result={result:url,error:Error('Image storage read failed')};
+        const release=()=>{if(read==='reject')result.onerror();else result.onsuccess();tx.oncomplete?.();};
+        reads.push(release);if(read==='ready'||read==='reject')queueMicrotask(release);
+        return result;
+      }}}};return tx;
+    }}};
+    queueMicrotask(()=>request.onsuccess());return request;
+  }};
+  Phaser.Game=class extends OriginalGame{constructor(config){
+    constructed.push({appearance:observed?.readAppearance().appearance,presentation:observed?.readAppearancePresentation()});
+    super(config);
+  }};
+  t.after(()=>{
+    globalThis.Image=oldImage;if(oldDatabase===undefined)delete globalThis.indexedDB;else globalThis.indexedDB=oldDatabase;
+    if(oldFonts===undefined)delete document.fonts;else document.fonts=oldFonts;Phaser.Game=OriginalGame;
+    saved.clear();for(const [key,value]of stored)saved.set(key,value);
+  });
+  return {url,reads,decodes,images,constructed,observe:fresh=>{observed=fresh;},get opens(){return opens;},get decodeCount(){return decodeCount;}};
+}
+
+for(const legacy of [false,true])test(`startup ${legacy?'legacy saved photo':'selected custom photo'} is decoded before Phaser can draw its first frame`,async t=>{
+  const f=startupImageFixture(t,{selection:legacy?undefined:'custom'});
+  // Explicit undefined is the absence of a legacy appearance selection.
+  if(legacy)saved.delete('qiuqiule-appearance-state');
+  let releaseFont,fontStarted=false;
+  document.fonts={load(){fontStarted=true;return new Promise(resolve=>releaseFont=resolve);},ready:Promise.resolve()};
+  await withReloadedEntry(null,false,async fresh=>{
+    f.observe(fresh);const booting=fresh.startWithFont();await flushStartup();
+    assert.equal(fontStarted,true);assert.equal(f.reads.length,1,'font and saved-image preparation begin concurrently');
+    assert.equal(f.constructed.length,0);
+    releaseFont([]);await flushStartup();assert.equal(f.constructed.length,0,'font readiness alone cannot reveal the fallback ball');
+    f.reads[0]();await flushStartup();
+    assert.equal(f.decodeCount,1);assert.equal(f.constructed.length,0,'storage readiness still waits for decode');
+    f.decodes[0]();await booting;
+    assert.equal(f.constructed.length,1);
+    assert.equal(f.constructed[0].appearance,f.images[0]);
+    assert.equal(f.constructed[0].presentation.state.selected,'custom');
+    assert.deepEqual(f.constructed[0].presentation.layers.map(({id,weight})=>({id,weight})),[{id:'custom',weight:1}]);
+    const attached=fresh.initializePhotoBoundaryForTest();
+    assert.equal(attached.image,f.images[0],'the first photo renderer receives the predecoded image immediately');
+    assert.equal(attached.auxiliaryImage,f.images[0]);
+    await fresh.hydrateAppearanceForStartupTest();
+    assert.equal(f.opens,1);assert.equal(f.decodeCount,1,'scene initialization does not load or decode the saved photo again');
+  });
+});
+
+for(const selection of ['original','big-eye'])test(`startup ${selection} stays responsive while an unused saved photo loads`,async t=>{
+  const f=startupImageFixture(t,{selection});
+  await withReloadedEntry(null,false,async fresh=>{
+    f.observe(fresh);await fresh.startWithFont();
+    assert.equal(f.constructed.length,1,'an explicitly unused custom photo never delays the equipped appearance');
+    assert.equal(f.constructed[0].presentation.state.selected,selection);
+    assert.equal(f.constructed[0].appearance,null);
+    await flushStartup();f.reads[0]();await flushStartup();f.decodes[0]();await fresh.hydrateAppearanceForStartupTest();
+    assert.equal(fresh.readAppearancePresentation().state.selected,selection,'late background hydration must preserve explicit selection');
+    assert.equal(fresh.readAppearance().appearance,f.images[0],'the decoded photo remains reusable in the wardrobe');
+  });
+});
+
+for(const failure of ['read','decode'])test(`startup ${failure} failure boots a fallback without erasing the saved custom choice`,async t=>{
+  const f=startupImageFixture(t,{read:failure==='read'?'reject':'ready',decode:failure==='decode'?'reject':'ready'});
+  await withReloadedEntry(null,false,async fresh=>{
+    f.observe(fresh);await fresh.startWithFont();
+    assert.equal(f.constructed.length,1);assert.equal(f.constructed[0].appearance,null);
+    assert.equal(fresh.imageIsLoadingForTest(),false);
+    assert.equal(fresh.readAppearance().appearanceUrl,null);
+    assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).selected,'custom','temporary failure must remain recoverable on the next visit');
+  });
+});
+
+for(const hanging of ['storage','decode'])test(`startup bounds a hung ${hanging} and ignores its late result after gameplay starts`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const f=startupImageFixture(t,{read:hanging==='decode'?'ready':'pending'});
+  await withReloadedEntry(null,false,async fresh=>{
+    f.observe(fresh);const booting=fresh.startWithFont();await flushStartup();
+    t.mock.timers.tick(4999);await flushStartup();assert.equal(f.constructed.length,0);
+    t.mock.timers.tick(1);await booting;
+    assert.equal(f.constructed.length,1);assert.equal(fresh.imageIsLoadingForTest(),false);
+    assert.equal(fresh.readAppearance().appearance,null);
+    if(hanging==='storage')f.reads[0]();else f.decodes[0]();
+    await flushStartup();
+    assert.equal(fresh.readAppearance().appearance,null,'late work cannot change the visible ball after fallback startup');
+    assert.equal(fresh.readAppearance().appearanceUrl,null);
+    assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).selected,'custom');
+    if(hanging==='storage')assert.equal(f.decodeCount,0,'an expired storage read must not start an unnecessary decode');
+  });
 });
