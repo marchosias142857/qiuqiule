@@ -125,3 +125,18 @@ test('reduced motion freezes a complete sample; resize keeps its relative compos
   showroom.reset();assert.equal(showroom.radius,0);assert.equal(showroom.points.length,0);assert.equal(showroom.dom.groups.size,0);
   assert.equal(showroom.dom.svg.getAttribute('visibility'),'hidden');
 });
+
+test('breathing reuses stationary ribbon geometry and invalidates it for retraction, color, resize and a new host',()=>{
+  const {host}=fixture(),showroom=new WardrobeShowroom(),bands=showroom.workspace.bands.bind(showroom.workspace);
+  let builds=0;showroom.workspace.bands=(...args)=>{builds++;return bands(...args);};
+  showroom.step(0,{radius:pose.r});showroom.paint(host,{pose,length:fullLength,layers:selected});
+  const first=showroom.dom.thin.paths.map(p=>p.getAttribute('d'));
+  for(let i=0;i<120;i++){showroom.step(1/120,{radius:pose.r});showroom.paint(host,{pose,length:fullLength,layers:selected});}
+  assert.equal(builds,1);assert.deepEqual(showroom.dom.thin.paths.map(p=>p.getAttribute('d')),first);
+  showroom.paint(host,{pose,length:fullLength/2,layers:selected});assert.equal(builds,2);
+  showroom.paint(host,{pose,length:fullLength/2,layers:selected,color:0xabcdef});assert.equal(builds,3);
+  assert.ok(showroom.dom.thin.paths.every(p=>p.getAttribute('fill')==='#abcdef'));
+  showroom.step(0,{radius:24});showroom.paint(host,{pose:{...pose,r:24},length:fullLength,layers:selected});assert.equal(builds,4);
+  const second=fixture().host;showroom.paint(second,{pose:{...pose,r:24},length:fullLength,layers:selected});assert.equal(builds,5);
+  assert.equal(visiblePaths(showroom.dom.thin).length,9);
+});

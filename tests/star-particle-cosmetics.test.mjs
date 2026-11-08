@@ -90,3 +90,16 @@ test('unequipping or invalid cosmetics clear visual state and never emit for an 
   }
   assert.equal(s.fx.count,0);assert.equal(s.fx.trackers.size,0);
 });
+
+test('recycled particles release departed bodies and clearing releases the previous run',()=>{
+  const s=scene();for(let i=0;i<120;i++)s.step();
+  assert.ok(s.fx.count>0);assert.ok(s.fx.free.every(p=>p.owner==null));
+  s.body.active=false;s.step();
+  assert.equal(s.fx.count,0);assert.equal(s.fx.trackers.size,0);
+  assert.ok(s.fx.free.every(p=>p.owner==null),'the inactive pool cannot keep a discarded body alive');
+  s.body.active=true;for(let i=0;i<60;i++)s.step();assert.ok(s.fx.count>0);
+  s.fx.clear();
+  assert.equal(s.fx.count,0);assert.equal(s.fx.trackers.size,0);assert.equal(s.fx.free.length,24);
+  assert.equal(s.fx.living.length,0);assert.equal(s.fx.bounds,null);
+  assert.ok(s.fx.free.every(p=>p.owner==null));
+});

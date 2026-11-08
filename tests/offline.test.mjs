@@ -1,28 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {webcrypto} from 'node:crypto';
+import {webcrypto,createHash} from 'node:crypto';
 import {readFile,stat} from 'node:fs/promises';
 const root=new URL('../dist/',import.meta.url);
 const source=await readFile(new URL('sw.js',root),'utf8');
 const musicFiles=['audio/endless.mp3','audio/boss.mp3'];
 const authoredModules=['run-upgrades.js','stage-hud.js','star-trails.js','star-particles.js','particle-appearance.js','skin-unlock.js'];
 
-function worker({failed=[],wrongType=[],partial=[],redirects={},base='/'}={}){
-  const handlers={},stores=new Map(),messages=[],requests=[];
+function worker({failed=[],wrongType=[],partial=[],redirects={},base='/',stores=new Map(),denySharedWrites=false,claimFails=false,code=source,assetBodies={},fetchOverride=null,timers={setTimeout,clearTimeout}}={}){
+  const handlers={},messages=[],requests=[];
   const failures=new Set(failed),wrong=new Set(wrongType);let offline=false,claimed=false,skipped=false;
   const key=url=>typeof url==='string'?url:url.url;
   const caches={
     async open(name){
       if(!stores.has(name))stores.set(name,new Map());const cache=stores.get(name);
-      return {async put(url,response){cache.set(key(url),response.clone());},async match(url){return cache.get(key(url))?.clone();},async keys(){return Array.from(cache.keys(),url=>({url}));}};
+      return {async put(url,response){if(denySharedWrites&&name.endsWith('-music-v1'))throw Error('quota exceeded');cache.set(key(url),response.clone());},async match(url){return cache.get(key(url))?.clone();},async delete(url){return cache.delete(key(url));},async keys(){return Array.from(cache.keys(),url=>({url}));}};
     },
     async keys(){return [...stores.keys()];},async delete(name){return stores.delete(name);}
   };
   const self={location:new URL('https://game.example'+base+'sw.js'),addEventListener(type,callback){handlers[type]=callback;},async skipWaiting(){skipped=true;},
-    clients:{async claim(){claimed=true;},async matchAll(){return [{postMessage(data){messages.push(data);}}];}}};
+    clients:{async claim(){if(claimFails)throw Error('claim failed');claimed=true;},async matchAll(){return [{postMessage(data){messages.push(data);}}];}}};
   const fetch=async(url,options)=>{
     const parsed=new URL(key(url));requests.push({path:parsed.pathname,options});
+    const overridden=fetchOverride?.(parsed,options);
+    if(overridden!==undefined)return overridden;
     if(offline||failures.has(parsed.pathname))throw new Error('network unavailable');
     if(redirects[parsed.pathname]){
       // Real hosting canonicalizes index.html and redirects unauthenticated assets.
@@ -36,11 +38,11 @@ function worker({failed=[],wrongType=[],partial=[],redirects={},base='/'}={}){
     if(partial.includes(parsed.pathname))return new Response('short slice',{status:206,headers:{'content-range':'bytes 100-110/1000','content-type':'audio/mpeg'}});
     if(wrong.has(parsed.pathname))return new Response('<html>Please sign in</html>',{headers:{'content-type':'text/html'}});
     const relative=parsed.pathname.slice(base.length);
-    const body=await readFile(new URL(relative||'index.html',root));
+    const body=assetBodies[relative]??await readFile(new URL(relative||'index.html',root));
     const type=parsed.pathname.endsWith('.js')?'text/javascript':parsed.pathname.endsWith('.css')?'text/css':!relative||parsed.pathname.endsWith('.html')?'text/html':'application/octet-stream';
     return new Response(body,{headers:{'content-type':type}});
   };
-  vm.runInNewContext(source,{self,caches,fetch,URL,Promise,Error,crypto:webcrypto});
+  vm.runInNewContext(code,{self,caches,fetch,URL,Promise,Error,crypto:webcrypto,AbortController,setTimeout:timers.setTimeout,clearTimeout:timers.clearTimeout});
   return{stores,messages,requests,failures,setOffline(value=true){offline=value;},get claimed(){return claimed;},get skipped(){return skipped;},
     async event(name,data={}){let promise;handlers[name]({...data,waitUntil(p){promise=p;},respondWith(p){promise=p;}});return promise;},
     async status(){let reply;await this.event('message',{data:{type:'CHECK_CACHE'},ports:[{postMessage(data){reply=data;}}]});return reply;}};
@@ -53,6 +55,71 @@ test('manifest carries private-site credentials and all icons/engine exist local
   assert.equal(manifest.orientation,'any');assert.equal(manifest.display,'standalone');
   for(const icon of manifest.icons)assert.ok((await stat(new URL(icon.src,root))).size>1000);
   assert.ok((await stat(new URL('vendor/phaser.min.js',root))).size>1000000);
+});
+
+function manualTimers(){
+  const active=new Map();let sequence=0;
+  return {active,setTimeout(callback,delay){const id=++sequence;active.set(id,{callback,delay});return id;},clearTimeout(id){active.delete(id);},
+    expire(){for(const {callback} of [...active.values()])callback();}};
+}
+const settleWorker=async()=>{for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));};
+
+test('a slow core script keeps its original fetch lifetime without the music deadline',async()=>{
+  const timers=manualTimers();let finishScript,scriptOptions;
+  const pending=new Promise(resolve=>{finishScript=resolve;});
+  const w=worker({timers,fetchOverride(parsed,options){
+    if(parsed.pathname==='/game.js'){scriptOptions=options;return pending;}
+  }});
+  const installing=w.event('install');await settleWorker();
+  assert.equal(timers.active.size,0,'core resources do not allocate music timeout timers');
+  assert.equal(scriptOptions.signal,undefined,'core cancellation behavior stays unchanged');
+  timers.expire();await settleWorker();assert.equal(w.skipped,false);
+  finishScript(new Response(await readFile(new URL('game.js',root)),{headers:{'content-type':'text/javascript'}}));
+  await installing;assert.equal(w.skipped,true);
+  assert.equal(w.requests.filter(request=>request.path==='/game.js').length,1);
+});
+
+test('a stalled shared music download times out before the page and later retries recover',async()=>{
+  const timers=manualTimers(),url='https://game.example/audio/endless.mp3';
+  let finishStalled,first=true,signal;
+  const stalled=new Promise(resolve=>{finishStalled=resolve;});
+  const w=worker({timers,fetchOverride(parsed,options){
+    if(parsed.pathname==='/audio/endless.mp3'&&first){first=false;signal=options.signal;return stalled;}
+  }});
+  await w.event('install');await w.event('activate');
+  const playing=()=>w.event('fetch',{request:{method:'GET',url,mode:'cors'}});
+  const a=assert.rejects(playing(),/timed out/),b=assert.rejects(playing(),/timed out/);
+  await settleWorker();
+  assert.equal(w.requests.filter(request=>request.path==='/audio/endless.mp3').length,1,'concurrent callers share the same download');
+  assert.equal(timers.active.size,1,'one deadline covers the whole shared request');
+  assert.ok([...timers.active.values()][0].delay<20000,'the worker releases before the audio caller gives up');
+  timers.expire();await Promise.all([a,b]);assert.equal(signal.aborted,true);assert.equal(timers.active.size,0);
+  const recovered=await playing(),expected=await readFile(new URL('audio/endless.mp3',root));
+  assert.deepEqual(Buffer.from(await recovered.arrayBuffer()),expected);
+  finishStalled(new Response('late stale response'));
+  await settleWorker();w.setOffline();
+  const cached=await playing();assert.deepEqual(Buffer.from(await cached.arrayBuffer()),expected);
+  assert.equal(w.requests.filter(request=>request.path==='/audio/endless.mp3').length,2,'late timed-out work neither retries nor replaces the successful response');
+});
+
+test('the music deadline also covers a body that stalls after successful response headers',async()=>{
+  const timers=manualTimers(),url='https://game.example/audio/endless.mp3';
+  let body,first=true,signal;
+  const w=worker({timers,fetchOverride(parsed,options){
+    if(parsed.pathname!=='/audio/endless.mp3'||!first)return;
+    first=false;signal=options.signal;
+    return new Response(new ReadableStream({start(controller){body=controller;}}),{headers:{'content-type':'audio/mpeg'}});
+  }});
+  await w.event('install');await w.event('activate');
+  const playing=()=>w.event('fetch',{request:{method:'GET',url,mode:'cors'}});
+  const timedOut=assert.rejects(playing(),/timed out/);await settleWorker();
+  assert.equal(timers.active.size,1);timers.expire();await timedOut;assert.equal(signal.aborted,true);
+  const recovered=await playing(),expected=await readFile(new URL('audio/endless.mp3',root));
+  assert.deepEqual(Buffer.from(await recovered.arrayBuffer()),expected);
+  body.enqueue(new TextEncoder().encode('late incomplete MP3'));body.close();await settleWorker();w.setOffline();
+  assert.deepEqual(Buffer.from(await (await playing()).arrayBuffer()),expected);
+  assert.equal(w.requests.filter(request=>request.path==='/audio/endless.mp3').length,2);
+  assert.equal(timers.active.size,0);
 });
 test('core and warmed extras serve from cache with the network unavailable',async()=>{
   const w=worker();await w.event('install');await w.event('activate');
@@ -223,4 +290,98 @@ test('every relative module reachable from the shipped entrypoints is bundled an
     const response=await w.event('fetch',{request:{method:'GET',url:'https://game.example/'+path,mode:'cors'}});
     assert.ok(response,`${path} is available offline`);assert.ok((await response.text()).length>0);
   }
+});
+
+test('verified migration keeps one MP3 copy across releases and retains the preceding game core',async()=>{
+  const w=worker(),origin='https://game.example/',old='qiuqiule-%2F-v11.3.1';
+  const buffers=await Promise.all(musicFiles.map(file=>readFile(new URL(file,root))));
+  const previous=new Map([[origin,new Response('previous working game')]]);
+  for(const [i,file] of musicFiles.entries())previous.set(origin+file,new Response(buffers[i]));
+  w.stores.set(old,previous);
+  await w.event('install');w.setOffline();await w.event('activate');
+  const state=await w.status();
+  assert.equal(state.musicReady,true);assert.ok(w.stores.has(old));
+  assert.equal(await previous.get(origin).clone().text(),'previous working game');
+  let bytes=0,copies=0;
+  for(const cache of w.stores.values())for(const [url,response] of cache){
+    if(new URL(url).pathname.endsWith('.mp3')){copies++;bytes+=(await response.clone().arrayBuffer()).byteLength;}
+  }
+  assert.equal(copies,2);assert.equal(bytes,buffers.reduce((sum,buffer)=>sum+buffer.byteLength,0));
+  for(const file of musicFiles)assert.equal(previous.has(origin+file),false);
+  const next=worker({stores:w.stores,code:source.replace(/const CACHE = [^\n]+/,"const CACHE = CACHE_PREFIX+'test-next-release';")});
+  await next.event('install');next.setOffline();await next.event('activate');
+  assert.equal((await next.status()).musicReady,true);
+  assert.ok(next.stores.has(state.version),'the preceding core stays available');
+  assert.equal(next.requests.filter(request=>request.path.endsWith('.mp3')).length,0,'unchanged music never redownloads');
+  assert.equal([...next.stores.values()].flatMap(cache=>[...cache.keys()]).filter(url=>new URL(url).pathname.endsWith('.mp3')).length,2);
+});
+
+test('a failed shared-cache write retains and serves the only legacy music offline',async()=>{
+  const w=worker({denySharedWrites:true}),origin='https://game.example/';
+  const old='qiuqiule-%2F-v11.2.0',previous=new Map();
+  const buffers=await Promise.all(musicFiles.map(file=>readFile(new URL(file,root))));
+  for(const [i,file] of musicFiles.entries())previous.set(origin+file,new Response(buffers[i]));
+  w.stores.set(old,previous);
+  w.stores.set('qiuqiule-%2F-v11.3.1',new Map([[origin,new Response('newer core')]]));
+  await w.event('install');w.setOffline();await w.event('activate');
+  assert.equal(w.claimed,true);assert.ok(w.stores.has(old),'quota failure must not evict the only playable copy');
+  for(const [i,file] of musicFiles.entries()){
+    const response=await w.event('fetch',{request:{method:'GET',url:origin+file,mode:'cors'}});
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()),buffers[i]);
+    assert.ok(previous.has(origin+file));
+  }
+  assert.equal(w.requests.filter(request=>request.path.endsWith('.mp3')).length,0);
+});
+
+test('a failed client handoff never removes music or cores still used by the previous worker',async()=>{
+  const w=worker({claimFails:true}),origin='https://game.example/';
+  const buffers=await Promise.all(musicFiles.map(file=>readFile(new URL(file,root))));
+  for(const version of ['11.2.0','11.3.1']){
+    const previous=new Map([[origin,new Response('previous game')]]);
+    for(const [i,file] of musicFiles.entries())previous.set(origin+file,new Response(buffers[i]));
+    w.stores.set('qiuqiule-%2F-v'+version,previous);
+  }
+  await w.event('install');await assert.rejects(w.event('activate'),/claim failed/);
+  for(const version of ['11.2.0','11.3.1']){
+    const previous=w.stores.get('qiuqiule-%2F-v'+version);assert.ok(previous?.has(origin));
+    for(const file of musicFiles)assert.ok(previous.has(origin+file));
+  }
+});
+
+test('replacing music retires obsolete shared hashes only after the complete replacement is cached',async()=>{
+  const w=worker();await w.event('install');await w.event('activate');await w.event('message',{data:{type:'WARM_CACHE'}});
+  const original=await readFile(new URL(musicFiles[0],root)),nextBytes=Buffer.concat([original,Buffer.from('replacement fixture')]);
+  const previousHash=createHash('sha256').update(original).digest('hex'),nextHash=createHash('sha256').update(nextBytes).digest('hex');
+  const code=source.replace(previousHash,nextHash).replace(/const CACHE = [^\n]+/,"const CACHE = CACHE_PREFIX+'music-replacement';");
+  const shared=w.stores.get('qiuqiule-%2F-music-v1');
+  const oldKeys=[...shared.keys()];
+  const replacement=worker({stores:w.stores,code,assetBodies:{[musicFiles[0]]:nextBytes},failed:['/'+musicFiles[0]]});
+  await replacement.event('install');await replacement.event('activate');
+  await replacement.event('message',{data:{type:'WARM_CACHE'}});
+  assert.deepEqual([...shared.keys()],oldKeys,'an unavailable replacement must keep the old offline bytes');
+  replacement.failures.clear();await replacement.event('message',{data:{type:'WARM_CACHE'}});
+  assert.equal((await replacement.status()).musicReady,true);
+  assert.equal(shared.size,2,'old fingerprint copies cannot accumulate with successful replacements');
+  assert.ok([...shared.keys()].some(key=>key.endsWith(nextHash)));
+  assert.ok(![...shared.keys()].some(key=>key.endsWith(previousHash)));
+  replacement.setOffline();
+  const response=await replacement.event('fetch',{request:{method:'GET',url:'https://game.example/'+musicFiles[0],mode:'cors'}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),nextBytes);
+});
+
+test('replacement quota failure preserves both legacy copies and existing shared hashes',async()=>{
+  const w=worker();await w.event('install');await w.event('activate');await w.event('message',{data:{type:'WARM_CACHE'}});
+  const original=await readFile(new URL(musicFiles[0],root)),nextBytes=Buffer.concat([original,Buffer.from('replacement fixture')]);
+  const previousHash=createHash('sha256').update(original).digest('hex'),nextHash=createHash('sha256').update(nextBytes).digest('hex');
+  const code=source.replace(previousHash,nextHash).replace(/const CACHE = [^\n]+/,"const CACHE = CACHE_PREFIX+'quota-replacement';");
+  const shared=w.stores.get('qiuqiule-%2F-music-v1'),oldKeys=[...shared.keys()];
+  const legacy=new Map([['https://game.example/'+musicFiles[0],new Response(nextBytes)]]);
+  w.stores.set('qiuqiule-%2F-prior-mix',legacy);
+  const replacement=worker({stores:w.stores,code,denySharedWrites:true,assetBodies:{[musicFiles[0]]:nextBytes}});
+  await replacement.event('install');await replacement.event('activate');await replacement.event('message',{data:{type:'WARM_CACHE'}});
+  assert.deepEqual([...shared.keys()],oldKeys);
+  assert.ok(legacy.has('https://game.example/'+musicFiles[0]));
+  replacement.setOffline();
+  const response=await replacement.event('fetch',{request:{method:'GET',url:'https://game.example/'+musicFiles[0],mode:'cors'}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),nextBytes);
 });

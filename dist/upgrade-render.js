@@ -64,7 +64,15 @@ function path(g,points,color,alpha,width=0){
   g.beginPath();points.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y));g.closePath();
   if(width)g.strokePath();else g.fillPath();
 }
-function disk(g,x,y,r,color,alpha,width=0){path(g,circle.map(p=>({x:x+p.x*r,y:y+p.y*r})),color,alpha,width);}
+function disk(g,x,y,r,color,alpha,width=0){
+  if(width)g.lineStyle(width,color,alpha);else g.fillStyle(color,alpha);
+  g.beginPath();
+  for(let i=0;i<circle.length;i++){
+    const p=circle[i],px=x+p.x*r,py=y+p.y*r;
+    i?g.lineTo(px,py):g.moveTo(px,py);
+  }
+  g.closePath();if(width)g.strokePath();else g.fillPath();
+}
 
 export function drawUpgradeBall(g,choice,background=0xf4f3eb,{alpha=1,preview=false,time=0,reducedMotion=false}={}){
   const appear=ease(choice.born??1),r=choice.r*appear,opacity=alpha*appear;

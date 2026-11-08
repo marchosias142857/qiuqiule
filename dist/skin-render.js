@@ -15,7 +15,7 @@ function skinProjector(pose){
   const centerX=pose.x||0,centerY=pose.y||0;
   const stretch=clamp(pose.flightStretch||0,0,.12);
   const turn=pose.flightAngle||0,fc=stretch?Math.cos(turn):1,fs=stretch?Math.sin(turn):0,scale=1+stretch;
-  return point=>{
+  return (point,output)=>{
     const x=point.x*rc-point.y*rs,y=point.x*rs+point.y*rc;
     let lx=x*c+y*s,ly=-x*s+y*c;
     if(amount){
@@ -31,7 +31,10 @@ function skinProjector(pose){
       const along=(dx*fc+dy*fs)*scale,across=(-dx*fs+dy*fc)/scale;
       dx=along*fc-across*fs;dy=along*fs+across*fc;
     }
-    return {x:centerX+dx,y:centerY+dy};
+    // Array.map supplies an index as the second argument. Only an explicit
+    // point object is a reusable output; standalone callers still own results.
+    const out=output&&typeof output==='object'?output:{};
+    out.x=centerX+dx;out.y=centerY+dy;return out;
   };
 }
 
@@ -39,8 +42,12 @@ export function transformSkinPoint(point,pose={}){
   return skinProjector(pose)(point);
 }
 
-export function projectSkinContour(contour,pose={}){
-  return contour.map(skinProjector(pose));
+export function projectSkinContour(contour,pose={},output=null){
+  const project=skinProjector(pose);
+  if(!output)return contour.map(project);
+  output.length=contour.length;
+  for(let i=0;i<contour.length;i++)output[i]=project(contour[i],output[i]);
+  return output;
 }
 
 export function contourPath(ctx,points){

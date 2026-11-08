@@ -1,24 +1,27 @@
 {
   "name": "qiuqiule",
-  "version": "11.3.1",
+  "version": "11.4.1",
   "private": true,
   "type": "module",
   "description": "球球了 — a tactile slingshot physics game",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/game.js && node --check dist/physics.js && node --check dist/home.js && node --check dist/icons.js && node --check dist/motion.js && node --check dist/audio.js && node --check dist/music-player.js && node --check dist/offline.js && node --check dist/display.js && node --check dist/sw.js && node --check dist/boss-visuals.js && node --check dist/skins.js && node --check dist/skin-render.js && node --check dist/wardrobe.js && node --check dist/wardrobe-showroom.js && node --check dist/skin-unlock.js && node --check dist/photo-renderer.js && node --check dist/feedback.js && node --check dist/aim.js && node --check dist/rhythm-feedback.js && node --check dist/enemies.js && node --check dist/enemy-render.js && node --check dist/upgrades.js && node --check dist/upgrade-render.js && node --check dist/shockwave-render.js && node --check dist/run-upgrades.js && node --check dist/stage-hud.js && node --check dist/endless-progress.js && node --check dist/aim-metrics.js && node --check dist/comet-trail.js && node --check dist/border-bulge.js && node --check dist/appearances.js && node --check dist/big-eye.js && node --check dist/star-trails.js && node --check dist/particle-appearance.js && node --check dist/star-particles.js && node --check dist/run-save.js && node --check dist/run-choice.js",
+    "check": "node --check dist/game.js && node --check dist/physics.js && node --check dist/home.js && node --check dist/icons.js && node --check dist/motion.js && node --check dist/audio.js && node --check dist/music-player.js && node --check dist/offline.js && node --check dist/display.js && node --check dist/sw.js && node --check dist/boss-visuals.js && node --check dist/skins.js && node --check dist/skin-render.js && node --check dist/wardrobe.js && node --check dist/wardrobe-showroom.js && node --check dist/skin-unlock.js && node --check dist/photo-renderer.js && node --check dist/feedback.js && node --check dist/aim.js && node --check dist/rhythm-feedback.js && node --check dist/enemies.js && node --check dist/enemy-render.js && node --check dist/upgrades.js && node --check dist/upgrade-render.js && node --check dist/shockwave-render.js && node --check dist/run-upgrades.js && node --check dist/stage-hud.js && node --check dist/endless-progress.js && node --check dist/aim-metrics.js && node --check dist/comet-trail.js && node --check dist/trail-clip.js && node --check dist/border-bulge.js && node --check dist/appearances.js && node --check dist/big-eye.js && node --check dist/star-trails.js && node --check dist/particle-appearance.js && node --check dist/star-particles.js && node --check dist/run-save.js && node --check dist/run-choice.js",
     "sync:engine": "node scripts/sync-engine.mjs",
     "native:sync": "cap sync",
     "native:android": "cap add android",
-    "native:ios": "cap add ios"
+    "native:ios": "cap add ios",
+    "build": "node scripts/build-static.mjs",
+    "verify:build": "node scripts/verify-static.mjs"
   },
   "dependencies": {
-    "phaser": "3.90.0",
-    "@capacitor/core": "7.4.3"
+    "@capacitor/core": "7.4.3",
+    "phaser": "3.90.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "7.4.3",
     "@capacitor/android": "7.4.3",
-    "@capacitor/ios": "7.4.3"
+    "@capacitor/cli": "7.4.3",
+    "@capacitor/ios": "7.4.3",
+    "terser": "5.44.1"
   }
 }

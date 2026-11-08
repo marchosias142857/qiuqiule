@@ -347,3 +347,20 @@ test('campaign photos support twenty reusable small balls without opening twenty
   assert.ok(pool.slots.every(s=>s.renderer.image===replacement));
   pool.dispose();assert.equal(pool.slots.length,0);assert.ok(canvases.every(c=>c.removed&&c.events.size===0));
 });
+
+test('retained photos only write changed composition styles while motion and opacity stay responsive',()=>{
+  const canvas=surface(),writes=[];
+  canvas.style=new Proxy(canvas.style,{
+    // CSSStyleDeclaration expands inset into its longhands and serializes their
+    // current values; a plain object would hide an inset/left/top reset loop.
+    get(target,key){return key==='inset'?[target.top,target.right,target.bottom,target.left].join(' '):target[key];},
+    set(target,key,value){writes.push(key);if(key==='inset')for(const side of ['top','right','bottom','left'])target[side]=value;else target[key]=value;return true;}
+  });
+  const renderer=new PhotoRenderer(canvas);renderer.setImage(photo);const contour=skinContour();
+  renderer.draw(contour,pose);writes.length=0;
+  for(let i=0;i<120;i++)renderer.draw(contour,pose);
+  assert.deepEqual(writes,[],'stationary frames leave browser style state untouched');
+  renderer.draw(contour,{...pose,x:pose.x+5},{alpha:.5});
+  assert.deepEqual(writes,['transform','opacity']);assert.equal(canvas.style.opacity,'0.5');
+  assert.equal(renderer.stats.frames,1,'composition-only updates retain the existing pixels');
+});

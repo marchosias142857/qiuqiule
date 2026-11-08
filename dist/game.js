@@ -29,9 +29,9 @@ import {PhotoRenderer,AuxiliaryPhotoPool} from './photo-renderer.js';
 import {initWardrobe,loadAppearance,saveAppearance} from './wardrobe.js';
 import {normalizeAppearanceState,unlockAppearance,selectAppearance,changeAppearance,appearanceFeedbackColor,acknowledgeAppearanceUnlock,BIG_EYE_DEFAULT_COLOR} from './appearances.js';
 import {bigEyeGeometry,bigEyeColors,drawBigEye} from './big-eye.js';
-import {normalizeStarTrailState,unlockStarTrails,acknowledgeStarTrailUnlock,selectStarTrail,paintStarTrailSvg} from './star-trails.js';
+import {normalizeStarTrailState,unlockStarTrails,acknowledgeStarTrailUnlock,selectStarTrail} from './star-trails.js';
 import {StarParticles} from './star-particles.js';
-import {unlockPose,unlockLeavePose,unlockSwitchPose,unlockTitleMarkup,createUnlockPanel} from './skin-unlock.js';
+import {unlockPose,unlockLeavePose,unlockSwitchPose,unlockStarTrailPose,unlockStarTrailGeometry,unlockTitleMarkup,createUnlockPanel} from './skin-unlock.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -78,13 +78,17 @@ let appearanceState=normalizeAppearanceState(savedAppearanceState,{best});
 let appearanceTween=null,appearanceOverride=null;
 let appearanceRevision=0,appearanceRequest=0;
 let starTrailState=normalizeStarTrailState(storage.read('qiuqiule-star-trails',null),{highestStage:endlessProgress.maxStage});
-let starTrailTween=null,starTrailOverride=null,starTrailClock=0;
+let starTrailTween=null,starTrailOverride=null;
 let wardrobeShowcase=null;
 const wardrobeShowroom=new WardrobeShowroom();
+const unlockShowroom=new WardrobeShowroom();
 
 const strainedEyes=[-1,1].map(strainedEyeOutline);
 const relaxedEyes=strainedEyes.map(relaxedEyeOutline);
 const playerVisuals=new WeakMap();
+// Each live player/clone owns one borrowed frame outline. Weak keys release
+// it with the body; clipping and the body fill consume the same exact points.
+const playerOutlines=new WeakMap();
 const ballSegments=192;
 const ballCircleX=new Float64Array(ballSegments+1),ballCircleY=new Float64Array(ballSegments+1);
 for(let i=0;i<=ballSegments;i++){
@@ -230,7 +234,6 @@ function chooseStarTrail(id){
 }
 function updateStarTrailVisual(dt){
   const elapsed=Math.max(0,Number.isFinite(dt)?dt:0);
-  starTrailClock+=elapsed;
   if(starTrailTween){starTrailTween.elapsed+=elapsed;if(starTrailTween.elapsed>=.18)starTrailTween=null;}
 }
 function grantEndlessStarTrails(){
@@ -241,16 +244,16 @@ function grantEndlessStarTrails(){
   starTrailState=unlocked.state;storage.write('qiuqiule-star-trails',starTrailState);wardrobeUi?.refresh();return true;
 }
 function paintUiStarTrails(p){
-  const el=$('#ui-star-trails'),layers=starTrailLayers();
+  const el=$('#ui-star-trails'),reward=skinUnlock,frame=reward?.starFrame;
   if(!el)return;
-  const showroom=!!skinUnlock&&skinUnlock.queue[skinUnlock.index]?.kind==='star-trail';
-  el.hidden=!showroom||!layers.length||wardrobeUi?.isCropping?.()===true||!(p.r>0);
-  if(el.hidden){if(!layers.length)paintStarTrailSvg(el,layers);return;}
+  el.hidden=!frame||!(frame.trailProgress>0)||wardrobeUi?.isCropping?.()===true||!(p.r>0);
+  if(el.hidden)return;
   const size=p.r*4,offset=p.r*2;
   el.style.width=el.style.height=size+'px';
   el.style.transform=`translate3d(${p.x-offset}px,${p.y-offset}px,0)`;
   el.style.clipPath='none';
-  paintStarTrailSvg(el,layers,{x:offset,y:offset,r:p.r},starTrailClock,{color:playerFeedbackColor(),reducedMotion,compact:true});
+  unlockShowroom.paint(el,{pose:{x:offset,y:offset,r:p.r},length:reward.starGeometry.length*frame.trailProgress,
+    alpha:frame.trailAlpha,color:playerFeedbackColor(),layers:starTrailLayers()});
 }
 
 function wardrobePreviewGeometry(){
@@ -738,6 +741,13 @@ function unlockAnchor(){
   panel.style.transform='translate(-50%,-50%)';
   const pose=anchorPose('skin-unlock');panel.style.transform=previous;return pose;
 }
+function unlockStarGeometry(){
+  const panel=$('#skin-unlock-panel'),previous=panel.style.transform;
+  panel.style.transform='translate(-50%,-50%)';
+  const box=panel.getBoundingClientRect(),anchor=anchorPose('skin-unlock');
+  panel.style.transform=previous;
+  return unlockStarTrailGeometry({left:box.left,width:box.width,y:anchor.y});
+}
 function blendUnlockLayers(from,to,amount){
   const layers=new Map();
   for(const layer of [...from.map(item=>({...item,weight:item.weight*(1-amount)})),...to.map(item=>({...item,weight:item.weight*amount}))]){
@@ -752,7 +762,7 @@ function setUnlockTitle(kind){
 }
 function beginSkinUnlock(from,sources,rewards,fromPause=false,view=null){
   if(!rewards.length)return;
-  cancelDrag();transfer=null;uiAnchor=null;paused=true;
+  cancelDrag();transfer=null;uiAnchor=null;paused=true;unlockShowroom.reset();
   const originalAppearance=appearanceLayers().map(layer=>({...layer})),originalStarTrails=starTrailLayers().map(layer=>({...layer}));
   skinUnlock={elapsed:0,phase:'enter',from:{...from},sources,fromPause,view,queue:rewards,index:0,ready:false,
     originalAppearance,originalStarTrails,fromAppearance:originalAppearance,fromStarTrails:originalStarTrails};
@@ -764,36 +774,52 @@ function dismissSkinUnlock(){
   if(current.kind==='appearance'){appearanceState=acknowledgeAppearanceUnlock(appearanceState);persistAppearanceState();}
   else{starTrailState=acknowledgeStarTrailUnlock(starTrailState,current.id);storage.write('qiuqiule-star-trails',starTrailState);}
   reward.fromAppearance=appearanceLayers().map(layer=>({...layer}));reward.fromStarTrails=starTrailLayers().map(layer=>({...layer}));
-  reward.from={...lastUiPose};reward.elapsed=0;reward.ready=false;$('#skin-unlock-continue').disabled=true;
+  reward.from={...lastUiPose};reward.fromKind=current.kind;reward.elapsed=0;reward.ready=false;$('#skin-unlock-continue').disabled=true;
   if(reward.index+1<reward.queue.length){reward.index++;reward.phase='switch';updateSkinUnlock(0);return;}
-  reward.phase='leave';presentResult(reward.from,reward.fromPause,reward.sources,reducedMotion?.28:.62,reward.view);
+  reward.phase='leave';
+  if(current.kind==='star-trail'){updateSkinUnlock(0);return;}
+  presentResult(reward.from,reward.fromPause,reward.sources,reducedMotion?.28:.62,reward.view);
   transfer=null;uiAnchor=null;$('#skin-unlock-panel').hidden=false;syncInputs();
 }
 function updateSkinUnlock(dt){
   if(document.hidden)return;
   const reward=skinUnlock;reward.elapsed+=dt;
   const leaving=reward.phase==='leave',switching=reward.phase==='switch',current=reward.queue[reward.index];
-  const frame=(leaving?unlockLeavePose:switching?unlockSwitchPose:unlockPose)({elapsed:reward.elapsed,from:reward.from,
-    to:leaving?anchorPose('over'):unlockAnchor(),reducedMotion});
+  const star=current.kind==='star-trail',starSwitch=star&&switching&&reward.fromKind==='star-trail';
+  const retractDuration=reducedMotion?.12:.18;
+  if(star&&leaving&&!reward.resultStarted&&reward.elapsed>=retractDuration){
+    reward.resultStarted=true;
+    presentResult(reward.from,reward.fromPause,reward.sources,reducedMotion?.22:.32,reward.view);
+    transfer=null;uiAnchor=null;$('#skin-unlock-panel').hidden=false;syncInputs();
+  }
+  if(star)reward.starGeometry=unlockStarGeometry();
+  const frame=star?unlockStarTrailPose({elapsed:reward.elapsed,from:reward.from,
+    to:leaving&&reward.resultStarted?anchorPose('over'):reward.from,geometry:reward.starGeometry,
+    phase:leaving?'leave':starSwitch?'switch':'enter',panelAlreadyVisible:switching,reducedMotion}):
+    (leaving?unlockLeavePose:switching?unlockSwitchPose:unlockPose)({elapsed:reward.elapsed,from:reward.from,
+      to:leaving?anchorPose('over'):unlockAnchor(),reducedMotion});
+  reward.starFrame=star?frame:null;
   const targetAppearance=leaving?reward.originalAppearance:current.kind==='appearance'?[{id:current.id,color:hex(BIG_EYE_DEFAULT_COLOR),weight:1}]:reward.originalAppearance;
   const targetStarTrails=leaving?[]:current.kind==='star-trail'?[{id:current.id,weight:1}]:reward.originalStarTrails;
   const blend=leaving?1-frame.morph:frame.morph;
   appearanceOverride=blendUnlockLayers(reward.fromAppearance,targetAppearance,blend);
-  starTrailOverride=blendUnlockLayers(reward.fromStarTrails,targetStarTrails,blend);
+  starTrailOverride=star&&!leaving&&!starSwitch?targetStarTrails:blendUnlockLayers(reward.fromStarTrails,targetStarTrails,blend);
   if(!switching||frame.switched)setUnlockTitle(current.kind);
   const panel=$('#skin-unlock-panel');panel.style.opacity=frame.panelAlpha;panel.style.transform=`translate(-50%,-50%) scale(${frame.panelScale})`;
+  if(star)unlockShowroom.step(dt,{radius:frame.pose.r,reducedMotion});
   $('#skin-unlock-title').style.opacity=frame.titleAlpha;paintUiBall(frame.pose);
   if(glowContext&&frame.glowAlpha>0){
-    const r=frame.pose.r,size=Math.ceil(r*7),scale=Math.min(viewport.scale,3),pixels=Math.ceil(size*scale);glowCanvas.hidden=false;
+    const center=star?reward.starGeometry.glow:frame.pose;
+    const r=center.r,size=Math.ceil(r*7),scale=Math.min(viewport.scale,3),pixels=Math.ceil(size*scale);glowCanvas.hidden=false;
     if(glowCanvas.width!==pixels)glowCanvas.width=pixels;if(glowCanvas.height!==pixels)glowCanvas.height=pixels;
     glowContext.setTransform(1,0,0,1,0,0);glowContext.clearRect(0,0,pixels,pixels);
-    Object.assign(glowCanvas.style,{width:size+'px',height:size+'px',left:(frame.pose.x-size/2)+'px',top:(frame.pose.y-size/2)+'px'});
+    Object.assign(glowCanvas.style,{width:size+'px',height:size+'px',left:(center.x-size/2)+'px',top:(frame.pose.y-size/2)+'px'});
     glowContext.setTransform(scale,0,0,scale,0,0);paintRadiance(glowContext,{x:size/2,y:size/2,r,time:scene?.clock||0,alpha:frame.glowAlpha,reducedMotion});
-  }else if(leaving)releaseUnlockGlow();
+  }else if(star||leaving)releaseUnlockGlow();
   if(!leaving&&frame.ready&&!reward.ready){reward.ready=true;$('#skin-unlock-continue').disabled=false;$('#skin-unlock-continue').focus({preventScroll:true});tone(880,.3,'sine',.055,1.5);}
   if(leaving){
-    updateControlFlight(dt);
-    if(frame.done){skinUnlock=null;skinOverride=null;appearanceOverride=null;starTrailOverride=null;uiAnchor='over';panel.hidden=true;paintUiBall(anchorPose('over'));syncInputs();}
+    updateControlFlight(star?Math.min(dt,Math.max(0,reward.elapsed-retractDuration)):dt);
+    if(frame.done){skinUnlock=null;skinOverride=null;appearanceOverride=null;starTrailOverride=null;unlockShowroom.reset();uiAnchor='over';panel.hidden=true;paintUiBall(anchorPose('over'));syncInputs();}
   }
 }
 
@@ -926,7 +952,7 @@ function prepareGame({demo=false,restored=null,revealScore=false}={}){
   $('#score').style.opacity=revealScore?0:1;
   cancelDrag();feedbackDemo=demo;runBest=best;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';result=null;transfer=null;controlFlight=null;uiAnchor=null;
   resumeSlowRemaining=0;restoredView=null;
-  skinUnlock=null;skinOverride=null;appearanceOverride=null;starTrailOverride=null;releaseUnlockGlow();clearPhoto();releaseOverlay=0;pauseOnArrival=false;
+  skinUnlock=null;skinOverride=null;appearanceOverride=null;starTrailOverride=null;unlockShowroom.reset();releaseUnlockGlow();clearPhoto();releaseOverlay=0;pauseOnArrival=false;
   $('#control-transfers').replaceChildren();$('#ui-ball').hidden=true;$('#ui-star-trails').hidden=true;$('#result-shadow').hidden=true;$('.result-actions').classList.remove('arriving');
   scene.g.clear();clearEffects();scene.rewardVisuals=null;scene.accumulator=0;scene.timeSlices=[];scene.clock=0;scene.hitSoundAt=0;
   runDay=restored?.runDay||createEndlessRun();runAimHoldDuration=demo?1.2:aimHoldDuration(aimMetrics);
@@ -999,7 +1025,7 @@ function restartGame(){
 }
 function showHome(){
   if(transfer||controlFlight||skinUnlock)return;
-  const from=currentPlayerPose();hidePanel();screen='home';cancelDrag();world=null;paused=false;result=null;feedbackDemo=false;resetStageHud();
+  const from=currentPlayerPose();hidePanel();unlockShowroom.reset();screen='home';cancelDrag();world=null;paused=false;result=null;feedbackDemo=false;resetStageHud();
   resumeSlowRemaining=0;restoredView=null;clearChoiceLabels();$('.pause-button').hidden=false;
   $('#control-transfers').replaceChildren();$('#result-shadow').hidden=true;sound.setMusicScene('home');
   home=new HomeWorld(viewport.width,viewport.height);homeReveal=0;
@@ -1169,9 +1195,11 @@ function drawBoss(g,b,alpha=1){
   for(const side of [-1,1]){
     const scaleEye=(point,scale)=>({x:side*.29+(point.x-side*.29)*scale,
       y:-.08+(point.y+.08)*scale});
-    const eye=bossAngryEyeOutline(side,pose.eyeOpen,pose.anger).map(point=>scaleEye(point,eyeScale*pose.angryScale));
-    path(eye,face,opacity*pose.angryAlpha);
-    path(bossSpiralEye(side,pose.spiralTurn).map(point=>scaleEye(point,eyeScale)),face,opacity*pose.spiralAlpha,Math.max(.8,r*.025)*eyeScale);
+    if(pose.angryAlpha>0){
+      const eye=bossAngryEyeOutline(side,pose.eyeOpen,pose.anger).map(point=>scaleEye(point,eyeScale*pose.angryScale));
+      path(eye,face,opacity*pose.angryAlpha);
+    }
+    if(pose.spiralAlpha>0)path(bossSpiralEye(side,pose.spiralTurn).map(point=>scaleEye(point,eyeScale)),face,opacity*pose.spiralAlpha,Math.max(.8,r*.025)*eyeScale);
   }
 }
 
@@ -1223,7 +1251,44 @@ function drawPlayerEyes(g,b,{r,visualX,visualY,roll,visual,alpha,pull,color,face
     }
 }
 
-function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
+// One projected outline owns both the translucent clone fill and its trail cut.
+// Keep the original-circle and appearance-contour branches exactly in sync.
+function ballRenderGeometry(b,skinPose,pull=null,owner=b){
+  const {x:visualX,y:visualY,r,squash,deformAngle:angle,pullAmount:amount}=skinPose;
+  const cos=Math.cos(angle),sin=Math.sin(angle);
+  const flight=b.isPlayer&&screen==='play'&&['battle','boss-entry','boss'].includes(world?.phase)&&!pull&&!reducedMotion;
+  const flightStart=world&&scene?.rewardVisuals?.world===world?scene.rewardVisuals.flightAt:null;
+  // Re-enter the existing flight deformation softly after the shorter reward
+  // rest, without changing any stretch during ordinary combat.
+  const flightBlend=flightStart!=null?smooth((world.feedbackTime-flightStart)/.2):1;
+  const flightStretch=flight?.12*clamp(Math.hypot(b.vx,b.vy)/(world.baseSpeed||1),0,1)*settings.juice*flightBlend:0;
+  const flightAngle=flight?Math.atan2(b.vy,b.vx):0;
+  Object.assign(skinPose,{flightStretch,flightAngle});
+  const fc=Math.cos(flightAngle),fs=Math.sin(flightAngle),fx=1+flightStretch;
+  const skinned=b.isPlayer&&usesSkinContour();
+  // Keep the player contour deformation identical across appearances.
+  let playerPoints=null;
+  if(b.isPlayer){
+    playerPoints=playerOutlines.get(owner);
+    if(!playerPoints){playerPoints=[];playerOutlines.set(owner,playerPoints);}
+    if(skinned)projectSkinContour(activeContour(),skinPose,playerPoints);
+    else{
+      playerPoints.length=ballSegments;
+      for(let i=0;i<ballSegments;i++){
+        let ux=ballCircleX[i],uy=ballCircleY[i];
+        if(amount!==0){const point=pullBallPoint(ux,uy,amount);ux=point.x;uy=point.y;}
+        const lx=r*ux*(1-squash),ly=r*uy*(1+squash*.7);
+        const wx=lx*cos-ly*sin,wy=lx*sin+ly*cos;
+        const along=(wx*fc+wy*fs)*fx,across=(-wx*fs+wy*fc)/fx;
+        const point=playerPoints[i]??={};
+        point.x=visualX+along*fc-across*fs;point.y=visualY+along*fs+across*fc;
+      }
+    }
+  }
+  return {skinPose,playerPoints};
+}
+
+function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null,preparedGeometry=null){
   // Apply once at the common visual entry point, including photo/capture fades.
   if(b.isAuxiliary)alpha*=.6;
   const born=birth?.scale??(b.isPlayer?1:ease(b.born));
@@ -1260,26 +1325,12 @@ function drawBall(g,b,color,alpha=1,pull=null,birth=null,photoSlot=null){
   // Keep eyes, custom contours and photos on the same eased turn as reward
   // placement; the ready-state pose is the identical completed full turn.
   const roll=b.roll??(world?.phase==='transition'?Math.PI*2*world.rewardMoveProgress:0);
-  const skinPose={x:visualX,y:visualY,r,squash,deformAngle:angle,pullAmount:amount,roll};
-  const flight=b.isPlayer&&screen==='play'&&['battle','boss-entry','boss'].includes(world?.phase)&&!pull&&!reducedMotion;
-  const flightStart=world&&scene?.rewardVisuals?.world===world?scene.rewardVisuals.flightAt:null;
-  // Re-enter the existing flight deformation softly after the shorter reward
-  // rest, without changing any stretch during ordinary combat.
-  const flightBlend=flightStart!=null?smooth((world.feedbackTime-flightStart)/.2):1;
-  const flightStretch=flight?.12*clamp(Math.hypot(b.vx,b.vy)/(world.baseSpeed||1),0,1)*settings.juice*flightBlend:0;
-  const flightAngle=flight?Math.atan2(b.vy,b.vx):0;
-  Object.assign(skinPose,{flightStretch,flightAngle});
+  let skinPose={x:visualX,y:visualY,r,squash,deformAngle:angle,pullAmount:amount,roll};
+  const geometry=preparedGeometry||ballRenderGeometry(b,skinPose,pull);
+  skinPose=geometry.skinPose;
+  const playerPoints=geometry.playerPoints;
+  const {flightAngle,flightStretch}=skinPose;
   const fc=Math.cos(flightAngle),fs=Math.sin(flightAngle),fx=1+flightStretch;
-  const skinned=b.isPlayer&&usesSkinContour();
-  // Keep the player contour deformation identical across appearances.
-  const playerPoints=b.isPlayer?skinned?projectSkinContour(activeContour(),skinPose):Array.from({length:ballSegments},(_,i)=>{
-    let ux=ballCircleX[i],uy=ballCircleY[i];
-    if(amount!==0){const point=pullBallPoint(ux,uy,amount);ux=point.x;uy=point.y;}
-    const lx=r*ux*(1-squash),ly=r*uy*(1+squash*.7);
-    const wx=lx*cos-ly*sin,wy=lx*sin+ly*cos;
-    const along=(wx*fc+wy*fs)*fx,across=(-wx*fs+wy*fc)/fx;
-    return {x:visualX+along*fc-across*fs,y:visualY+along*fs+across*fc};
-  }):null;
   g.fillStyle(color,alpha*(birth?.alpha??born));g.beginPath();
   if(playerPoints){
     const points=playerPoints;
@@ -1430,7 +1481,7 @@ function boot(){
       };
       resize();
       window.addEventListener('resize',resize);
-      this.events.once('shutdown',()=>{clearChoicePress();window.removeEventListener('resize',resize);sound.clearEnd();sound.stopCharge();photoRenderer?.dispose();releaseUnlockGlow();});
+      this.events.once('shutdown',()=>{clearChoicePress();window.removeEventListener('resize',resize);sound.clearEnd();sound.stopCharge();photoRenderer?.dispose();unlockShowroom.reset();releaseUnlockGlow();});
       if(new URLSearchParams(window.location?.search||'').get('feedback-demo')==='1')installFeedbackDemo();
 
     }
@@ -1798,10 +1849,20 @@ function boot(){
       const g=this.g;this.drawBorder(world.arenaBounds);
       const view=this.ending||result?.sceneBodies,p=view?.player||world.player,boss=view?.boss||world.boss;
       const arrival=1;
+      // Resolve hit-stop displacement once: the cut and the later body fill must
+      // use the very same frame, including velocity stretch and impact squash.
+      const auxiliaryFrames=(view?.auxiliaries||world.auxiliaries||[])
+        .filter(body=>body.active!==false&&body.hp>0&&!body.captured).map(source=>{
+          const body=this.shakenBody(source);
+          const skinPose={x:body.x,y:body.y,r:body.r,squash:body.squash,
+            deformAngle:body.angle,pullAmount:0,roll:body.roll??(world.phase==='transition'?Math.PI*2*world.rewardMoveProgress:0)};
+          return {source,body,geometry:ballRenderGeometry(body,skinPose,null,source)};
+        });
 
       const trailBodies=[world.player,...(world.auxiliaries||[])].filter(body=>!body.captured&&body.active!==false&&body.hp>0);
       if(this.trailsEnabled()&&trailBodies.length){
-        this.cometTrails.draw(g,trailBodies,playerFeedbackColor(),{unit:world.unit,strength:settings.juice,bounds:world.arenaBounds});
+        this.cometTrails.draw(g,trailBodies,playerFeedbackColor(),{unit:world.unit,strength:settings.juice,bounds:world.arenaBounds,
+          clipOutline:body=>auxiliaryFrames.find(frame=>frame.source===body)?.geometry.playerPoints});
         this.starParticles.draw(g,playerFeedbackColor(),{strength:settings.juice});
       }else{this.cometTrails.clear();this.starParticles.clear();}
       if(boss&&!boss.defeated){
@@ -1844,10 +1905,8 @@ function boot(){
           time:Math.max(0,this.inputClock-(choicePress?.startedAt||0)-.3),reducedMotion:reducedMotion||!settings.juice});
       }
       let photoSlot=0;
-      for(const auxiliary of view?.auxiliaries||world.auxiliaries||[]){
-        if(auxiliary.active===false||auxiliary.hp<=0)continue;
-        const pose={body:auxiliary,alpha:1,hidden:auxiliary.captured};
-        if(!pose.hidden)drawBall(g,this.shakenBody(pose.body),hex(settings.player),pose.alpha*(result?1-smooth(result.clock/.65):1)*arrival,null,null,photoSlot++);
+      for(const {body,geometry} of auxiliaryFrames){
+        drawBall(g,body,hex(settings.player),(result?1-smooth(result.clock/.65):1)*arrival,null,null,photoSlot++,geometry);
       }
       if(!detached()){
         const pose={body:p,alpha:1,hidden:false};

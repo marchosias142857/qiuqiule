@@ -2,6 +2,7 @@ import {skinContour} from './skins.js';
 import {paintPhoto,projectSkinContour,contourPath} from './skin-render.js';
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+const setStyle=(style,name,value)=>{if(style[name]!==value)style[name]=value;};
 const SHAPES=[0];
 const VERTEX=`
 attribute vec2 a_point;
@@ -70,7 +71,7 @@ export function photoMeshData(contour,reuse){
 
 /** A local backing surface with room for the full continuous pull range.
  * Fixed breathing/pull allowance avoids resizing the canvas every frame. */
-export function photoFrame(mesh,pose,scale=1,maxPixels=1024){
+export function photoFrame(mesh,pose,scale=1,maxPixels=1024,out={}){
   const r=Number.isFinite(pose.r)?Math.max(0,pose.r):1,squash=pose.squash||0;
   const stretch=Math.max(1.5,Math.abs(1-squash),Math.abs(1+squash*.7));
   // Reserve the maximum flight stretch once, not a changing canvas allocation
@@ -78,7 +79,8 @@ export function photoFrame(mesh,pose,scale=1,maxPixels=1024){
   const halfUnit=mesh.radius*1.95*stretch*1.12+.04;
   const size=Math.max(1,2*r*halfUnit);
   const pixels=Math.min(maxPixels,Math.max(32,Math.ceil(size*clamp(scale||1,1,3)/32)*32));
-  return {halfUnit,size,pixels,left:(pose.x||0)-size/2,top:(pose.y||0)-size/2};
+  out.halfUnit=halfUnit;out.size=size;out.pixels=pixels;
+  out.left=(pose.x||0)-size/2;out.top=(pose.y||0)-size/2;return out;
 }
 
 /** Caches image pixels and the circle mesh once. Other contours use one reusable
@@ -91,6 +93,7 @@ export class PhotoRenderer {
     this.gl=null;this.glAcquired=false;this.lost=false;
     this.program=null;this.texture=null;this.fallback=null;this.context2d=null;
     this.lastDraw=null;this.backend='none';
+    this.frame={};this.drawKey=[];
     this.counts={drawCalls:0,frames:0,textureUploads:0,meshUploads:0};
     this.onLost=event=>{
       event.preventDefault?.();this.lost=true;this.lastDraw=null;
@@ -220,13 +223,15 @@ export class PhotoRenderer {
     if(!this.image||this.backend==='none'||!(pose.r>0)){this.hide();return false;}
     const mesh=this._mesh(contour);
     if(!mesh){this.hide();return false;}
-    const frame=photoFrame(mesh,pose,scale,this.maxPixels),surface=this.fallback||this.canvas;
+    const frame=photoFrame(mesh,pose,scale,this.maxPixels,this.frame),surface=this.fallback||this.canvas;
     const style=surface.style;
-    Object.assign(style,{position:'fixed',inset:'auto',left:'0',top:'0',
-      transform:`translate3d(${frame.left}px,${frame.top}px,0)`,
-      width:frame.size+'px',height:frame.size+'px',pointerEvents:'none',zIndex:this.canvas.style.zIndex||'3'});
-    style.opacity=String(clamp(Number.isFinite(alpha)?alpha:1,0,1));
-    style.clipPath=clip?`inset(${Math.max(0,clip.top-frame.top)}px ${Math.max(0,frame.left+frame.size-clip.right)}px ${Math.max(0,frame.top+frame.size-clip.bottom)}px ${Math.max(0,clip.left-frame.left)}px)`:'none';
+    setStyle(style,'position','fixed');setStyle(style,'right','auto');setStyle(style,'bottom','auto');
+    setStyle(style,'left','0px');setStyle(style,'top','0px');
+    setStyle(style,'transform',`translate3d(${frame.left}px,${frame.top}px,0)`);
+    setStyle(style,'width',frame.size+'px');setStyle(style,'height',frame.size+'px');
+    setStyle(style,'pointerEvents','none');setStyle(style,'zIndex',this.canvas.style.zIndex||'3');
+    setStyle(style,'opacity',String(clamp(Number.isFinite(alpha)?alpha:1,0,1)));
+    setStyle(style,'clipPath',clip?`inset(${Math.max(0,clip.top-frame.top)}px ${Math.max(0,frame.left+frame.size-clip.right)}px ${Math.max(0,frame.top+frame.size-clip.bottom)}px ${Math.max(0,clip.left-frame.left)}px)`:'none');
     surface.hidden=false;
     const resized=surface.width!==frame.pixels||surface.height!==frame.pixels;
     if(resized){surface.width=surface.height=frame.pixels;this.lastDraw=null;}
@@ -236,8 +241,10 @@ export class PhotoRenderer {
     const meshContour=this.backend==='2d'
       ?Math.abs(squash)>.3||pose.r>96?contour:pose.r>48?mesh.coarse96:mesh.coarse64:null;
     const base=Number.isFinite(baseColor)?clamp(Math.floor(baseColor),0,0xffffff):null;
-    const key=[mesh,frame.halfUnit,frame.pixels,roll,angle,pull,squash,flightStretch,flightAngle,meshContour?.length||0,base];
-    if(this.lastDraw&&key.every((value,i)=>value===this.lastDraw[i]))return true;
+    const previous=this.lastDraw,meshCount=meshContour?.length||0;
+    if(previous&&previous[0]===mesh&&previous[1]===frame.halfUnit&&previous[2]===frame.pixels&&previous[3]===roll&&
+      previous[4]===angle&&previous[5]===pull&&previous[6]===squash&&previous[7]===flightStretch&&
+      previous[8]===flightAngle&&previous[9]===meshCount&&previous[10]===base)return true;
     let drawCalls=1;
     if(this.backend==='webgl'){
       const gl=this.gl;
@@ -269,6 +276,8 @@ export class PhotoRenderer {
       paintPhoto(ctx,this.image,contour,{...pose,x:frame.size/2,y:frame.size/2},{meshContour});
       drawCalls=pull>1e-6?meshContour.length:1;
     }
+    const key=this.drawKey;key[0]=mesh;key[1]=frame.halfUnit;key[2]=frame.pixels;key[3]=roll;key[4]=angle;
+    key[5]=pull;key[6]=squash;key[7]=flightStretch;key[8]=flightAngle;key[9]=meshCount;key[10]=base;
     this.counts.drawCalls+=drawCalls;this.counts.frames++;this.lastDraw=key;return true;
   }
 
@@ -284,7 +293,7 @@ export class PhotoRenderer {
       if(this.program)gl.deleteProgram(this.program);
     }
     this.texture=null;this.program=null;this.locations=null;
-    this.meshes.clear();this.dynamic=null;this.lastDraw=null;
+    this.meshes.clear();this.dynamic=null;this.lastDraw=null;this.drawKey.length=0;
   }
 
   _removeFallback(){

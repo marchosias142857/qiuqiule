@@ -1,5 +1,6 @@
 import {clamp,lerp} from './physics.js';
-import {smooth as rawSmooth} from './motion.js';
+import {smooth as rawSmooth,transferPose} from './motion.js';
+import {cometProfile} from './comet-trail.js';
 
 export const UNLOCK_ENTER_DURATION=1.65;
 export const UNLOCK_LEAVE_DURATION=.62;
@@ -79,6 +80,45 @@ export function unlockSwitchPose({elapsed=0,from,to=from,reducedMotion=false}){
     titleAlpha:switched?smooth((time-titleSwapAt)/(duration-titleSwapAt)):1-smooth(time/titleSwapAt),
     switched,ready:progress===1,done:progress===1
   };
+}
+
+/** Center the complete resting ribbon and ball, reserving room for the whole
+ * ball at its left-hand approach stop as well as the final composition. */
+export function unlockStarTrailGeometry({left,width,y}){
+  const ratio=cometProfile(33,1,1,.6).length;
+  const inset=Math.min(28,Math.max(18,width*.08));
+  const r=Math.max(1,Math.min(38,(width-2*inset)/(ratio+3))),length=ratio*r;
+  const center=left+width/2,finish={x:center+(length-r)/2,y,r};
+  return {start:{...finish,x:finish.x-length},finish,length,glow:{x:center,y,r},inset};
+}
+
+/** Star rewards use the wardrobe's approach, ribbon reveal and retraction.
+ * Transfer roll belongs to the moving ball; the settled preview never spins. */
+export function unlockStarTrailPose({elapsed=0,from,to,geometry,phase='enter',reducedMotion=false,panelAlreadyVisible=false}){
+  const time=elapsedSeconds(elapsed),start=geometry?.start||to||from,finish=geometry?.finish||to||start;
+  if(phase==='switch'){
+    const progress=clamp(time/.18,0,1),t=smooth(progress);
+    // Normally from already equals finish. Only a resized layout moves the
+    // existing composition, with no new approach, roll or expression change.
+    const pose={...from,x:lerp(from.x,finish.x,t),y:lerp(from.y,finish.y,t),r:lerp(from.r,finish.r,t)};
+    return {pose,morph:t,rotation:pose.roll||0,panelAlpha:1,panelScale:1,titleAlpha:1,glowAlpha:1,
+      trailProgress:1,trailAlpha:1,ready:progress===1,done:progress===1,switched:true};
+  }
+  if(phase==='leave'){
+    const retractDuration=reducedMotion?.12:.18,returnDuration=reducedMotion?.22:.32;
+    const retracted=smooth(time/retractDuration),progress=time>=retractDuration+returnDuration?1:clamp((time-retractDuration)/returnDuration,0,1),t=smooth(progress);
+    const pose=time<=retractDuration?{...from}:transferPose({...from,visualSquash:from.squash||0},to,progress);
+    return {pose,morph:1-t,rotation:pose.roll||0,panelAlpha:1-t,panelScale:1,titleAlpha:1-t,glowAlpha:1-retracted,
+      trailProgress:1-retracted,trailAlpha:1-retracted,ready:false,done:progress===1,switched:true};
+  }
+  const approachDuration=reducedMotion?.16:.28,drawDuration=reducedMotion?.16:.26;
+  const approach=clamp(time/approachDuration,0,1),progress=time>=approachDuration+drawDuration?1:clamp((time-approachDuration)/drawDuration,0,1),t=smooth(progress);
+  const arrival=transferPose({...from,visualSquash:from.squash||0},start,approach);
+  const pose=time<=approachDuration?arrival:{...arrival,x:lerp(start.x,finish.x,t),y:finish.y,r:finish.r,
+    squash:(arrival.squash||0)*(1-t)+(reducedMotion?0:Math.sin(Math.PI*t)*.06)};
+  const panelAlpha=panelAlreadyVisible?1:smooth(approach);
+  return {pose,morph:t,rotation:pose.roll||0,panelAlpha,panelScale:1,titleAlpha:panelAlpha,glowAlpha:t,
+    trailProgress:t,trailAlpha:1,ready:progress===1,done:false,switched:true};
 }
 
 // Real bundled GameSans ink bounds at 1000 px, excluding advance whitespace.

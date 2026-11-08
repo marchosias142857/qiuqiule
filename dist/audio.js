@@ -28,6 +28,9 @@ export class GameAudio {
         // for a later Boss encounter after its large PCM buffer is released.
         const buffer = await context.decodeAudioData(bytes.slice(0));
         if (!Number.isFinite(buffer?.duration) || buffer.duration < MUSIC_TRACKS[name].loopEnd) throw new Error('Incomplete music track: ' + name);
+        // Endless PCM stays resident for its uninterrupted clock. Its compressed
+        // duplicate is no longer needed; Boss bytes still support later decodes.
+        if (name === 'endless' && this.musicByteCache.get(name) === bytes) this.musicByteCache.delete(name);
         return buffer;
       } catch (error) {
         if (this.musicByteCache.get(name) === bytes) this.musicByteCache.delete(name);
@@ -113,7 +116,10 @@ export class GameAudio {
   }
   prepareMusic() {
     if (this.hidden || !this.enabled || !this.bgmVolume || !this.prefetchMusic) return;
-    return this.prefetchMusic(MUSIC_SCENES[this.musicScene].track).catch(() => null);
+    const name = MUSIC_SCENES[this.musicScene].track;
+    if (this.player?.buffers.has(name)) return Promise.resolve(null);
+    if (this.player?.loads.has(name)) return this.player.loads.get(name).catch(() => null);
+    return this.prefetchMusic(name).catch(() => null);
   }
   prepareBossMusic() {
     // Remember the upcoming encounter without opening an audio device or

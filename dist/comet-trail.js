@@ -1,3 +1,5 @@
+import {createTrailClipper} from './trail-clip.js';
+
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const finite=value=>Number.isFinite(value);
 
@@ -245,14 +247,19 @@ export class CometTrails {
       trail.lastX=body.x;trail.lastY=body.y;trail.lastSpeed=speed;
     }
   }
-  draw(graphics,bodies,color,{unit=1,strength=1,bounds=null}={}){
+  draw(graphics,bodies,color,{unit=1,strength=1,bounds=null,clipOutline=null}={}){
     if(!(strength>0))return;
     for(const body of bodies){
       const trail=this.entries.get(body);if(!trail?.active)continue;
       const profile=cometProfile(Math.hypot(body.vx,body.vy),body.r,unit,strength);
+      const outline=clipOutline?.(body);
+      const clip=outline?.length>=3?createTrailClipper(outline):null;
       const workspace=this.workspace??=new CometWorkspace();
       for(const band of workspace.bands(trail.points,{...profile,bounds})){
-        fillRibbon(graphics,band.vertices,color,profile.alpha*band.opacity*band.crossAlpha);
+        const alpha=profile.alpha*band.opacity*band.crossAlpha;
+        if(clip){
+          for(const vertices of clip(band.vertices))fillRibbon(graphics,vertices,color,alpha);
+        }else fillRibbon(graphics,band.vertices,color,alpha);
       }
     }
   }

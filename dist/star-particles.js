@@ -18,18 +18,19 @@ export class StarParticles{
     this.free=Array.from({length:STAR_PARTICLE_LIMITS.total},()=>({}));
     this.trackers=new Map();this.bounds=null;this.fallbackTrails=null;
     this.sampleResult={};this.boundPosition={};this.drawPosition={};this.emissionCount=0;
+    this.living=[];this.drawOptions={};
   }
   get count(){return this.particles.length;}
   clear(){
-    while(this.particles.length)this.free.push(this.particles.pop());
-    this.trackers.clear();this.clock=0;this.fallbackTrails?.clear();
+    while(this.particles.length)this.recycle(this.particles.pop());
+    this.trackers.clear();this.living.length=0;this.bounds=null;this.clock=0;this.fallbackTrails?.clear();
   }
+  recycle(p){p.owner=null;this.free.push(p);}
   random(){this.seed=(Math.imul(this.seed,1664525)+1013904223)>>>0;return this.seed/4294967296;}
   shapeRandom(){this.shapeSeed=(Math.imul(this.shapeSeed,1664525)+1013904223)>>>0;return this.shapeSeed/4294967296;}
   newTracker(b,state){return{x:b.x,y:b.y,generation:state.generation,active:false,phase:0,spacing:0,jitter:.65+.7*this.random(),lateralPhase:this.random()};}
-  advanceParticle(p,dt){
+  advanceParticle(p,dt,forwardDecay=Math.exp(-STAR_PARTICLE_LIMITS.longitudinalDrag*dt),sideDecay=Math.exp(-STAR_PARTICLE_LIMITS.lateralDrag*dt)){
     p.age+=dt;
-    const forwardDecay=Math.exp(-STAR_PARTICLE_LIMITS.longitudinalDrag*dt),sideDecay=Math.exp(-STAR_PARTICLE_LIMITS.lateralDrag*dt);
     const forwardTravel=p.forward*(1-forwardDecay)/STAR_PARTICLE_LIMITS.longitudinalDrag;
     const sideTravel=p.lateral*(1-sideDecay)/STAR_PARTICLE_LIMITS.lateralDrag;
     p.x+=p.nx*forwardTravel-p.ny*sideTravel;p.y+=p.ny*forwardTravel+p.nx*sideTravel;
@@ -62,7 +63,8 @@ export class StarParticles{
     if(!enabled||!(strength>0)||!resolveStarTrailShape(shape,0)){this.clear();return;}
     if(!Number.isFinite(dt)||dt<0)return;
     // Clones intentionally retain only their ordinary thin trail.
-    const living=(bodies||[]).filter(b=>b&&b.isPlayer===true&&!b.isAuxiliary&&b.hp>0&&b.active!==false&&!b.captured&&Number.isFinite(b.x)&&Number.isFinite(b.y)&&Number.isFinite(b.r)&&b.r>0);
+    const living=this.living;living.length=0;
+    if(bodies)for(const b of bodies)if(b&&b.isPlayer===true&&!b.isAuxiliary&&b.hp>0&&b.active!==false&&!b.captured&&Number.isFinite(b.x)&&Number.isFinite(b.y)&&Number.isFinite(b.r)&&b.r>0)living.push(b);
     this.bounds=bounds;unit=Math.max(.001,unit);strength=clamp(strength,0,1);
     if(!trails){trails=this.fallbackTrails??=new CometTrails();trails.step(living,dt,{unit});}
     if(dt>.1){this.clear();return;}
@@ -76,17 +78,18 @@ export class StarParticles{
       track.currentOpacity=speedOpacity(speed/unit);
     }
     let keep=0;
+    const forwardDecay=Math.exp(-STAR_PARTICLE_LIMITS.longitudinalDrag*dt),sideDecay=Math.exp(-STAR_PARTICLE_LIMITS.lateralDrag*dt);
     for(const p of this.particles){
       const state=trails.getState(p.owner);
-      if(!state||state.generation!==p.generation||!living.includes(p.owner)){this.free.push(p);continue;}
+      if(!state||state.generation!==p.generation||!living.includes(p.owner)){this.recycle(p);continue;}
       const track=this.trackers.get(p.owner);
-      this.advanceParticle(p,dt);
+      this.advanceParticle(p,dt,forwardDecay,sideDecay);
       // Deceleration dims the whole existing string, not just future births.
       // Acceleration replenishes it with new particles without reviving old ink.
       p.opacity=Math.min(p.opacity,track.currentOpacity);
       p.distanceOpacity=Math.min(p.distanceOpacity,this.distanceOpacity(p,state,track.currentLength));
       this.constrainParticle(p);
-      if(p.age>=p.life||p.opacity<=0||p.distanceOpacity<=0)this.free.push(p);else this.particles[keep++]=p;
+      if(p.age>=p.life||p.opacity<=0||p.distanceOpacity<=0)this.recycle(p);else this.particles[keep++]=p;
     }
     this.particles.length=keep;
     for(const b of this.trackers.keys())if(!living.includes(b))this.trackers.delete(b);
@@ -129,18 +132,19 @@ export class StarParticles{
           const radius=b.r*(.14+this.random()*.06)*1.84;
           const sideSign=Math.abs(side)<.05*b.r?(this.random()<.5?-1:1):(side<0?-1:1);
           const sideSpeed=sideSign*b.r*(.8+.6*this.random());
-          Object.assign(p,{shape:resolveStarTrailShape(shape,this.shapeRandom()),owner:b,generation:state.generation,x:origin.x-origin.ny*side,y:origin.y+origin.nx*side,
-            nx:origin.nx,ny:origin.ny,forward:speed*inherit,lateral:sideSpeed,
-            vx:origin.nx*speed*inherit-origin.ny*sideSpeed,vy:origin.ny*speed*inherit+origin.nx*sideSpeed,
-            r:radius,age:0,life:STAR_PARTICLE_LIMITS.lifetime[0]+this.random()*(STAR_PARTICLE_LIMITS.lifetime[1]-STAR_PARTICLE_LIMITS.lifetime[0]),
-            rotation:(this.random()-.5)*Math.PI*.4,spin:(this.random()-.5)*.6,
-            opacity:track.currentOpacity,distanceOpacity:1,bornAt:at,sequence:++this.emissionCount,
-            birthMileage:state.mileage-moved*(1-fraction),backDistance,birthSide:side,lateralPhase:track.lateralPhase,
-            birthTrailLength:track.currentLength});
+          p.shape=resolveStarTrailShape(shape,this.shapeRandom());p.owner=b;p.generation=state.generation;
+          p.x=origin.x-origin.ny*side;p.y=origin.y+origin.nx*side;
+          p.nx=origin.nx;p.ny=origin.ny;p.forward=speed*inherit;p.lateral=sideSpeed;
+          p.vx=origin.nx*speed*inherit-origin.ny*sideSpeed;p.vy=origin.ny*speed*inherit+origin.nx*sideSpeed;
+          p.r=radius;p.age=0;p.life=STAR_PARTICLE_LIMITS.lifetime[0]+this.random()*(STAR_PARTICLE_LIMITS.lifetime[1]-STAR_PARTICLE_LIMITS.lifetime[0]);
+          p.rotation=(this.random()-.5)*Math.PI*.4;p.spin=(this.random()-.5)*.6;
+          p.opacity=track.currentOpacity;p.distanceOpacity=1;p.bornAt=at;p.sequence=++this.emissionCount;
+          p.birthMileage=state.mileage-moved*(1-fraction);p.backDistance=backDistance;p.birthSide=side;p.lateralPhase=track.lateralPhase;
+          p.birthTrailLength=track.currentLength;
           p.birthRotation=p.rotation;
           this.advanceParticle(p,Math.max(0,this.clock-at));
           p.distanceOpacity=this.distanceOpacity(p,state,track.currentLength);this.constrainParticle(p);
-          if(p.age>=p.life||p.opacity<=0||p.distanceOpacity<=0)this.free.push(p);else this.particles.push(p);
+          if(p.age>=p.life||p.opacity<=0||p.distanceOpacity<=0)this.recycle(p);else this.particles.push(p);
         }
         // Invalid history / full pool consumes the event too. There is never a
         // backlog to burst after a freeze, a reset or an available pool slot.
@@ -154,11 +158,14 @@ export class StarParticles{
    * per-particle display object; drawing never changes the simulation. */
   draw(graphics,color,{strength=.6}={}){
     if(!(strength>0))return;
+    const options=this.drawOptions;options.color=color;
+    const opacity=clamp(strength,0,1);
     for(const p of this.particles){
       const position=this.clampedPosition(p,this.drawPosition);
       const t=clamp(p.age/p.life,0,1),appear=smooth(t/.15),fade=t<.35?1:1-((t-.35)/.65)**1.35;
-      drawParticleAppearance(graphics,{shape:p.shape,x:position.x,y:position.y,radius:p.r*sizeAt(t),color,
-        alpha:appear*fade*p.distanceOpacity*clamp(strength,0,1)*p.opacity,rotation:p.rotation});
+      options.shape=p.shape;options.x=position.x;options.y=position.y;options.radius=p.r*sizeAt(t);
+      options.alpha=appear*fade*p.distanceOpacity*opacity*p.opacity;options.rotation=p.rotation;
+      drawParticleAppearance(graphics,options);
     }
   }
 }

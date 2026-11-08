@@ -95,6 +95,9 @@ const luminance = value => [16,8,0].reduce((sum, shift, index) => {
     * [.2126,.7152,.0722][index];
 }, 0);
 const contrast = (a, b) => (Math.max(a,b) + .05) / (Math.min(a,b) + .05);
+// Both special appearances use the same palette-only result. Keep a small
+// bounded cache for crossfades; color-picker changes cannot grow it indefinitely.
+const feedbackColors = new Map();
 
 // Thin translucent feedback cannot use the pale body fill unchanged on a pale
 // arena. Custom photos can conceal that same pale underlying palette, so both
@@ -103,16 +106,25 @@ const contrast = (a, b) => (Math.max(a,b) + .05) / (Math.min(a,b) + .05);
 export function appearanceFeedbackColor(playerColor, backgroundColor, id = 'original') {
   const color = colorValue(playerColor, 0x252720);
   if (id !== 'big-eye' && id !== 'custom') return color;
-  const background = luminance(colorValue(backgroundColor, 0xf4f3eb));
+  const backgroundColorValue = colorValue(backgroundColor, 0xf4f3eb);
+  const key = color * 0x1000000 + backgroundColorValue;
+  const cached = feedbackColors.get(key);
+  if (cached !== undefined) return cached;
+  const background = luminance(backgroundColorValue);
   const required = 6;
-  if (contrast(luminance(color), background) >= required) return color;
-  const target = contrast(0, background) >= contrast(1, background) ? 0x000000 : 0xffffff;
-  const threshold = Math.min(required, contrast(luminance(target), background));
-  let low = 0, high = 1;
-  for (let step = 0; step < 16; step++) {
-    const middle = (low + high) / 2;
-    if (contrast(luminance(mixColor(color, target, middle)), background) >= threshold) high = middle;
-    else low = middle;
+  let result = color;
+  if (contrast(luminance(color), background) < required) {
+    const target = contrast(0, background) >= contrast(1, background) ? 0x000000 : 0xffffff;
+    const threshold = Math.min(required, contrast(luminance(target), background));
+    let low = 0, high = 1;
+    for (let step = 0; step < 16; step++) {
+      const middle = (low + high) / 2;
+      if (contrast(luminance(mixColor(color, target, middle)), background) >= threshold) high = middle;
+      else low = middle;
+    }
+    result = mixColor(color, target, high);
   }
-  return mixColor(color, target, high);
+  if (feedbackColors.size >= 16) feedbackColors.delete(feedbackColors.keys().next().value);
+  feedbackColors.set(key, result);
+  return result;
 }

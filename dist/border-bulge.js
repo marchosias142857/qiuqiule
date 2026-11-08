@@ -112,9 +112,8 @@ function multiply(a,b){
 // The original rounded rectangle is C1 but its curvature changes at straight /
 // arc joins. A fixed contact normal makes the added displacement itself C1 at
 // those joins; using a different normal at each sample would create a kink.
-function displacement(s,g,states,start,end,open){
+function displacement(s,g,states,start,end,open,maximum){
   let x=0,y=0,dx=0,dy=0;
-  const maximum=Math.max(0,...states.map(state=>Math.abs(state.height)));
   for(const state of states){
     let delta=s-state.s;
     if(!open)delta=((delta+g.length/2)%g.length+g.length)%g.length-g.length/2;
@@ -195,8 +194,10 @@ export function buildBulgedBorder(frame,gap,bulges=[],{maxStep=2}={}){
   }
   samples.push(end);
   let largestSlope=0;
+  // The strongest contact is constant for this border, not per sample.
+  const maximum=Math.max(0,...states.map(state=>Math.abs(state.height)));
   const values=samples.map(s=>{
-    const p=pointAt(g,s),d=displacement(s,g,states,start,end,open);
+    const p=pointAt(g,s),d=displacement(s,g,states,start,end,open,maximum);
     largestSlope=Math.max(largestSlope,Math.hypot(d.dx,d.dy));
     return {p,d};
   });

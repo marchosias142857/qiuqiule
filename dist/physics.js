@@ -21,6 +21,9 @@ export function enemyBaseHp(stage) {
 const LEGACY_REWARD_TIMING = Object.freeze({move: 1.45, transition: 1.85, bornDelay: .25, bornDuration: 1.5, rest: 1});
 const smooth = value => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
 const smoother = value => { const t = clamp(value, 0, 1); return t * t * t * (10 + t * (-15 + 6 * t)); };
+const introducedEnemyTypes = Object.values(ENEMY_TYPES)
+  .filter(type => type.spawnable && type.id !== 'normal').sort((a, b) => a.stage - b.stage);
+const introductionStages = new Set(introducedEnemyTypes.map(type => type.stage));
 
 // The original layers keep their fixed bonuses. Further endless layers use
 // upgradeStat; campaign rewards are applied separately in CampaignWorld.
@@ -277,21 +280,29 @@ export class World {
   get rewardTransitionEnd() { return Math.max(this.rewardTiming.transition, this.rollFrom?.end || 0); }
   get launchCap() { return this.unit * (60 + (this.mode !== 'campaign' ? upgradeStat('overspeed', this.buffs.overspeed || 0) : 0)); }
   scoreValue(base) { return Math.round(base); }
-  get liveCount() { return this.enemies.filter(body => body.hp > 0).length; }
+  get liveCount() {
+    let count = 0;
+    for (const body of this.enemies) if (body.hp > 0) count++;
+    return count;
+  }
   get pressureCount() {
     if (this.mode === 'campaign') return this.liveCount;
-    const families = new Set();
+    let families = null;
     let count = 0;
     for (const body of this.enemies) if (body.hp > 0) {
       if (body.splitFamilyId == null) count++;
-      else families.add(body.splitFamilyId);
+      else (families ||= new Set()).add(body.splitFamilyId);
     }
     // A family stays alive while any of its three children awaits a safe
     // birth position, even if all of its already-born siblings were killed.
-    for (const child of this.fragmentQueue) if (child.splitFamilyId != null) families.add(child.splitFamilyId);
-    return count + families.size;
+    for (const child of this.fragmentQueue) if (child.splitFamilyId != null) (families ||= new Set()).add(child.splitFamilyId);
+    return count + (families?.size || 0);
   }
-  get resultMisses() { return this.shotHistory.filter(shot => this.feedbackTime - shot.time <= 20 && shot.hits === 0).length; }
+  get resultMisses() {
+    let count = 0;
+    for (const shot of this.shotHistory) if (this.feedbackTime - shot.time <= 20 && shot.hits === 0) count++;
+    return count;
+  }
   get maxPhysicsSpeed() { return (this.launchCap + this.readySpeed) * (this.mode !== 'campaign' && this.buffs.boomerang ? UPGRADES.boomerang.effect.speedMultiplier : 1); }
   get combatActive() { return ['battle', 'boss-entry', 'boss'].includes(this.phase); }
   get continuousControl() { return this.mode !== 'campaign' && this.combatActive; }
@@ -388,9 +399,9 @@ export class World {
           const direction = candidate + i * Math.PI * 2 / 3;
           const x = body.x + Math.cos(direction) * distanceUnits * this.unit;
           const y = body.y + Math.sin(direction) * distanceUnits * this.unit;
-          const gap = Math.min(x - bounds.left - radius, bounds.right - x - radius,
-            y - bounds.top - radius, bounds.bottom - y - radius,
-            ...blockers.map(b => Math.hypot(x - b.x, y - b.y) - radius - b.r - this.unit * .08));
+          let gap = Math.min(x - bounds.left - radius, bounds.right - x - radius,
+            y - bounds.top - radius, bounds.bottom - y - radius);
+          for (const b of blockers) gap = Math.min(gap, Math.hypot(x - b.x, y - b.y) - radius - b.r - this.unit * .08);
           if (gap >= 0) clear++;
           score += clamp(gap / this.unit, -10, 1);
         }
@@ -423,7 +434,7 @@ export class World {
     }
   }
   get spawnInterval() {
-    const introduction = Object.values(ENEMY_TYPES).some(type => type.spawnable && type.id !== 'normal' && type.stage === this.stage);
+    const introduction = introductionStages.has(this.stage);
     return (.65 + 1.35 * .86 ** (this.stage - 1)) * (introduction ? 1.15 : 1);
   }
   enemyProfile() {
@@ -522,8 +533,7 @@ export class World {
   }
 
   nextIntroduction() {
-    return Object.values(ENEMY_TYPES).filter(type => type.spawnable && type.id !== 'normal' && type.stage <= this.stage)
-      .sort((a, b) => a.stage - b.stage).find(type => (this.typeIntroductions[type.id] || 0) < 3)?.id || null;
+    return introducedEnemyTypes.find(type => type.stage <= this.stage && (this.typeIntroductions[type.id] || 0) < 3)?.id || null;
   }
 
   reservedEnemyTypes(includeIntroduction = false) {
@@ -569,9 +579,12 @@ export class World {
   safeSpawnPosition(point, radius, cluster, {localOnly = false} = {}) {
     const bounds = this.arenaBounds;
     const fit = pos => ({x: clamp(pos.x, bounds.left + radius, bounds.right - radius), y: clamp(pos.y, bounds.top + radius, bounds.bottom - radius)});
-    const clearance = pos => Math.min(Math.hypot(pos.x - this.player.x, pos.y - this.player.y) - radius - this.player.r,
-      ...(localOnly ? this.auxiliaries : []).map(b => Math.hypot(pos.x - b.x, pos.y - b.y) - radius - b.r),
-      ...this.enemies.filter(b => b.hp > 0).map(b => Math.hypot(pos.x - b.x, pos.y - b.y) - radius - b.r)) - (localOnly ? this.unit * .08 : 0);
+    const clearance = pos => {
+      let gap = Math.hypot(pos.x - this.player.x, pos.y - this.player.y) - radius - this.player.r;
+      if (localOnly) for (const b of this.auxiliaries) gap = Math.min(gap, Math.hypot(pos.x - b.x, pos.y - b.y) - radius - b.r);
+      for (const b of this.enemies) if (b.hp > 0) gap = Math.min(gap, Math.hypot(pos.x - b.x, pos.y - b.y) - radius - b.r);
+      return gap - (localOnly ? this.unit * .08 : 0);
+    };
     let best = fit(point), gap = clearance(best);
     if (gap >= 0 && (!localOnly || Math.hypot(best.x - cluster.x, best.y - cluster.y) <= this.unit * 2.5)) return {point: best, cluster};
     for (let pass = 0; pass < (localOnly ? 1 : 2); pass++) {
@@ -609,8 +622,8 @@ export class World {
       const point = {x: side < 2 ? (side ? bounds.right - radius : bounds.left + radius) : lerp(bounds.left + radius, bounds.right - radius, t),
         y: side >= 2 ? (side === 2 ? bounds.top + radius : bounds.bottom - radius) : lerp(bounds.top + radius, bounds.bottom - radius, t)};
       if (Math.hypot(point.x - this.player.x, point.y - this.player.y) < this.player.r + radius) continue;
-      const gap = Math.min(Math.hypot(point.x - this.player.x, point.y - this.player.y) - this.player.r - radius,
-        ...this.enemies.filter(b => b.hp > 0).map(b => Math.hypot(point.x - b.x, point.y - b.y) - b.r - radius));
+      let gap = Math.hypot(point.x - this.player.x, point.y - this.player.y) - this.player.r - radius;
+      for (const b of this.enemies) if (b.hp > 0) gap = Math.min(gap, Math.hypot(point.x - b.x, point.y - b.y) - b.r - radius);
       if (gap > distance) { best = point; distance = gap; }
     }
     return best;
@@ -871,7 +884,7 @@ export class World {
   }
 
   advanceMagnetPull(dt, activeTimes = null) {
-    if (!this.combatActive) return;
+    if (!this.combatActive || !this.magnetPull && !this.magnetPullSecond) return;
     this.pruneMagnetPulls();
     const p = this.player, lane = this.magnetLane();
     for (const pull of [this.magnetPull, this.magnetPullSecond]) {
@@ -981,11 +994,14 @@ export class World {
     if (this.phase === 'clearing' || a.hp <= 0 || b.hp <= 0) return;
     if ((a.feedbackFreeze || 0) > 1e-10 || (b.feedbackFreeze || 0) > 1e-10) return;
     const dx = b.x - a.x, dy = b.y - a.y;
-    const dist = Math.hypot(dx, dy);
     const ar = a.r * (a.isPlayer ? 1 : ease(a.born));
     const br = b.r * ease(b.born);
     const sum = ar + br;
-    if (dist >= sum || sum < 1) return;
+    // Most body pairs are far apart. Reject only pairs whose circle bounds
+    // cannot overlap; actual contact still uses the same hypot and solver.
+    if (sum < 1 || Math.abs(dx) >= sum || Math.abs(dy) >= sum) return;
+    const dist = Math.hypot(dx, dy);
+    if (dist >= sum) return;
     const nx = dist > .001 ? dx / dist : 1, ny = dist > .001 ? dy / dist : 0;
     const invA = 1 / a.mass, invB = 1 / b.mass;
     const totalInv = invA + invB;
@@ -1553,7 +1569,9 @@ export class World {
     // Each integration covers at most half a base radius at the sampled speed.
     let remaining = dt;
     while (remaining > 1e-10 && this.phase !== 'over') {
-      const sampledSpeed = Math.max(length(this.player), ...this.auxiliaries.map(length), ...this.enemies.map(length));
+      let sampledSpeed = length(this.player);
+      for (const body of this.auxiliaries) sampledSpeed = Math.max(sampledSpeed, length(body));
+      for (const body of this.enemies) sampledSpeed = Math.max(sampledSpeed, length(body));
       const speed = ['boss-entry', 'boss', 'boss-celebrate'].includes(this.phase) ? sampledSpeed : Math.min(this.maxPhysicsSpeed, sampledSpeed);
       let h = Math.min(remaining, speed > 0 ? this.unit * .5 / speed : remaining);
       // Attraction can accelerate a resting enemy, which sampledSpeed cannot
@@ -1562,7 +1580,8 @@ export class World {
       if (this.mode !== 'campaign' && ['battle', 'clearing', 'boss-entry', 'boss'].includes(this.phase)) h = Math.min(h, 1 / 120);
       if (this.phase === 'boss-celebrate' && this.phaseTime < BOSS_TIMING.brake) h = Math.min(h, 1 / 120, BOSS_TIMING.brake - this.phaseTime);
       if (this.bossControl && speed > 0 && this.arenaBlend > .9) {
-        const biggest = Math.max(this.player.r, ...this.auxiliaries.map(b => b.r));
+        let biggest = this.player.r;
+        for (const body of this.auxiliaries) biggest = Math.max(biggest, body.r);
         const corridor = this.arenaGeometry.r - this.bossRadius - 2 * biggest;
         h = Math.min(h, Math.max(this.unit * .025, corridor * .4) / speed);
       }
@@ -1651,10 +1670,13 @@ export class World {
 
   advanceBodies(dt, dragging, timeScale = 1) {
     const p = this.player;
-    const bodies = [p, ...this.auxiliaries, ...this.enemies], activeTimes = new Map();
+    // Wall shockwaves may start a pull during this pass, so include the enabled
+    // upgrade as well as existing pulls before deciding whether timing is needed.
+    const bodies = [p, ...this.auxiliaries, ...this.enemies];
+    const activeTimes = this.buffs.magnet || this.magnetPull || this.magnetPullSecond ? new Map() : null;
     for (const b of bodies) {
       const bodyDt = this.feedbackStep(b, dt, timeScale);
-      activeTimes.set(b.id, bodyDt);
+      activeTimes?.set(b.id, bodyDt);
       if (bodyDt <= 1e-10 || b.hp <= 0) continue;
       this.advanceBoomerang(b, bodyDt);
       if (b.isAuxiliary) b.slowAge = length(b) < this.unit * 3 ? (b.slowAge || 0) + bodyDt : 0;

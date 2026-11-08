@@ -5,7 +5,7 @@
 1. 新建或使用你的 GitHub 仓库，将解压后 `qiuqiule` 文件夹里的**内容**放到仓库根目录。推荐用 GitHub Desktop 上传，确保包含 `.github/workflows/pages.yml`。
 2. 打开仓库 **Settings → Pages**，把 **Source** 设为 **GitHub Actions**。
 3. 打开 **Actions**，选择 **Deploy 球球了**，点击 **Run workflow**。若此前第一次自动运行因 Pages 尚未启用而失败，启用 Pages 后重新运行即可。
-4. 工作流会检查代码、运行测试、上传 `dist/` 并部署，不需要填写密钥、不需要改仓库名相关路径。
+4. 工作流会安装锁定依赖、检查代码、运行测试，将 `dist/` 构建为压缩后的 `build/`，验证资源后上传部署，不需要填写密钥、不需要改仓库名相关路径。
 5. 在 **Settings → Pages** 打开发布的网址。资源使用相对路径，普通仓库的 `/<仓库名>/` 路径和用户主页根路径均支持。
 
 后续推送 `main` 或 `master` 会自动更新；使用其他分支时，修改工作流的 `branches`，或手动运行工作流。
@@ -16,7 +16,7 @@
 
 如果只想通过 GitHub 网页上传：
 
-1. 打开本包的 `dist/`，将其**内部全部文件和文件夹**上传到仓库根目录；仓库根目录应直接有 `index.html`、`game.js`、`fonts/`、`audio/`、`vendor/` 等。
+1. 在本包目录执行 `npm ci`、`npm run build` 和 `npm run verify:build`，再将 `build/` **内部全部文件和文件夹**上传到仓库根目录；仓库根目录应直接有 `index.html`、`game.js`、`fonts/`、`audio/`、`vendor/` 等。
 2. 在 **Settings → Pages** 选择 **Deploy from a branch**，选择你的主分支及 **/(root)**，保存。
 3. 这种方式不需要上传本包根目录的 `package.json`、`tests/`、`scripts/` 或 `.github/`；请在本地保留完整工程以便以后修改。
 

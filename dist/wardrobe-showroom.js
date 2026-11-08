@@ -17,8 +17,8 @@ const ink=value=>typeof value==='string'&&/^#[\da-f]{6}$/i.test(value)?value:
 const attr=(node,key,value)=>{value=String(value);if(node.getAttribute(key)!==value)node.setAttribute(key,value);};
 let nextMask=0;
 function node(parent,tag){const value=(parent.ownerDocument||document).createElementNS(SVG,tag);parent.append(value);return value;}
-function activeLayers(layers){
-  const ids=new Set();
+function activeLayers(layers,ids){
+  ids.clear();
   for(const layer of layers||[])if(starTrailShapes(layer.id).length&&finite(layer.weight,1)>0)ids.add(layer.id);
   return ids;
 }
@@ -41,14 +41,15 @@ class SvgGraphics {
   finish(){for(let i=this.count;i<this.paths.length;i++)attr(this.paths[i],'display','none');}
 }
 
-/** Wardrobe-only fixed composition. The thin ribbon uses the battle renderer;
+/** Shared wardrobe/unlock composition. The thin ribbon uses the battle renderer;
  * three decorative samples stay anchored to it and breathe in place. This
  * class owns no World, emitter, gameplay RNG, persistence or acquisition UI. */
 export class WardrobeShowroom {
-  constructor(){this.workspace=new CometWorkspace();this.dom=null;this.reset();}
+  constructor(){this.workspace=new CometWorkspace();this.dom=null;this.activeIds=new Set();this.drawOptions={};this.reset();}
   reset(){
-    this.points=[];this.radius=0;this.clock=0;this.reducedMotion=false;
-    if(this.dom){attr(this.dom.svg,'visibility','hidden');this.removeUnusedGroups(new Set());}
+    this.points=[];this.radius=0;this.clock=0;this.reducedMotion=false;this.thinState=null;
+    this.activeIds.clear();
+    if(this.dom){attr(this.dom.svg,'visibility','hidden');this.removeUnusedGroups(this.activeIds);}
   }
   step(dt,{radius,reducedMotion=false}={}){
     if(!(Number.isFinite(radius)&&radius>0)){this.reset();return;}
@@ -74,6 +75,7 @@ export class WardrobeShowroom {
     const dark=node(gradient,'stop'),light=node(gradient,'stop');attr(dark,'offset',0);attr(dark,'stop-color','#000');attr(light,'offset',1);attr(light,'stop-color','#fff');
     const mask=node(defs,'mask'),maskRect=node(mask,'rect');attr(mask,'id',maskId);attr(mask,'maskUnits','userSpaceOnUse');attr(mask,'maskContentUnits','userSpaceOnUse');attr(mask,'mask-type','luminance');attr(maskRect,'fill',`url(#${gradientId})`);
     const scene=node(svg,'g'),thin=node(scene,'g');attr(scene,'mask',`url(#${maskId})`);attr(thin,'data-kind','thin-trail');
+    this.thinState=null;
     this.dom={host,svg,gradient,mask,maskRect,scene,thin:new SvgGraphics(thin),groups:new Map()};return this.dom;
   }
   removeUnusedGroups(ids){
@@ -90,15 +92,20 @@ export class WardrobeShowroom {
     for(const target of [dom.mask,dom.maskRect]){
       attr(target,'x',number(left));attr(target,'y',number(y-r*2));attr(target,'width',number(visible));attr(target,'height',number(height));
     }
-    const profile=cometProfile(SPEED*r,r,r,STRENGTH);
-    dom.thin.start(x,y);
-    for(const band of this.workspace.bands(this.points,{...profile,length:visible})){
-      dom.thin.fillStyle(color,profile.alpha*band.opacity*band.crossAlpha);dom.thin.beginPath();
-      band.vertices.forEach((point,i)=>i?dom.thin.lineTo(point.x,point.y):dom.thin.moveTo(point.x,point.y));
-      dom.thin.closePath();dom.thin.fillPath();
+    // The ribbon is stationary while the three samples breathe. Retain its
+    // geometry and serialized SVG paths until a real layout/retraction change.
+    const previous=this.thinState;
+    if(!previous||previous.x!==x||previous.y!==y||previous.r!==r||previous.length!==visible||previous.color!==color||previous.points!==this.points){
+      const profile=cometProfile(SPEED*r,r,r,STRENGTH);
+      dom.thin.start(x,y);
+      for(const band of this.workspace.bands(this.points,{...profile,length:visible})){
+        dom.thin.fillStyle(color,profile.alpha*band.opacity*band.crossAlpha);dom.thin.beginPath();
+        for(let i=0;i<band.vertices.length;i++){const point=band.vertices[i];if(i)dom.thin.lineTo(point.x,point.y);else dom.thin.moveTo(point.x,point.y);}
+        dom.thin.closePath();dom.thin.fillPath();
+      }
+      dom.thin.finish();this.thinState={x,y,r,length:visible,color,points:this.points};
     }
-    dom.thin.finish();
-    const ids=activeLayers(layers);this.removeUnusedGroups(ids);
+    const ids=activeLayers(layers,this.activeIds);this.removeUnusedGroups(ids);
     for(const layer of layers){
       if(!ids.has(layer.id))continue;
       const shapes=starTrailShapes(layer.id);
@@ -109,9 +116,11 @@ export class WardrobeShowroom {
       for(let i=0;i<SAMPLES.length;i++){
         const sample=SAMPLES[i],phase=this.clock*TAU/2.8+sample.phase;
         const breath=this.reducedMotion?1:.5+.5*Math.cos(phase);
-        drawParticleAppearance(g,{shape:shapes[i%shapes.length],x:x-r*sample.back,y:y+r*sample.side,
-          radius:r*sample.size*(.66+.34*breath),color:layer.color??color,alpha:.38+.62*breath,
-          rotation:sample.angle+(this.reducedMotion?0:.14*Math.sin(phase))});
+        const options=this.drawOptions;
+        options.shape=shapes[i%shapes.length];options.x=x-r*sample.back;options.y=y+r*sample.side;
+        options.radius=r*sample.size*(.66+.34*breath);options.color=layer.color??color;options.alpha=.38+.62*breath;
+        options.rotation=sample.angle+(this.reducedMotion?0:.14*Math.sin(phase));
+        drawParticleAppearance(g,options);
       }
       g.finish();
     }

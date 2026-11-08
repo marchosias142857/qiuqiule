@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {skinContour} from '../dist/skins.js';
+import {projectSkinContour} from '../dist/skin-render.js';
 import {UPGRADE_DEFINITIONS,UPGRADES} from '../dist/upgrades.js';
 import {impactShards} from '../dist/feedback.js';
 import {World,BOSS_TIMING} from '../dist/physics.js';
@@ -30,6 +31,14 @@ function element(selector){
       if(selector==='#wardrobe-panel .wardrobe-preview'){
         const width=Math.min(window.innerWidth-48,416),height=150,left=(window.innerWidth-width)/2,top=120;
         return {x:left,y:top,left,right:left+width,top,bottom:top+height,width,height};
+      }
+      if(selector==='#skin-unlock-panel'||selector==='#skin-unlock-ball'){
+        const raw=Math.min(380,window.innerWidth-48,window.innerHeight-48);
+        const scale=Number(element('#skin-unlock-panel').style.transform?.match(/scale\(([^)]+)\)/)?.[1])||1;
+        const size=raw*scale,left=(window.innerWidth-size)/2,top=(window.innerHeight-size)/2;
+        const ball=selector==='#skin-unlock-ball',width=ball?size*.26:size,height=width;
+        const x=ball?left+size*.5-width/2:left,y=ball?top+size*(.5+.12*.5+.82*.08668219763152786)-height/2:top;
+        return {x,y,width,height,left:x,right:x+width,top:y,bottom:y+height};
       }
       const [x,y,width,height]=selector==='#over-ball'?[96,320,72,72]:selector==='#pause-ball'?[110,200,64,64]:selector==='#run-upgrades-ball'?[68,132,42,42]:selector==='#skin-unlock-ball'?[141,370,108,108]:[0,0,390,844];
       return {x,y,width,height,top:y,bottom:y+height,left:x,right:x+width};
@@ -81,7 +90,7 @@ export function seedRenderer(graphics,width=390,height=844,arena=false,keepSave=
   if(typeof pendingRunSnapshot!=='undefined')pendingRunSnapshot=null;
   if(typeof restoredView!=='undefined')restoredView=null;
   if(typeof resumeSlowRemaining!=='undefined')resumeSlowRemaining=0;
-  starTrailState=normalizeStarTrailState({unlocked:9});starTrailTween=null;starTrailOverride=null;starTrailClock=0;scene?.starParticles?.clear();
+  starTrailState=normalizeStarTrailState({unlocked:9});starTrailTween=null;starTrailOverride=null;scene?.starParticles?.clear();
   clearChoicePress();aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
   $('#feedback-demo').testViewport={width,height};
   // Generic rendering fixtures already own star trails and isolate celebrations.
@@ -151,7 +160,7 @@ export const saveEndless=saveEndlessProgress;
 export function seedCircle(){
   playerContour=skinContour(0);skinOverride=null;skinUnlock=null;wardrobeShowcase=null;lastUiPose=null;appearance=null;appearanceUrl=null;appearanceLoading=false;
   appearanceState=normalizeAppearanceState(null);appearanceTween=null;appearanceOverride=null;
-  starTrailState=normalizeStarTrailState({unlocked:9});starTrailTween=null;starTrailOverride=null;starTrailClock=0;scene?.starParticles?.clear();
+  starTrailState=normalizeStarTrailState({unlocked:9});starTrailTween=null;starTrailOverride=null;scene?.starParticles?.clear();
 }
 export function readPlayerShape(){return {playerContour,skinOverride,skinUnlock,lastUiPose,active:activeContour()};}
 export const advanceSkin=updateSkin;
@@ -204,13 +213,24 @@ export function seedWardrobePresentation(time=.75){
 export const openWardrobeForTest=openWardrobe;
 export const navigateWardrobeForTest=navigateWardrobePreview;
 export const readShowcaseForTest=()=>({state:wardrobeShowcase,pose:currentPlayerPose(),lastUiPose,start:anchorPose('wardrobe-start'),end:anchorPose('wardrobe-trail')});
+export const readUnlockShowroomForTest=()=>({dom:unlockShowroom.dom,clock:unlockShowroom.clock,radius:unlockShowroom.radius,points:unlockShowroom.points});
+export function bindUnlockGlowForTest(){
+  const previous={glowCanvas,glowContext};
+  const canvas=glowCanvas={hidden:false,width:512,height:512,style:{}},fills=[],alphaStack=[];
+  const context=glowContext={globalAlpha:1,setTransform(){},clearRect(){},
+    save(){alphaStack.push(this.globalAlpha);},restore(){this.globalAlpha=alphaStack.pop();},
+    translate(){},rotate(){},createRadialGradient(){return {addColorStop(){}};},
+    beginPath(){},arc(){},moveTo(){},lineTo(){},quadraticCurveTo(){},closePath(){},
+    fill(){fills.push(this.globalAlpha);}};
+  return {canvas,context,fills,restore(){({glowCanvas,glowContext}=previous);}};
+}
 export function bindWardrobeControls(controls){const previous=wardrobeUi;wardrobeUi=controls;return ()=>{wardrobeUi=previous;};}
 export const paintUiForTest=paintUiBall;
 export const drawPlayerForTest=drawBall;
 export function seedStarTrails(raw=null,{highestStage=0}={}){
-  starTrailState=normalizeStarTrailState(raw,{highestStage});starTrailTween=null;starTrailOverride=null;starTrailClock=0;scene?.starParticles?.clear();return starTrailState;
+  starTrailState=normalizeStarTrailState(raw,{highestStage});starTrailTween=null;starTrailOverride=null;scene?.starParticles?.clear();return starTrailState;
 }
-export function readStarTrails(){return {state:starTrailState,tween:starTrailTween,clock:starTrailClock,layers:starTrailLayers()};}
+export function readStarTrails(){return {state:starTrailState,tween:starTrailTween,layers:starTrailLayers()};}
 export const chooseStarTrailForTest=chooseStarTrail;
 export const advanceStarTrails=updateStarTrailVisual;
 export const grantStarTrailsForTest=grantEndlessStarTrails;
@@ -3430,6 +3450,74 @@ test('Boss play and split auxiliaries share comet rendering, and independent aim
   }
 });
 
+test('clone comets cut at the exact current painted contour across appearances, impact squash and hit-stop displacement',t=>{
+  t.after(()=>{app.seedCircle();app.setFeedbackStrength(.6);});
+  const contains=(polygon,point)=>{
+    let inside=false;
+    for(let i=0,j=polygon.length-1;i<polygon.length;j=i++){
+      const a=polygon[i],b=polygon[j];
+      if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+    }
+    return inside;
+  };
+  for(const appearance of ['original','big-eye','custom']){
+    const {world,scene,g}=controlRun(),p=world.player;app.seedCircle();
+    let photos;
+    if(appearance==='big-eye')app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});
+    if(appearance==='custom')photos=app.recordCompositePhotos(true);
+    try{
+      const clone=world.makeBody(160,300,p.r*.7,p.density);
+      Object.assign(clone,{isPlayer:true,isAuxiliary:true,born:1,solid:true,hp:1,vx:world.unit*34,vy:world.unit*18});
+      world.auxiliaries=[clone];Object.assign(p,{x:80,y:620,vx:world.unit*40,vy:0});
+      for(let frame=0;frame<16;frame++){
+        for(const body of [p,clone]){body.x+=body.vx/120;body.y+=body.vy/120;}
+        scene.updateTrails(1/120);
+      }
+      const history=structuredClone(scene.cometTrails.entries.get(clone).points),physical=physicalFields(clone);
+      const draw=scene.cometTrails.draw.bind(scene.cometTrails);let cut,mainCut,trailShapes;
+      scene.cometTrails.draw=(graphics,bodies,color,options)=>{
+        cut=options.clipOutline(clone);mainCut=options.clipOutline(p);
+        const first=g.shapes.length;draw(graphics,bodies,color,options);trailShapes=g.shapes.slice(first);
+      };
+      let previousCut;
+      for(const [squash,angle,clock] of [[.3,1.1,.137],[-.33,.2,.181]]){
+        Object.assign(clone,{squash,angle,feedbackFreeze:.07});scene.clock=clock;
+        const shaken=scene.shakenBody(clone);assert.notEqual(shaken,clone,'fixture exercises hit-stop displacement');
+        if(photos)photos.aux.length=0;
+        g.clear();scene.drawArena();
+        assert.equal(mainCut,undefined,'main player retains its original uncut trail');
+        assert.equal(cut.length,192);
+        let painted;
+        if(appearance==='original'){
+          const fill=g.shapes.find(shape=>shape.type==='path'&&shape.alpha===.6&&shape.points.length===193);
+          assert.ok(fill,'clone retains its original 60% transparency');painted=fill.points.slice(0,-1);
+        }else if(appearance==='big-eye'){
+          const fan=g.shapes.filter(shape=>shape.type==='triangle'&&shape.alpha===.6);
+          assert.equal(fan.length,192);painted=fan.map(shape=>shape.points[1]);
+        }else{
+          assert.equal(photos.aux.length,1);const photo=photos.aux[0];
+          assert.equal(photo.options.alpha,.6);assert.ok(photo.pose.flightStretch>0,'mask includes velocity deformation');
+          painted=projectSkinContour(photo.contour,photo.pose);
+        }
+        assert.deepEqual(cut,painted,'the clip reuses the exact outline painted in the same frame');
+        const center=cut.reduce((out,point)=>({x:out.x+point.x/cut.length,y:out.y+point.y/cut.length}),{x:0,y:0});
+        near(center.x,shaken.x);near(center.y,shaken.y);
+        if(previousCut)assert.notDeepEqual(cut,previousCut,'the boundary follows the next squash and shake pose');
+        previousCut=structuredClone(cut);
+        const paths=trailShapes.filter(shape=>shape.type==='path');assert.ok(paths.length>0);
+        assert.ok(paths.every(shape=>shape.alpha>0&&shape.alpha<=.24),'clipping preserves the thin trail opacity');
+        for(let i=0;i<cut.length;i+=12)for(const fraction of [.15,.5,.9]){
+          const point={x:center.x+(cut[i].x-center.x)*fraction,y:center.y+(cut[i].y-center.y)*fraction};
+          assert.ok(paths.every(shape=>!contains(shape.points,point)),appearance+' trail never fills the translucent body interior');
+        }
+        assert.deepEqual(scene.cometTrails.entries.get(clone).points,history,'drawing cannot alter travel history');
+        assert.ok(scene.starParticles.particles.every(particle=>particle.owner!==clone),'clone clipping adds no star particles');
+      }
+      assert.deepEqual(physicalFields(clone),physical,'only test-authored visual fields changed');
+    }finally{photos?.restore();app.seedCircle();}
+  }
+});
+
 test('comets are cleared across pause, background, rewards, ending, resize and fresh runs with no streak between positions',t=>{
   const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
   t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;app.seedRenderer(graphicsRecorder());app.setFeedbackStrength(.6);});
@@ -3712,11 +3800,74 @@ test('v7.9 endless appearance reward uses the animated unlock route and returns 
   assert.ok(app.readRestart().result);
 });
 
+const visibleUnlockPaths=group=>group.paths.filter(path=>path.getAttribute('display')!=='none');
+function assertUnlockComposition(module,id){
+  const {dom}=module.readUnlockShowroomForTest();
+  assert.equal(element('#ui-star-trails').hidden,false);
+  assert.equal(visibleUnlockPaths(dom.thin).length,9,'the acquired star uses the real nine-band thin ribbon');
+  assert.equal(dom.groups.size,1);
+  assert.equal(visibleUnlockPaths(dom.groups.get(id)).length,3,'the reward shows exactly three shared particle samples');
+  assert.equal(dom.groups.get(id).group.getAttribute('opacity'),'1');
+  assert.equal(element('#wardrobe-showroom').hidden,true,'the separate gallery cannot leak into the reward');
+  return dom;
+}
+function assertCenteredUnlockGeometry(reward){
+  const box=element('#skin-unlock-panel').getBoundingClientRect(),geometry=reward.starGeometry;
+  const {start,finish,length,glow,inset}=geometry,center=box.left+box.width/2;
+  assert.ok(start.x-start.r>=box.left+inset-1e-9,'the entire arrival ball keeps the intended inset from the popup left');
+  assert.ok(inset>=18,'the inset remains visibly distinct from the panel edge');
+  near((finish.x-length+finish.x+finish.r)/2,center,'the full ribbon and ball are centered together');
+  near(glow.x,center);near(glow.y,finish.y);
+  assert.ok(finish.r<40,'the complete composition is smaller than the previous enlarged sample');
+}
+function assertUnlockGlow(glow,reward){
+  assert.equal(glow.canvas.hidden,false);assert.ok(glow.canvas.width>1);assert.ok(glow.fills.length>0);
+  const center=reward.starGeometry.glow;
+  near(parseFloat(glow.canvas.style.left)+parseFloat(glow.canvas.style.width)/2,center.x);
+  near(parseFloat(glow.canvas.style.top)+parseFloat(glow.canvas.style.height)/2,reward.starFrame.pose.y);
+  assert.ok(Math.abs(center.x-reward.starGeometry.finish.x)>1,'gold is centered on the popup rather than following the resting ball');
+}
+
+test('first star reward stays inset and centered with fixed gold light that fades while its ribbon retracts',t=>{
+  const stored=new Map(saved),{world}=controlRun();app.seedEndless();app.seedCircle();app.seedStarTrails();
+  const glow=app.bindUnlockGlowForTest();
+  t.after(()=>{glow.restore();app.seedCircle();document.hidden=false;saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  world.stage=world.maxStage=5;app.updateScoreHud();world.phase='over';
+  const before=app.sourcePose();app.showResultForTest();const reward=app.readPlayerShape().skinUnlock;
+  assert.deepEqual(reward.queue,[{kind:'star-trail',id:'triangle'}]);samePose(app.sourcePose(),before);
+  assert.equal(glow.canvas.hidden,true);assert.equal(glow.canvas.width,1);assert.equal(glow.canvas.height,1);
+  assert.equal(element('#ui-star-trails').hidden,true);assert.equal(reward.ready,false);
+  clickAction('close');assert.deepEqual(app.readStarTrails().state.pendingUnlocks,['triangle']);
+  app.advanceUi(.28);samePose(app.sourcePose(),{...app.sourcePose(),...reward.starGeometry.start});
+  assertCenteredUnlockGeometry(reward);
+  assert.equal(reward.starFrame.trailProgress,0);assert.equal(element('#ui-star-trails').hidden,true);
+  app.advanceUi(.13);assert.equal(reward.ready,false);near(reward.starFrame.trailProgress,.5);
+  near(reward.starFrame.glowAlpha,.5);assertUnlockGlow(glow,reward);
+  assert.ok(app.sourcePose().x>reward.starGeometry.start.x&&app.sourcePose().x<reward.starGeometry.finish.x);
+  assert.equal(element('#ui-star-trails').hidden,false);
+  app.advanceUi(.13);assert.equal(reward.ready,true);assertUnlockComposition(app,'triangle');
+  near(reward.starFrame.glowAlpha,1);assertUnlockGlow(glow,reward);
+  const glowPosition={...glow.canvas.style};
+  const held=app.sourcePose(),time=world.time,clock=app.readUnlockShowroomForTest().clock;
+  app.advanceUi(.05);samePose(app.sourcePose(),held);assert.ok(app.readUnlockShowroomForTest().clock>clock);
+  clickAction('close');assert.equal(reward.phase,'leave');assert.equal(app.readRestart().result,null);assert.equal(app.readRestart().controlFlight,null);
+  assert.deepEqual(app.readStarTrails().state.pendingUnlocks,[]);assert.equal(app.readStarTrails().state.selected,null);
+  clickAction('close');app.advanceUi(.09);samePose(app.sourcePose(),held);near(reward.starFrame.trailProgress,.5);
+  near(reward.starFrame.glowAlpha,.5);assertUnlockGlow(glow,reward);assert.deepEqual(glow.canvas.style,glowPosition);
+  assert.equal(app.readRestart().result,null);assert.equal(app.readRestart().controlFlight,null);
+  app.advanceUi(.09);samePose(app.sourcePose(),held);assert.equal(element('#ui-star-trails').hidden,true);assert.ok(app.readRestart().result);
+  assert.equal(glow.canvas.hidden,true);assert.equal(glow.canvas.width,1);assert.equal(glow.canvas.height,1);
+  app.advanceUi(.16);assert.notEqual(app.sourcePose().x,held.x);assert.equal(glow.canvas.hidden,true);
+  app.advanceUi(.16);assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readRestart().uiAnchor,'over');
+  assert.equal(app.readUnlockShowroomForTest().radius,0);assert.equal(app.readUnlockShowroomForTest().dom.groups.size,0);
+  assert.equal(world.time,time);
+});
+
 test('a queued appearance and three stage star trails require one ready acknowledgement each and restore the equipped photo and star trail',t=>{
   const stored=new Map(saved),{world}=controlRun();app.seedEndless();app.seedCircle();
   app.seedStarTrails({unlocked:1,selected:'triangle'});
-  const photo=app.recordCompositePhotos(true),image=app.readAppearance().appearance,originalInk=app.playerInk();
-  t.after(()=>{photo.restore();app.seedCircle();document.hidden=false;saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  const photo=app.recordCompositePhotos(true),image=app.readAppearance().appearance,originalInk=app.playerInk(),glow=app.bindUnlockGlowForTest();
+  t.after(()=>{glow.restore();photo.restore();app.seedCircle();document.hidden=false;saved.clear();for(const [key,value]of stored)saved.set(key,value);});
   Object.assign(world,{score:233333,stage:20,maxStage:20});app.updateScoreHud();
   assert.equal(app.readRestart().modal,null);assert.deepEqual(app.readStarTrails().state.pendingUnlocks,['square','diamond','snowflake']);
   world.phase='over';app.showResultForTest();
@@ -3730,32 +3881,53 @@ test('a queued appearance and three stage star trails require one ready acknowle
   document.hidden=true;for(const handler of listeners.get('visibilitychange'))handler();app.advanceUi(5);
   assert.equal(reward.elapsed,frozen.elapsed);assert.deepEqual(app.sourcePose(),frozen.pose);assert.equal(reward.ready,false);
   document.hidden=false;for(const handler of listeners.get('visibilitychange'))handler();app.advanceUi(.86);
+  let lastPose;
   for(let index=0;index<queue.length;index++){
     assert.equal(reward.index,index);assert.equal(reward.ready,true);assert.equal(app.readRestart().result,null);assert.equal(app.readRestart().controlFlight,null);
     assert.equal(element('#skin-unlock-title').dataset.kind,queue[index].kind);
     assert.equal(app.readAppearancePresentation().state.selected,'custom');assert.equal(app.readStarTrails().state.selected,'triangle');
     assert.equal(app.readAppearance().appearance,image);assert.equal(app.playerInk(),originalInk);
-    if(queue[index].kind==='star-trail')assert.deepEqual(app.readStarTrails().layers,[{id:queue[index].id,weight:1}]);
+    if(queue[index].kind==='star-trail'){
+      assert.deepEqual(app.readStarTrails().layers,[{id:queue[index].id,weight:1}]);assertUnlockComposition(app,queue[index].id);
+      assertCenteredUnlockGeometry(reward);assertUnlockGlow(glow,reward);near(reward.starFrame.glowAlpha,1);
+    }else{glow.canvas.hidden=false;glow.canvas.width=glow.canvas.height=512;}
+    lastPose=app.sourcePose();const previousShowroom=app.readUnlockShowroomForTest(),previousClock=previousShowroom.clock;
+    const previousGlowStyle={...glow.canvas.style};
     clickAction('close');
     const pending=JSON.parse(saved.get('qiuqiule-star-trails')).pendingUnlocks;
     assert.deepEqual(pending,queue.slice(Math.max(1,index+1)).map(item=>item.id));
     assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).pendingUnlock,false);
     if(index+1<queue.length){
       assert.equal(reward.phase,'switch');assert.equal(reward.index,index+1);assert.equal(reward.ready,false);assert.equal(app.readRestart().result,null);
-      clickAction('close');escape();assert.equal(reward.index,index+1,'rapid repeated input cannot acknowledge an unshown reward');
-      app.advanceUi(.18);assert.equal(reward.ready,false);assert.equal(app.readRestart().result,null);
-      app.advanceUi(.18);assert.equal(reward.ready,true);
+      samePose(app.sourcePose(),lastPose);clickAction('close');escape();assert.equal(reward.index,index+1,'rapid repeated input cannot acknowledge an unshown reward');
+      if(index===0){
+        assert.equal(glow.canvas.hidden,true);assert.equal(glow.canvas.width,1,'previous appearance radiance is released immediately');
+        assert.equal(element('#ui-star-trails').hidden,true);near(Number(element('#skin-unlock-panel').style.opacity),1);
+        app.advanceUi(.28);assert.equal(reward.ready,false);near(reward.starFrame.trailProgress,0);
+        assert.equal(glow.canvas.hidden,true,'the old ball-anchored light stays cleared during approach');
+        app.advanceUi(.26);assert.equal(reward.ready,true);
+        assertUnlockGlow(glow,reward);assertCenteredUnlockGeometry(reward);
+      }else{
+        assert.equal(app.readUnlockShowroomForTest().dom,previousShowroom.dom,'next reward retains the same SVG composition');
+        near(app.readUnlockShowroomForTest().clock,previousClock);
+        assertUnlockGlow(glow,reward);near(reward.starFrame.glowAlpha,1);assert.deepEqual(glow.canvas.style,previousGlowStyle);
+        app.advanceUi(.09);samePose(app.sourcePose(),lastPose);assert.equal(reward.ready,false);
+        assertUnlockGlow(glow,reward);near(reward.starFrame.glowAlpha,1);assert.deepEqual(glow.canvas.style,previousGlowStyle);
+        assert.equal(reward.starFrame.trailProgress,1);near(Number(element('#skin-unlock-title').style.opacity),1);
+        const layers=app.readStarTrails().layers;assert.equal(layers.length,2);layers.forEach(layer=>near(layer.weight,.5));
+        assert.equal(app.readUnlockShowroomForTest().dom.groups.size,2);assert.ok(app.readUnlockShowroomForTest().clock>previousClock);
+        clickAction('close');assert.equal(reward.index,index+1);
+        app.advanceUi(.09);assert.equal(reward.ready,true);samePose(app.sourcePose(),lastPose);
+      }
     }
   }
-  assert.equal(reward.phase,'leave');assert.ok(app.readRestart().result);
-  const preview=element('#ui-star-trails'),opacity=()=>Math.max(0,...preview.querySelectorAll('path').map(path=>Number(path.getAttribute('opacity'))));
-  const initialAlpha=opacity();assert.ok(initialAlpha>0);
-  app.advanceUi(.31);near(app.readStarTrails().layers[0].weight,.5);
-  assert.ok(Math.abs(opacity()/initialAlpha-.5)<.001,'the reward preview fades halfway during the return flight');
-  assert.equal(app.readStarTrails().state.selected,'triangle','returning cannot equip the newly awarded preview');
-  app.advanceUi(.30);assert.ok(opacity()<initialAlpha*.002,'the last visible reward frame is already almost transparent');
-  app.advanceUi(.01);
-  assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readRestart().modal,'over');assert.equal(preview.hidden,true);
+  assert.equal(reward.phase,'leave');assert.equal(app.readRestart().result,null);
+  app.advanceUi(.09);samePose(app.sourcePose(),lastPose);near(reward.starFrame.trailProgress,.5);assert.equal(app.readRestart().result,null);
+  near(reward.starFrame.glowAlpha,.5);assertUnlockGlow(glow,reward);
+  app.advanceUi(.09);assert.ok(app.readRestart().result);assert.equal(element('#ui-star-trails').hidden,true);
+  assert.equal(glow.canvas.hidden,true);assert.equal(glow.canvas.width,1);
+  app.advanceUi(.32);
+  assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readRestart().modal,'over');assert.equal(element('#ui-star-trails').hidden,true);
   assert.deepEqual(app.readStarTrails().layers,[{id:'triangle',weight:1}]);
   assert.ok(app.readAppearancePresentation().layers.every(layer=>layer.id==='custom'));assert.equal(app.readAppearance().appearance,image);
   assert.deepEqual(app.readStarTrails().state.pendingUnlocks,[]);assert.equal(app.readStarTrails().state.selected,'triangle');
@@ -3764,7 +3936,7 @@ test('a queued appearance and three stage star trails require one ready acknowle
 test('reloading after one star trail acknowledgement preserves every unseen reward and never replays the acknowledged item',async t=>{
   const stored=new Map(saved),{world}=controlRun();app.seedEndless();app.seedCircle();app.seedStarTrails();
   t.after(()=>{app.seedCircle();saved.clear();for(const [key,value]of stored)saved.set(key,value);});
-  world.stage=world.maxStage=15;app.updateScoreHud();world.phase='over';app.showResultForTest();app.advanceUi(1.65);clickAction('close');
+  world.stage=world.maxStage=15;app.updateScoreHud();world.phase='over';app.showResultForTest();app.advanceUi(.54);clickAction('close');
   const pending=['square','diamond'];assert.deepEqual(app.readStarTrails().state.pendingUnlocks,pending);
   assert.equal(app.readRestart().result,null);assert.equal(app.readPlayerShape().skinUnlock.ready,false);
   await withReloadedEntry(null,false,fresh=>{
@@ -3783,24 +3955,35 @@ test('star trail reward transitions keep one visible player through rotation and
     window.innerWidth=390;window.innerHeight=844;window.devicePixelRatio=1;
     window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else originalWindow.add(type,handler);};
     const g=graphicsRecorder(),{world,scene}=fresh.seedRenderer(g,390,844,true);fresh.seedCircle();fresh.seedEndless();fresh.seedStarTrails({unlocked:1,selected:'triangle'});
-    const photos=fresh.recordCompositePhotos(true),image=fresh.readAppearance().appearance,pointer=inputCanvas(390,844,fresh);
+    const photos=fresh.recordCompositePhotos(true),image=fresh.readAppearance().appearance,pointer=inputCanvas(390,844,fresh);let glow;
     try{
-      fresh.mountSceneBoundary(pointer.canvas,g);world.stage=world.maxStage=15;fresh.updateScoreHud();world.phase='over';fresh.showResultForTest();
+      fresh.mountSceneBoundary(pointer.canvas,g);glow=fresh.bindUnlockGlowForTest();world.stage=world.maxStage=15;fresh.updateScoreHud();world.phase='over';fresh.showResultForTest();
       const reward=fresh.readPlayerShape().skinUnlock,expected=reward.queue.map(item=>item.id),time=world.time;
       fresh.advanceUi(reduced?.56:1.65);assert.equal(reward.ready,true);
+      assertCenteredUnlockGeometry(reward);assertUnlockGlow(glow,reward);
       const before=fresh.sourcePose();clickAction('close');const after=fresh.sourcePose();
       for(const key of ['x','y','r'])near(after[key],before[key]);
       assert.equal(reward.phase,'switch');assert.equal(reward.index,1);assert.equal(reward.ready,false);
-      fresh.advanceUi(reduced?.1:.18);const age=reward.elapsed;
+      fresh.advanceUi(.09);const age=reward.elapsed;
       window.innerWidth=844;window.innerHeight=390;resize();fresh.advanceUi(0);
       assert.equal(fresh.readPlayerShape().skinUnlock,reward);assert.equal(reward.elapsed,age);assert.deepEqual(reward.queue.map(item=>item.id),expected);
       assert.equal(element('#ui-ball').hidden,false);near(Number(element('#skin-unlock-panel').style.opacity),1);
       assert.ok(['x','y','r'].every(key=>Number.isFinite(fresh.sourcePose()[key])));assert.equal(fresh.readRestart().result,null);
+      assertCenteredUnlockGeometry(reward);assertUnlockGlow(glow,reward);
+      assert.ok(Math.abs(reward.starFrame.pose.y-reward.starGeometry.glow.y)>1,'mid-switch resize keeps the visible axis distinct from the new resting anchor');
       assert.equal(fresh.readAppearance().appearance,image);assert.equal(fresh.readStarTrails().state.selected,'triangle');assert.equal(world.time,time);
-      fresh.advanceUi(reduced?.1:.18);assert.equal(reward.ready,true);clickAction('close');fresh.advanceUi(reduced?.28:.62);
+      fresh.advanceUi(.09);assert.equal(reward.ready,true);clickAction('close');
+      const retractHalf=reduced?.06:.09,leaveDuration=reduced?.34:.5;
+      fresh.advanceUi(retractHalf);near(reward.starFrame.glowAlpha,.5);
+      window.innerWidth=390;window.innerHeight=844;resize();fresh.advanceUi(0);
+      assert.equal(reward.phase,'leave');near(reward.elapsed,retractHalf);near(reward.starFrame.trailProgress,.5);
+      assertUnlockGlow(glow,reward);
+      assert.ok(Math.abs(reward.starFrame.pose.y-reward.starGeometry.glow.y)>1,'mid-retraction resize keeps gold on the currently drawn ball and ribbon axis');
+      fresh.advanceUi(leaveDuration-retractHalf);
       assert.equal(fresh.readPlayerShape().skinUnlock,null);assert.equal(fresh.readRestart().modal,'over');assert.equal(fresh.readAppearance().appearance,image);
+      assert.equal(glow.canvas.hidden,true);assert.equal(glow.canvas.width,1);
       assert.deepEqual(fresh.readStarTrails().layers,[{id:'triangle',weight:1}]);assert.equal(world.time,time);
-    }finally{photos.restore();window.innerWidth=originalWindow.width;window.innerHeight=originalWindow.height;window.devicePixelRatio=originalWindow.dpr;window.addEventListener=originalWindow.add;}
+    }finally{glow?.restore();photos.restore();window.innerWidth=originalWindow.width;window.innerHeight=originalWindow.height;window.devicePixelRatio=originalWindow.dpr;window.addEventListener=originalWindow.add;}
   });
 });
 
@@ -4059,7 +4242,7 @@ test('star trail equip, replacement and same-card removal fade from the current 
   assert.deepEqual(app.readStarTrails().layers,[],'the newly selected star trails begin at zero opacity');
   app.advanceStarTrails(.09);const middle=app.readStarTrails();
   assert.ok(middle.layers.some(layer=>layer.id==='galaxy'&&layer.weight>0&&layer.weight<1));
-  assert.equal(app.chooseStarTrailForTest('triple'),true);assert.equal(app.readStarTrails().clock,.09);
+  assert.equal(app.chooseStarTrailForTest('triple'),true);
   assert.deepEqual(app.readStarTrails().layers,middle.layers,'a fast replacement starts at the currently visible layer mix');
   app.advanceStarTrails(.18);assert.deepEqual(app.readStarTrails().layers,[{id:'triple',weight:1}]);
   assert.equal(app.chooseStarTrailForTest('triple'),true);assert.equal(app.readStarTrails().state.selected,null);

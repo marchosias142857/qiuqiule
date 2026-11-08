@@ -41,13 +41,15 @@ export class HomeWorld {
   get mode(){return 'endless';}
   get targets(){
     const t=this.animate?this.clock:0,b=this.layout.base;
-    return [
-      {...this.layout.play,r:this.layout.play.r*(1+Math.sin(t*1.7)*.018),id:'play'},
-      ...this.layout.others.map((c,i)=>({...c,y:c.y+Math.sin(t*.85+c.seed)*b*.1,id:['settings','wardrobe','sound'][i]}))
-    ].map(c=>{
-      const hit=this.contactAction===c.id&&this.phase==='returning'?Math.sin(this.phaseTime*15)*Math.exp(-this.phaseTime*7)*.10:0;
-      return {...c,sx:1+hit,sy:1-hit};
-    });
+    const hit=this.phase==='returning'?Math.sin(this.phaseTime*15)*Math.exp(-this.phaseTime*7)*.10:0;
+    const playHit=this.contactAction==='play'?hit:0;
+    const targets=[{...this.layout.play,r:this.layout.play.r*(1+Math.sin(t*1.7)*.018),id:'play',sx:1+playHit,sy:1-playHit}];
+    for(let i=0;i<this.layout.others.length;i++){
+      const c=this.layout.others[i],id=i===0?'settings':i===1?'wardrobe':'sound';
+      const targetHit=this.contactAction===id?hit:0;
+      targets.push({...c,y:c.y+Math.sin(t*.85+c.seed)*b*.1,id,sx:1+targetHit,sy:1-targetHit});
+    }
+    return targets;
   }
   reset(){
     this.phase='idle';this.phaseTime=0;this.contactAction=null;

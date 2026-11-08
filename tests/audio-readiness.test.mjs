@@ -352,3 +352,22 @@ test('an existing suspended context prepares Boss without emitting a new source'
   assert.equal(calls.filter(name => name === 'boss').length, 1);
   near(audio.player.voices.get('boss').source.loopEnd, MUSIC_TRACKS.boss.loopEnd);
 });
+
+test('resident decode releases duplicate endless MP3 bytes without refetching or decoding on scene changes',async t=>{
+  const calls=fakeFetch(t),c=audioContext(),decoded=[];
+  c.decodeAudioData=async bytes=>{
+    const name=new Uint8Array(bytes)[0]===2?'boss':'endless';decoded.push(name);return music(name);
+  };
+  const audio=new GameAudio({createContext:()=>c});
+  await audio.prepareMusic();assert.ok(audio.musicByteCache.has('endless'));
+  await audio.unlock();await audio.loading;
+  assert.equal(audio.musicByteCache.has('endless'),false);
+  const resident=audio.source;
+  for(const scene of ['endless','boss','home','resultEndless','endless']){
+    await audio.setMusicScene(scene);await audio.prepareMusic();
+  }
+  assert.equal(audio.source,resident);assert.equal(resident.starts,1);
+  assert.equal(calls.filter(name=>name==='endless').length,1);
+  assert.equal(decoded.filter(name=>name==='endless').length,1);
+  assert.ok(audio.musicByteCache.has('boss'),'Boss bytes remain available after its temporary PCM is released');
+});

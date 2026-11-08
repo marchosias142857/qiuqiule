@@ -38,7 +38,7 @@ function tangentTravel(outline,origin,direction,radius){
       const initial=(origin.x-a.x)*nx+(origin.y-a.y)*ny;
       const speed=direction.x*nx+direction.y*ny;
       if(Math.abs(speed)>1e-12){
-        for(const side of [-1,1]){
+        for(let side=-1;side<=1;side+=2){
           const t=(side*radius-initial)/speed;
           if(t< -epsilon||t>=limit)continue;
           const x=origin.x+direction.x*t-a.x,y=origin.y+direction.y*t-a.y;
@@ -52,9 +52,9 @@ function tangentTravel(outline,origin,direction,radius){
     const discriminant=projection*projection-(ox*ox+oy*oy-radius*radius);
     if(discriminant>=0){
       const root=Math.sqrt(discriminant);
-      for(const t of [-projection-root,-projection+root]){
-        if(t>=-epsilon&&t<limit)limit=Math.max(0,t);
-      }
+      const first=-projection-root,last=-projection+root;
+      if(first>=-epsilon&&first<limit)limit=Math.max(0,first);
+      if(last>=-epsilon&&last<limit)limit=Math.max(0,last);
     }
   }
   return Number.isFinite(limit)?limit:0;
@@ -75,7 +75,8 @@ export function bigEyeGeometry(contour,pose={},options={}){
     && (pose.r??1)===bodyRadius && clamp(pose.pullAmount||0,0,1)===amount
     && (pose.deformAngle??pose.angle??0)===angle;
   const outline=canReuse?options.projectedOutline:projectSkinContour(contour,{...pose,x:center.x,y:center.y,r:bodyRadius,pullAmount:amount,deformAngle:angle});
-  const clearance=Math.min(...outline.map((point,i)=>segmentDistance(center,point,outline[(i+1)%outline.length])));
+  let clearance=Infinity;
+  for(let i=0;i<outline.length;i++)clearance=Math.min(clearance,segmentDistance(center,outline[i],outline[(i+1)%outline.length]));
   const radius=Math.min(bodyRadius*BIG_EYE_RADIUS_RATIO,clearance*(1-1e-9));
   const roll=finite(pose.roll),c=Math.cos(roll),s=Math.sin(roll);
   const lookX=finite(options.lookX,finite(pose.lookX)),lookY=finite(options.lookY,finite(pose.lookY));
@@ -98,6 +99,10 @@ function triangle(g,a,b,c){
   if(typeof g.fillTriangle==='function')g.fillTriangle(a.x,a.y,b.x,b.y,c.x,c.y);
   else{g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.lineTo(c.x,c.y);g.closePath();g.fillPath();}
 }
+function triangleCoordinates(g,ax,ay,bx,by,cx,cy){
+  if(typeof g.fillTriangle==='function')g.fillTriangle(ax,ay,bx,by,cx,cy);
+  else{g.beginPath();g.moveTo(ax,ay);g.lineTo(bx,by);g.lineTo(cx,cy);g.closePath();g.fillPath();}
+}
 
 /** The WebGL fan uses one triangle per contour edge and interpolated vertex
  * colors, so its gradient is smooth and its alpha is applied exactly once.
@@ -119,11 +124,11 @@ export function drawBigEye(g,contour,pose={},options={}){
       g.fillStyle(mixColor(colors.center,colors.edge,(inner+outer)/2),alpha);
       for(let i=0;i<outline.length;i++){
         const a=outline[i],b=outline[(i+1)%outline.length];
-        const at=factor=>({x:center.x+(a.x-center.x)*factor,y:center.y+(a.y-center.y)*factor});
-        const bt=factor=>({x:center.x+(b.x-center.x)*factor,y:center.y+(b.y-center.y)*factor});
-        const ai=at(inner),ao=at(outer),bo=bt(outer);
-        triangle(g,ai,ao,bo);
-        if(ring)triangle(g,ai,bo,bt(inner));
+        const aix=center.x+(a.x-center.x)*inner,aiy=center.y+(a.y-center.y)*inner;
+        const aox=center.x+(a.x-center.x)*outer,aoy=center.y+(a.y-center.y)*outer;
+        const box=center.x+(b.x-center.x)*outer,boy=center.y+(b.y-center.y)*outer;
+        triangleCoordinates(g,aix,aiy,aox,aoy,box,boy);
+        if(ring)triangleCoordinates(g,aix,aiy,box,boy,center.x+(b.x-center.x)*inner,center.y+(b.y-center.y)*inner);
       }
     }
   }

@@ -6,6 +6,21 @@ const circle=Array.from({length:128},(_,i)=>({x:Math.cos(i/128*Math.PI*2),y:Math
 const types=new Set(['ring','heavy','split','walker','magnet','shield','leader','fragment']);
 const darken=(color,amount)=>[16,8,0].reduce((result,shift)=>result|Math.round(((color>>shift)&255)*(1-amount))<<shift,0);
 const splitHoles=[{x:0,y:-.26},{x:-.22,y:.13},{x:.22,y:.13}];
+const splitContours=splitHoles.map(center=>circle.map(p=>({x:center.x+p.x*.12,y:center.y+p.y*.12})));
+const walkerCircle=circle.filter((_,i)=>i%4===0);
+const renderBuffers=new WeakMap();
+function buffersFor(graphics){
+  let buffers=renderBuffers.get(graphics);
+  if(!buffers){buffers={projected:[],eyes:[],ring:[],local:[],eyeLocal:[]};renderBuffers.set(graphics,buffers);}
+  return buffers;
+}
+function localContour(points,output,sx,sy=sx,x=0,y=0){
+  output.length=points.length;
+  for(let i=0;i<points.length;i++){
+    const point=output[i]??={};point.x=x+points[i].x*sx;point.y=y+points[i].y*sy;
+  }
+  return output;
+}
 
 // Precompose black with the theme color; do not blend these details a second
 // time over the body. Boss eyes share the same 40% black mixture.
@@ -30,6 +45,9 @@ export function drawEnemyBall(g,body,color,{alpha=1,unit=body.r,player=null,flas
   if(r<.3||opacity<=0)return false;
   const angle=body.angle||0,turn=angle+(body.roll||0);
   const pose={x:body.x,y:body.y,r,squash:body.squash||0,deformAngle:angle,roll:turn};
+  // The graphics API consumes coordinates synchronously. One bounded buffer
+  // per renderer serves every enemy without retaining any simulation bodies.
+  const buffers=buffersFor(g);
   const paintPath=(points,paint,opacity,width=0)=>{
     if(opacity<=0)return;
     if(width)g.lineStyle(width,paint,opacity);else g.fillStyle(paint,opacity);
@@ -40,22 +58,24 @@ export function drawEnemyBall(g,body,color,{alpha=1,unit=body.r,player=null,flas
     }
     g.closePath();if(width)g.strokePath();else g.fillPath();
   };
-  const path=(points,paint,opacity,width=0)=>paintPath(projectSkinContour(points,pose),paint,opacity,width);
-  const disk=(radius,paint,opacity,width=0)=>path(radius===1?circle:circle.map(p=>({x:p.x*radius,y:p.y*radius})),paint,opacity,width);
+  const path=(points,paint,opacity,width=0)=>paintPath(projectSkinContour(points,pose,points.length===32?buffers.eyes:buffers.projected),paint,opacity,width);
+  const disk=(radius,paint,opacity,width=0)=>path(radius===1?circle:localContour(circle,buffers.local,radius),paint,opacity,width);
   const type=body.enemyType,edge=darken(color,.22),hollow=type==='ring'||type==='magnet';
   if(hollow){
     let ring;
     if(type==='ring'){
-      const contour=projectSkinContour(circle,pose);
+      const contour=projectSkinContour(circle,pose,buffers.projected);
       // Move the stroke centre inward by half the added thickness. Offsetting
       // in screen-space normals preserves the original outer edge even while
       // squashing; neither the collider nor the transparent centre is painted.
       const width=Math.min(3,r*.9),inset=(width-1.5)/2;
-      const points=contour.map((point,i)=>{
+      const points=buffers.ring;points.length=contour.length;
+      for(let i=0;i<contour.length;i++){
+        const point=contour[i];
         const previous=contour[(i+127)%128],next=contour[(i+1)%128];
         const dx=next.x-previous.x,dy=next.y-previous.y,length=Math.hypot(dx,dy)||1;
-        return {x:point.x-dy/length*inset,y:point.y+dx/length*inset};
-      });
+        const output=points[i]??={};output.x=point.x-dy/length*inset;output.y=point.y+dx/length*inset;
+      }
       ring=(paint,alpha)=>paintPath(points,paint,alpha,width);
     }else ring=(paint,alpha)=>{disk(1,paint,alpha,2.5);disk(.72,paint,alpha*.8,1.5);};
     ring(color,opacity);
@@ -68,15 +88,13 @@ export function drawEnemyBall(g,body,color,{alpha=1,unit=body.r,player=null,flas
   disk(1,color,opacity);
   if(flashAlpha>0)disk(.85,flashColor,opacity*flashAlpha);
   if(type==='heavy')disk(.975,edge,opacity*.8,2.25);
-  if(type==='split')for(const center of splitHoles){
-    path(circle.map(p=>({x:center.x+p.x*.12,y:center.y+p.y*.12})),enemyDetailColor(color),opacity);
-  }
+  if(type==='split')for(const points of splitContours)path(points,enemyDetailColor(color),opacity);
   if(type==='shield'&&body.shield)disk(1+.3*unit/body.r,color,opacity*.8,2);
   if(type==='leader')disk(.105,edge,opacity);
   if(type==='walker'){
     const dx=(player?.x??body.x)-body.x,dy=(player?.y??body.y)-body.y,length=Math.hypot(dx,dy)||1;
     const c=Math.cos(turn),s=Math.sin(turn),lookX=(dx*c+dy*s)/length*.13,lookY=(-dx*s+dy*c)/length*.13;
-    for(const side of [-1,1])path(circle.filter((_,i)=>i%4===0).map(p=>({x:side*.17+lookX+p.x*.0525,y:-.07+lookY+p.y*.095})),enemyDetailColor(color),opacity);
+    for(const side of [-1,1])path(localContour(walkerCircle,buffers.eyeLocal,.0525,.095,side*.17+lookX,-.07+lookY),enemyDetailColor(color),opacity);
   }
   return true;
 }
