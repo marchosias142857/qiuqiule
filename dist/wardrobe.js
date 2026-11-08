@@ -1,4 +1,4 @@
-import {COMPANION_DEFINITIONS,normalizeCompanionState,companionPreview} from './companions.js';
+import {STAR_TRAIL_DEFINITIONS,normalizeStarTrailState,starTrailPreview} from './star-trails.js';
 import {BIG_EYE_UNLOCK_SCORE} from './appearances.js';
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -70,9 +70,9 @@ export function wardrobeAppearanceCards(state){
   return [{id:'original',label:'原汁原味',unlocked:true},{id:'custom',label:'自定义',unlocked:true},
     {id:'big-eye',label:'大眼萌',unlocked}].map(card=>({...card,selected:card.id===selected}));
 }
-export function wardrobeCompanionCards(state){
-  const companion=normalizeCompanionState({unlocked:state.companionUnlocked,selected:state.companionId},{highestStage:state.highestStage});
-  return COMPANION_DEFINITIONS.map((card,index)=>({...card,unlocked:index<companion.unlocked,selected:card.id===companion.selected}));
+export function wardrobeStarTrailCards(state){
+  const starTrail=normalizeStarTrailState({unlocked:state.starTrailUnlocked,selected:state.starTrailId},{highestStage:state.highestStage});
+  return STAR_TRAIL_DEFINITIONS.map((card,index)=>({...card,unlocked:index<starTrail.unlocked,selected:card.id===starTrail.selected}));
 }
 function appearancePreview(id){
   if(id==='custom')return '<svg viewBox="0 0 100 100" aria-hidden="true"><circle class="shape-outline" cx="50" cy="59" r="26"/><text class="appearance-question" x="50" y="68" text-anchor="middle">?</text></svg>';
@@ -80,14 +80,15 @@ function appearancePreview(id){
   return '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="59" r="26" fill="#252720"/><ellipse cx="45.5" cy="57.2" rx="1.6" ry="3.9" fill="#f4f3eb"/><ellipse cx="54.5" cy="57.2" rx="1.6" ry="3.9" fill="#f4f3eb"/></svg>';
 }
 
-export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=()=>{},onError=()=>{}}){
+export function initWardrobe({getState,onImage,onAppearance=()=>{},onStarTrail=()=>{},onNavigate=(from,to,commit)=>commit(),onError=()=>{}}){
   const $=id=>document.getElementById(id);
   const panel=$('wardrobe-panel'),content=$('wardrobe-content'),backButton=$('wardrobe-back');
   const separator=$('wardrobe-preview-line'),file=$('appearance-file');
   const layer=$('appearance-cropper'),canvas=$('crop-canvas'),zoomControl=$('crop-zoom'),apply=$('crop-apply');
-  const views={main:$('wardrobe-main'),appearance:$('appearance-gallery'),companion:$('companion-gallery')};
+  const views={main:$('wardrobe-main'),appearance:$('appearance-gallery'),'star-trail':$('star-trail-gallery')};
   let page='main',transition=null,crop=null,sourceURL=null,loadGeneration=0,saving=false,restoreFocus=null,previewColor=null;
-  const pointers=new Map(),appearanceButtons=new Map(),companionButtons=new Map();
+  let pendingNavigation=false,navigationGeneration=0;
+  const pointers=new Map(),appearanceButtons=new Map(),starTrailButtons=new Map();
   const setPage=target=>{
     page=target;
     for(const [name,view] of Object.entries(views))view.hidden=name!==page;
@@ -96,9 +97,18 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=(
     panel.setAttribute('data-wardrobe-view',page);
   };
   const navigate=target=>{
-    if(transition||page===target)return;
-    transition={target,elapsed:0,swapped:false,lineFrom:page==='main'?0:1,lineTo:target==='main'?0:1};content.inert=true;
-    panel.classList.add('wardrobe-switching');
+    if(transition||pendingNavigation||page===target)return;
+    const from=page,generation=++navigationGeneration;
+    pendingNavigation=true;content.inert=true;
+    // The scene may finish retracting its preview before fading the content.
+    // A reset invalidates the callback even when a new navigation is pending.
+    const commit=()=>{
+      if(!pendingNavigation||generation!==navigationGeneration)return false;
+      pendingNavigation=false;
+      transition={target,elapsed:0,swapped:false,lineFrom:from==='main'?0:1,lineTo:target==='main'?0:1};
+      panel.classList.add('wardrobe-switching');return true;
+    };
+    onNavigate(from,target,commit);
   };
   const update=dt=>{
     if(!transition)return;
@@ -124,12 +134,12 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=(
       button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
     }
     const color=state.playerColor??'#252720';
-    for(const card of wardrobeCompanionCards(state)){
-      const button=companionButtons.get(card.id);button.setAttribute('aria-pressed',String(card.selected));
+    for(const card of wardrobeStarTrailCards(state)){
+      const button=starTrailButtons.get(card.id);button.setAttribute('aria-pressed',String(card.selected));
       button.setAttribute('aria-disabled',String(!card.unlocked));
       button.setAttribute('aria-label',card.label+(card.unlocked?'':`，到达第 ${card.stage} 阶段解锁`));
       button.querySelector('.wardrobe-card-lock').hidden=card.unlocked;
-      if(color!==previewColor)button.querySelector('.companion-preview').innerHTML=companionPreview(card.id,color);
+      if(color!==previewColor)button.querySelector('.star-trail-preview').innerHTML=starTrailPreview(card.id,color);
     }
     previewColor=color;
   };
@@ -142,7 +152,7 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=(
     const button=makeCard(card.label,appearancePreview(card.id),card.id==='big-eye'?`达${BIG_EYE_UNLOCK_SCORE}分<br>解锁`:'');
     button.id=`appearance-option-${card.id}`;button.setAttribute('data-appearance',card.id);
     button.addEventListener('click',()=>{
-      if(transition)return;
+      if(transition||pendingNavigation)return;
       const state=getState(),current=wardrobeAppearanceCards(state).find(option=>option.id===card.id);
       if(!current?.unlocked){onError(`达${BIG_EYE_UNLOCK_SCORE}分解锁`);return;}
       if(card.id==='custom'&&state.imageLoading&&!state.image)return;
@@ -153,20 +163,20 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=(
     });
     appearanceButtons.set(card.id,button);$('appearance-grid').append(button);
   }
-  for(const card of wardrobeCompanionCards(getState())){
-    const button=makeCard(card.label,`<span class="companion-preview">${companionPreview(card.id,getState().playerColor??'#252720')}</span>`,`到达第 ${card.stage} 阶段<br>解锁`);
-    button.id=`companion-option-${card.id}`;button.setAttribute('data-companion',card.id);
+  for(const card of wardrobeStarTrailCards(getState())){
+    const button=makeCard(card.label,`<span class="star-trail-preview">${starTrailPreview(card.id,getState().playerColor??'#252720')}</span>`,`到达第 ${card.stage} 阶段<br>解锁`);
+    button.id=`star-trail-option-${card.id}`;button.setAttribute('data-star-trail',card.id);
     button.addEventListener('click',()=>{
-      if(transition)return;
-      if(!wardrobeCompanionCards(getState()).find(option=>option.id===card.id)?.unlocked){onError(`到达第 ${card.stage} 阶段解锁`);return;}
-      onCompanion(card.id);refresh();
+      if(transition||pendingNavigation)return;
+      if(!wardrobeStarTrailCards(getState()).find(option=>option.id===card.id)?.unlocked){onError(`到达第 ${card.stage} 阶段解锁`);return;}
+      onStarTrail(card.id);refresh();
     });
-    companionButtons.set(card.id,button);$('companion-grid').append(button);
+    starTrailButtons.set(card.id,button);$('star-trail-grid').append(button);
   }
   window.addEventListener('blur',()=>pointers.clear());
   document.addEventListener('visibilitychange',()=>{if(document.hidden)pointers.clear();});
   $('appearance-select').addEventListener('click',()=>navigate('appearance'));
-  $('companion-select').addEventListener('click',()=>navigate('companion'));
+  $('star-trail-select').addEventListener('click',()=>navigate('star-trail'));
 
   const releaseImage=()=>{if(sourceURL){URL.revokeObjectURL(sourceURL);sourceURL=null;}};
   const closeCrop=()=>{
@@ -239,8 +249,9 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onCompanion=(
   },{capture:true});
   separator.style.opacity='0';setPage('main');refresh();
   return {refresh,update,
-    back(){if(transition)return true;if(page==='main')return false;navigate('main');return true;},
-    resetNavigation(){transition=null;content.inert=false;content.style.opacity='1';separator.style.opacity='0';panel.classList.remove('wardrobe-switching');setPage('main');},
+    getPage:()=>page,
+    back(){if(transition||pendingNavigation)return true;if(page==='main')return false;navigate('main');return true;},
+    resetNavigation(){navigationGeneration++;pendingNavigation=false;transition=null;content.inert=false;content.style.opacity='1';separator.style.opacity='0';panel.classList.remove('wardrobe-switching');setPage('main');},
     isCropping:()=>!layer.hidden,
     cancelInteraction(){pointers.clear();if(!saving)closeCrop();}
   };

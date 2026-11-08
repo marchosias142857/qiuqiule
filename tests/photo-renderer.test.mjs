@@ -181,9 +181,9 @@ test('photo base color and opacity update both backends without reuploading pixe
   assert.equal(fallbackCanvas.ctx.calls.filter(call=>call[0]==='lineTo').length,contour.length*2-2,'base and photo clip share the full contour');
 });
 
-test('two companion photo slots are lazy, ordered before the main photo and reused across motion and shots',()=>{
+test('two auxiliary photo slots are lazy, ordered before the main photo and reused across motion and shots',()=>{
   const canvases=[],order=[],main={parentNode:{insertBefore(canvas,before){assert.equal(before,main);order.push(canvas);}}};
-  const owner={createElement(){const gl=graphics(),canvas=surface(gl);canvas.testGl=gl;canvases.push(canvas);return canvas;},body:{append(){assert.fail('companions must be below the main canvas');}}};
+  const owner={createElement(){const gl=graphics(),canvas=surface(gl);canvas.testGl=gl;canvases.push(canvas);return canvas;},body:{append(){assert.fail('auxiliarys must be below the main canvas');}}};
   const pool=new AuxiliaryPhotoPool(owner,{before:main,maxPixels:512});pool.setImage(photo);
   assert.equal(canvases.length,0);assert.equal(pool.draw(2,skinContour(0),pose),false);
   const contour=skinContour(8);
@@ -207,7 +207,7 @@ test('two companion photo slots are lazy, ordered before the main photo and reus
   for(const canvas of canvases){assert.equal(canvas.removed,true);assert.equal(canvas.testGl.textures.size,0);assert.equal(canvas.testGl.buffers.size,0);assert.equal(canvas.events.size,0);}
 });
 
-test('a lost companion context has a unique fallback and deleting the photo prevents restoration',()=>{
+test('a lost auxiliary context has a unique fallback and deleting the photo prevents restoration',()=>{
   const canvases=[],owner={createElement(){const canvas=surface(graphics());canvases.push(canvas);return canvas;},body:{append(){}}};
   const pool=new AuxiliaryPhotoPool(owner);pool.setImage(photo);
   pool.draw(0,skinContour(6),pose,{baseColor:0x252720});pool.draw(1,skinContour(6),pose,{baseColor:0x252720});

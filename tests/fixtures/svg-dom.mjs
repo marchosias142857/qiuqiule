@@ -66,4 +66,4 @@ export function createSvgNode(namespace, tag) {
   return node;
 }
 
-export const isSvgMount = selector => ['#ui-companions', '#level-orbs', '#level-return'].includes(selector);
+export const isSvgMount = selector => ['#ui-star-trails', '#wardrobe-showroom', '#level-orbs', '#level-return'].includes(selector);

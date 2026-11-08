@@ -82,10 +82,10 @@ export function unlockSwitchPose({elapsed=0,from,to=from,reducedMotion=false}){
 }
 
 // Real bundled GameSans ink bounds at 1000 px, excluding advance whitespace.
-// The five-glyph companion title is narrower than the punctuated appearance title.
+// Both reward headings use five CJK glyphs and the full-width punctuation.
 export function unlockTitleMarkup(kind='appearance'){
-  const companion=kind==='companion',title=companion?'已解锁伴星':'已解锁外观！';
-  return `<svg viewBox="113 -797 ${companion?4825:5151} 893" aria-hidden="true" focusable="false"><text x="0" y="0">${title}</text></svg>`;
+  const title=kind==='star-trail'?'已获得星迹！':'已解锁外观！';
+  return `<svg viewBox="113 -797 5151 893" aria-hidden="true" focusable="false"><text x="0" y="0">${title}</text></svg>`;
 }
 
 /** DOM is touched only when the app explicitly creates the panel. */

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {initWardrobe,wardrobeAppearanceCards,wardrobeCompanionCards} from '../dist/wardrobe.js';
-import {normalizeCompanionState,selectCompanion} from '../dist/companions.js';
+import {initWardrobe,wardrobeAppearanceCards,wardrobeStarTrailCards} from '../dist/wardrobe.js';
+import {normalizeStarTrailState,selectStarTrail} from '../dist/star-trails.js';
 
-function wardrobe(t,initial,saveImage){
+function wardrobe(t,initial,saveImage,onNavigate){
   const previous=Object.fromEntries(['document','window'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
   t.after(()=>{for(const [key,descriptor] of Object.entries(previous)){
     if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];
@@ -28,9 +28,9 @@ function wardrobe(t,initial,saveImage){
   Object.defineProperty(globalThis,'window',{configurable:true,value:{addEventListener(){}}});
   node('appearance-cropper').hidden=true;
   let state=initial;const errors=[],images=[],appearances=[];
-  const ui=initWardrobe({getState:()=>state,
+  const ui=initWardrobe({getState:()=>state,onNavigate,
     onAppearance:id=>{appearances.push(id);state={...state,appearanceId:id};},
-    onCompanion:id=>{const next=selectCompanion(normalizeCompanionState({unlocked:state.companionUnlocked,selected:state.companionId},{highestStage:state.highestStage}),id);state={...state,companionId:next.selected,companionUnlocked:next.unlocked};},
+    onStarTrail:id=>{const next=selectStarTrail(normalizeStarTrailState({unlocked:state.starTrailUnlocked,selected:state.starTrailId},{highestStage:state.highestStage}),id);state={...state,starTrailId:next.selected,starTrailUnlocked:next.unlocked};},
     onImage:async image=>{images.push(image);await saveImage?.(image);state={...state,image,appearanceId:'custom'};},onError:error=>errors.push(error)});
   const open=kind=>{node(`${kind}-select`).fire('click');ui.update(.24);};
   return {node,ui,open,state:()=>state,setState:value=>{state=value;ui.refresh();},errors,images,appearances,lookups};
@@ -40,7 +40,7 @@ test('wardrobe initializes without querying removed shape or image-removal contr
   const view=wardrobe(t,{appearanceId:'custom',image:'data:image/png;base64,b2xk'});
   view.ui.refresh();view.ui.resetNavigation();
   assert.equal(view.node('appearance-grid').children.length,3);
-  assert.equal(view.node('companion-grid').children.length,9);
+  assert.equal(view.node('star-trail-grid').children.length,9);
   assert.ok(!view.lookups.some(id=>['shape-select','shape-gallery','shape-grid','appearance-tools','appearance-clear'].includes(id)));
   assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'main');
 });
@@ -67,13 +67,55 @@ test('gallery fades only content and keeps the same header and preview nodes mou
 
 test('rapid navigation or selection during a fade cannot change the appearance or lose the return route',t=>{
   const view=wardrobe(t,{appearanceId:'original',appearanceUnlocked:true});
-  view.node('appearance-select').fire('click');view.node('companion-select').fire('click');
+  view.node('appearance-select').fire('click');view.node('star-trail-select').fire('click');
   view.node('appearance-option-big-eye').fire('click');assert.equal(view.state().appearanceId,'original');assert.equal(view.ui.back(),true);
   view.ui.update(.24);assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'appearance');
   view.node('appearance-option-big-eye').fire('click');assert.equal(view.state().appearanceId,'big-eye');
   view.ui.back();view.ui.update(.04);view.ui.resetNavigation();view.ui.update(1);
   assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'main');
   assert.equal(view.node('wardrobe-content').inert,false);assert.equal(view.node('wardrobe-content').style.opacity,'1');
+});
+
+test('navigation can wait for trail retraction while blocking duplicate requests and card selection',t=>{
+  const requests=[];
+  const view=wardrobe(t,{starTrailUnlocked:9},undefined,(from,to,commit)=>requests.push({from,to,commit}));
+  assert.equal(view.ui.getPage(),'main');assert.equal(requests.length,0);
+  view.node('star-trail-select').fire('click');
+  assert.equal(requests.length,1);assert.equal(requests[0].from,'main');assert.equal(requests[0].to,'star-trail');
+  assert.equal(view.node('wardrobe-content').inert,true);
+  view.node('appearance-select').fire('click');view.node('star-trail-select').fire('click');
+  view.node('star-trail-option-galaxy').fire('click');
+  assert.equal(view.state().starTrailId,undefined);assert.equal(view.ui.back(),true);
+  view.ui.update(1);assert.equal(view.ui.getPage(),'main');assert.equal(requests.length,1);
+  assert.equal(requests[0].commit(),true);assert.equal(requests[0].commit(),false);
+  view.ui.update(.12);assert.equal(view.ui.getPage(),'star-trail');
+  view.ui.update(.12);assert.equal(view.node('wardrobe-content').inert,false);
+  assert.equal(requests[0].commit(),false);view.ui.update(1);assert.equal(view.ui.getPage(),'star-trail');
+  view.ui.back();assert.equal(requests.length,2);assert.equal(requests[1].from,'star-trail');assert.equal(requests[1].to,'main');
+  assert.equal(view.ui.getPage(),'star-trail');assert.equal(view.ui.back(),true);assert.equal(requests.length,2);
+  requests[1].commit();view.ui.update(.24);assert.equal(view.ui.getPage(),'main');
+});
+
+test('reset cancels delayed navigation callbacks without allowing them to commit a newer route',t=>{
+  const requests=[];
+  const view=wardrobe(t,{},undefined,(from,to,commit)=>requests.push({from,to,commit}));
+  view.node('star-trail-select').fire('click');const stale=requests[0].commit;
+  view.ui.resetNavigation();assert.equal(view.ui.getPage(),'main');assert.equal(view.ui.back(),false);
+  assert.equal(view.node('wardrobe-content').inert,false);assert.equal(requests.length,1);
+  view.node('appearance-select').fire('click');assert.equal(requests.length,2);
+  assert.equal(stale(),false);view.ui.update(1);assert.equal(view.ui.getPage(),'main');
+  assert.equal(requests[1].commit(),true);view.ui.update(.24);assert.equal(view.ui.getPage(),'appearance');
+  assert.equal(stale(),false);view.ui.resetNavigation();assert.equal(requests.length,2);
+});
+
+test('navigation hooks may commit synchronously and reentrant navigation cannot start a second transition',t=>{
+  let view,calls=0;
+  view=wardrobe(t,{},undefined,(from,to,commit)=>{
+    calls++;assert.equal(from,'main');assert.equal(to,'star-trail');
+    view.node('appearance-select').fire('click');assert.equal(view.ui.back(),true);
+    assert.equal(commit(),true);assert.equal(commit(),false);
+  });
+  view.open('star-trail');assert.equal(calls,1);assert.equal(view.ui.getPage(),'star-trail');
 });
 
 test('appearance gallery has exactly three choices and enforces the 233333 score lock',t=>{
@@ -201,7 +243,7 @@ test('appearance card models preserve earned ownership independently of the curr
 test('preview separator fades with every subpage and back while preserving the ball layout',t=>{
   const view=wardrobe(t,{}),line=view.node('wardrobe-preview-line'),ball=view.node('wardrobe-ball');
   assert.equal(line.style.opacity,'0');
-  for(const page of ['appearance','companion']){
+  for(const page of ['appearance','star-trail']){
     view.node(`${page}-select`).fire('click');view.ui.update(.06);
     assert.equal(Number(line.style.opacity),.15625);
     view.ui.update(.06);assert.equal(Number(line.style.opacity),.5);
@@ -220,60 +262,60 @@ test('preview separator fades with every subpage and back while preserving the b
 });
 
 
-test('companion gallery exposes stage milestones, protects locked choices and supports click-to-remove',t=>{
-  const initial={highestStage:9,best:999999,companionId:null,companionUnlocked:0,playerColor:'#526a9b'};
-  const view=wardrobe(t,initial);view.open('companion');
-  assert.equal(view.node('companion-grid').children.length,9);
-  assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'companion');
-  const sun=view.node('companion-option-sun-1'),moon=view.node('companion-option-moon-1');
-  assert.equal(sun.getAttribute('aria-disabled'),'false');assert.equal(moon.getAttribute('aria-disabled'),'true');
-  assert.match(moon.innerHTML,/到达第 10 阶段/);assert.match(moon.getAttribute('aria-label'),/到达第 10 阶段解锁/);
-  assert.equal(sun.querySelector('.wardrobe-card-lock').hidden,true);assert.equal(moon.querySelector('.wardrobe-card-lock').hidden,false);
-  moon.fire('click');assert.equal(view.state().companionId,null);assert.equal(view.errors.at(-1),'到达第 10 阶段解锁');
-  sun.fire('click');assert.equal(view.state().companionId,'sun-1');assert.equal(sun.getAttribute('aria-pressed'),'true');
-  sun.fire('click');assert.equal(view.state().companionId,null);assert.equal(sun.getAttribute('aria-pressed'),'false');
-  view.setState({...view.state(),highestStage:10});moon.fire('click');
-  assert.equal(view.state().companionId,'moon-1');assert.equal(moon.getAttribute('aria-pressed'),'true');
-  assert.equal(sun.getAttribute('aria-pressed'),'false');assert.equal(moon.querySelector('.wardrobe-card-lock').hidden,true);
+test('star-trail gallery exposes stage milestones, protects locked choices and supports click-to-remove',t=>{
+  const initial={highestStage:9,best:999999,starTrailId:null,starTrailUnlocked:0,playerColor:'#526a9b'};
+  const view=wardrobe(t,initial);view.open('star-trail');
+  assert.equal(view.node('star-trail-grid').children.length,9);
+  assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'star-trail');
+  const triangle=view.node('star-trail-option-triangle'),square=view.node('star-trail-option-square');
+  assert.equal(triangle.getAttribute('aria-disabled'),'false');assert.equal(square.getAttribute('aria-disabled'),'true');
+  assert.match(square.innerHTML,/到达第 10 阶段/);assert.match(square.getAttribute('aria-label'),/到达第 10 阶段解锁/);
+  assert.equal(triangle.querySelector('.wardrobe-card-lock').hidden,true);assert.equal(square.querySelector('.wardrobe-card-lock').hidden,false);
+  square.fire('click');assert.equal(view.state().starTrailId,null);assert.equal(view.errors.at(-1),'到达第 10 阶段解锁');
+  triangle.fire('click');assert.equal(view.state().starTrailId,'triangle');assert.equal(triangle.getAttribute('aria-pressed'),'true');
+  triangle.fire('click');assert.equal(view.state().starTrailId,null);assert.equal(triangle.getAttribute('aria-pressed'),'false');
+  view.setState({...view.state(),highestStage:10});square.fire('click');
+  assert.equal(view.state().starTrailId,'square');assert.equal(square.getAttribute('aria-pressed'),'true');
+  assert.equal(triangle.getAttribute('aria-pressed'),'false');assert.equal(square.querySelector('.wardrobe-card-lock').hidden,true);
 });
 
-test('companion navigation preserves preview motion nodes and selection waits until the content transition completes',t=>{
-  const view=wardrobe(t,{companionId:null,companionUnlocked:9,best:0});
-  const preview=view.node('wardrobe-ball'),orbit=view.node('ui-companions');
-  view.node('companion-select').fire('click');view.node('companion-option-star-3').fire('click');
-  assert.equal(view.state().companionId,null);view.ui.update(.24);
-  assert.equal(view.node('companion-gallery').hidden,false);assert.equal(view.node('appearance-gallery').hidden,true);
+test('star-trail navigation preserves preview motion nodes and selection waits until the content transition completes',t=>{
+  const view=wardrobe(t,{starTrailId:null,starTrailUnlocked:9,best:0});
+  const preview=view.node('wardrobe-ball'),trail=view.node('ui-star-trails');
+  view.node('star-trail-select').fire('click');view.node('star-trail-option-galaxy').fire('click');
+  assert.equal(view.state().starTrailId,null);view.ui.update(.24);
+  assert.equal(view.node('star-trail-gallery').hidden,false);assert.equal(view.node('appearance-gallery').hidden,true);
   assert.equal(view.node('wardrobe-back').getAttribute('aria-label'),'返回换装');
-  view.node('companion-option-star-3').fire('click');assert.equal(view.state().companionId,'star-3');
+  view.node('star-trail-option-galaxy').fire('click');assert.equal(view.state().starTrailId,'galaxy');
   assert.equal(view.ui.back(),true);view.ui.update(.24);
   assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'main');
-  assert.equal(view.node('wardrobe-ball'),preview);assert.equal(view.node('ui-companions'),orbit);
-  assert.deepEqual(preview.style,{});assert.deepEqual(orbit.style,{});
-  assert.equal(view.state().companionId,'star-3');
+  assert.equal(view.node('wardrobe-ball'),preview);assert.equal(view.node('ui-star-trails'),trail);
+  assert.deepEqual(preview.style,{});assert.deepEqual(trail.style,{});
+  assert.equal(view.state().starTrailId,'galaxy');
 });
 
-test('companion card preview colors refresh with the player and keep static trails without replacing selection controls',t=>{
-  const view=wardrobe(t,{companionId:'sun-1',companionUnlocked:1,playerColor:'#526a9b'});
-  const button=view.node('companion-option-sun-1'),preview=button.querySelector('.companion-preview'),first=preview.innerHTML;
+test('star-trail card preview colors refresh with the player and keep static trails without replacing selection controls',t=>{
+  const view=wardrobe(t,{starTrailId:'triangle',starTrailUnlocked:1,playerColor:'#526a9b'});
+  const button=view.node('star-trail-option-triangle'),preview=button.querySelector('.star-trail-preview'),first=preview.innerHTML;
   assert.match(first,/<svg/);assert.match(first,/<path/);
   view.setState({...view.state(),playerColor:'#b8db8a'});
-  assert.notEqual(preview.innerHTML,first);assert.equal(view.node('companion-option-sun-1'),button);
+  assert.notEqual(preview.innerHTML,first);assert.equal(view.node('star-trail-option-triangle'),button);
   assert.equal(button.getAttribute('aria-pressed'),'true');
 });
 
-test('companion cards follow stage milestones and preserve previously earned ownership',()=>{
-  const cards=wardrobeCompanionCards({best:0,companionUnlocked:9,companionId:'star-3'});
-  assert.deepEqual(cards.map(card=>card.label),['日·一','月·一','星·一','日·二','月·二','星·二','日·三','月·三','星·三']);
+test('star-trail cards follow stage milestones and preserve previously earned ownership',()=>{
+  const cards=wardrobeStarTrailCards({best:0,starTrailUnlocked:9,starTrailId:'galaxy'});
+  assert.deepEqual(cards.map(card=>card.label),['三角星','四方星','菱星','雪星','三连星','日','月','日月星','群星']);
   assert.deepEqual(cards.map(card=>card.stage),[5,10,15,20,25,30,35,40,45]);
   assert.ok(cards.every(card=>card.unlocked&&card.score===undefined));assert.equal(cards.filter(card=>card.selected).length,1);
-  assert.equal(cards.at(-1).selected,true);
-  assert.equal(wardrobeCompanionCards({highestStage:4,best:999999}).some(card=>card.unlocked),false);
+  assert.equal(cards.at(-2).selected,true);
+  assert.equal(wardrobeStarTrailCards({highestStage:4,best:999999}).some(card=>card.unlocked),false);
 });
 
 
-test('companion preview disables inherited icon strokes without changing white lock outlines',()=>{
+test('star-trail preview disables inherited icon strokes without changing white lock outlines',()=>{
   const css=readFileSync(new URL('../dist/style.css',import.meta.url),'utf8');
-  const preview=css.match(/\.wardrobe-card \.companion-preview>svg\{([^}]+)\}/)?.[1];
+  const preview=css.match(/\.wardrobe-card \.star-trail-preview>svg\{([^}]+)\}/)?.[1];
   const lock=css.match(/\.wardrobe-card-lock svg\{([^}]+)\}/)?.[1];
   assert.match(preview,/(?:^|;)stroke:none(?:;|$)/);
   assert.match(lock,/(?:^|;)stroke:#fff(?:;|$)/);

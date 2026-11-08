@@ -75,10 +75,14 @@
 
 /* One detached player ball travels continuously between each UI anchor. */
 #ui-ball{position:fixed;left:0;top:0;z-index:40;pointer-events:none;transform-origin:center;will-change:transform,width,height}
-#ui-ball svg{width:100%;height:100%;fill:var(--player);stroke:none;overflow:visible}
+#ui-ball svg{position:absolute;left:0;top:0;width:100%;height:100%;fill:var(--player);stroke:none;overflow:visible}
+/* Body-only raster room leaves the original face viewport and eye origin intact. */
+#ui-ball svg.ui-ball-raster{left:-50%;top:-50%;width:200%;height:200%}
 #ui-ball .ui-eyes{fill:var(--face,#f4f3eb);transform-origin:50px 50px}
-#ui-companions{position:fixed;left:0;top:0;z-index:39;pointer-events:none;transform-origin:center;overflow:visible;will-change:transform,width,height}
-#ui-companions svg{display:block;width:100%;height:100%;overflow:visible;stroke:none}
+#ui-star-trails{position:fixed;left:0;top:0;z-index:39;pointer-events:none;transform-origin:center;overflow:visible;will-change:transform,width,height}
+#ui-star-trails svg{display:block;width:100%;height:100%;overflow:visible;stroke:none}
+#wardrobe-showroom{position:fixed;left:0;top:0;z-index:39;pointer-events:none;transform-origin:center;overflow:visible;will-change:transform,width,height}
+#wardrobe-showroom svg{display:block;width:100%;height:100%;overflow:visible;stroke:none}
 .ball-anchor{display:block;flex-shrink:0;width:48px;height:48px}
 .settings-heading{align-items:center;gap:11px;margin-bottom:14px}
 .settings-heading h2{font-size:clamp(18px,5vw,22px);line-height:1.4;margin:0;flex:1;letter-spacing:-.8px}
@@ -163,8 +167,8 @@ body{position:fixed;inset:0;transition:color .3s}
 .wardrobe-card[aria-pressed=true]{box-shadow:inset 0 0 0 2px var(--ink)}
 .wardrobe-card-title{position:absolute;top:11%;left:4px;right:4px;z-index:1;font-size:clamp(11px,2.7vw,13px);line-height:1.15;text-align:center;white-space:nowrap}
 .wardrobe-card>svg{display:block;width:100%;height:100%;overflow:visible}
-.wardrobe-card .companion-preview{display:block;width:100%;height:100%;pointer-events:none}
-.wardrobe-card .companion-preview>svg{display:block;width:100%;height:100%;overflow:visible;stroke:none}
+.wardrobe-card .star-trail-preview{display:block;width:100%;height:100%;pointer-events:none}
+.wardrobe-card .star-trail-preview>svg{display:block;width:100%;height:100%;overflow:visible;stroke:none}
 .wardrobe-card .shape-outline{fill:none;stroke:var(--ink);stroke-width:3;stroke-linejoin:round;stroke-linecap:round}
 .wardrobe-card .appearance-question{fill:var(--ink);stroke:none;font:29px GameSans,sans-serif}
 .wardrobe-card-lock{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px;border-radius:15px;color:#fff;background:rgba(101,105,100,.76);font-size:clamp(10px,2.5vw,12px);line-height:1.35;text-align:center;padding:6px;pointer-events:none}
@@ -189,7 +193,7 @@ body{position:fixed;inset:0;transition:color .3s}
 .crop-zoom-row input{flex:1;min-width:0;accent-color:var(--ink);height:30px}
 .crop-hint{text-align:center;color:var(--muted);font-size:11px;margin:7px 0 0}
 .crop-dialog .primary-button{margin-top:16px}
-body.appearance-cropping #ui-ball,body.appearance-cropping #ui-companions,body.appearance-cropping #result-shadow{visibility:hidden}
+body.appearance-cropping #ui-ball,body.appearance-cropping #ui-star-trails,body.appearance-cropping #wardrobe-showroom,body.appearance-cropping #result-shadow{visibility:hidden}
 @media(max-height:560px){#wardrobe-panel{padding:20px 26px 14px}.wardrobe-heading{padding-bottom:12px}.wardrobe-row{height:55px;min-height:55px}.wardrobe-preview{height:148px;padding-bottom:20px}#wardrobe-ball{width:56px;height:56px}.crop-dialog{width:min(500px,100%);padding:16px 20px}.crop-dialog .panel-heading{margin-bottom:10px}.crop-stage{width:min(100%,calc(100dvh - 210px));margin:auto;aspect-ratio:1}.crop-zoom-row{margin-top:8px}.crop-hint{display:none}.crop-dialog .primary-button{margin-top:8px;min-height:38px;padding:8px 20px}}
 body.appearance-cropping #toast{z-index:80}
 @media(max-height:440px){.wardrobe-grid{--gallery-gap:12px;grid-template-columns:repeat(auto-fit,minmax(82px,1fr))}.wardrobe-card{border-radius:14px}.wardrobe-card-lock{border-radius:12px}.wardrobe-row{height:52px;min-height:52px}.wardrobe-preview{height:110px;padding-bottom:16px}}

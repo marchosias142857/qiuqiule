@@ -7,9 +7,15 @@ const finite=value=>Number.isFinite(value);
 export const COMET_TRAIL={startSpeed:20,endSpeed:18,fullSpeed:40,lifetime:.22,maxPoints:48};
 const SAMPLE_SECONDS=1/120;
 
-export function cometProfile(speed,radius,unit,strength=1){
+// Shared length growth, independent of feedback opacity and body radius.
+// Decorations should follow this curve instead of duplicating speed gates.
+export function cometGrowth(speed,unit){
   const amount=clamp((speed/Math.max(1e-6,unit)-COMET_TRAIL.endSpeed)/(COMET_TRAIL.fullSpeed-COMET_TRAIL.endSpeed),0,1);
-  const gain=clamp(strength,0,1),growth=amount*amount*(3-2*amount);
+  return amount*amount*(3-2*amount);
+}
+
+export function cometProfile(speed,radius,unit,strength=1){
+  const gain=clamp(strength,0,1),growth=cometGrowth(speed,unit);
   // The first radius is covered by the ball. Grow the visible part from its
   // rear edge, rather than hiding the entire low-speed tail inside the body.
   const maximum=Math.min(radius*7,unit*8);
@@ -119,7 +125,7 @@ export function cometBands(ribbon){
 }
 
 const NO_BANDS=Object.freeze([]);
-// Live histories are bounded (48 player samples or 96 companion samples).
+// Live histories are bounded; external paths may use the same workspace.
 // Larger external inputs still render fully, without keeping a larger buffer.
 const MAX_WORKSPACE_SAMPLES=96;
 export class CometWorkspace {
@@ -140,25 +146,68 @@ function fillRibbon(graphics,vertices,color,alpha){
 }
 
 export class CometTrails {
-  constructor(){this.entries=new Map();this.workspace=null;}
+  constructor(){this.entries=new Map();this.workspace=null;this.generation=0;}
   clear(){this.entries.clear();this.workspace=null;}
+  /** Borrowed read-only state, valid until the next step/clear. Mileage is
+   * sampled world travel; resets are identified by a new generation. */
+  getState(body){return this.entries.get(body)||null;}
+  /** Sample the same quarter/three-quarter corner-cutting centerline used by
+   * buildRibbon. Insufficient history is explicit: never stack at its tail.
+   * The caller owns `out`, so repeated particle births need no sample objects. */
+  sample(body,backwardDistance,out={}){
+    const trail=this.entries.get(body),points=trail?.points;
+    out.valid=false;out.available=0;out.generation=trail?.generation??-1;
+    if(!points?.length||!finite(backwardDistance)||backwardDistance<0)return out;
+    let x=points[points.length-1].x,y=points[points.length-1].y,distance=0;
+    for(let index=2*points.length-2;index>=0;index--){
+      let px=points[0].x,py=points[0].y;
+      if(index>0){
+        const edge=Math.floor((index-1)/2),t=index%2?.25:.75;
+        const a=points[edge],b=points[edge+1];
+        px=a.x+(b.x-a.x)*t;py=a.y+(b.y-a.y)*t;
+      }
+      const dx=x-px,dy=y-py,span=Math.hypot(dx,dy);
+      if(span<1e-6)continue;
+      if(distance+span>=backwardDistance-1e-8){
+        const take=clamp(backwardDistance-distance,0,span);
+        out.x=x-dx*take/span;out.y=y-dy*take/span;
+        out.nx=dx/span;out.ny=dy/span;out.available=backwardDistance;
+        out.valid=true;return out;
+      }
+      distance+=span;x=px;y=py;
+    }
+    out.available=distance;return out;
+  }
   step(bodies,dt,{unit=1,enabled=true}={}){
     if(!enabled){this.clear();return;}
+    // A hidden-tab time gap does not describe a traversable flight path.
+    if(finite(dt)&&dt>.1)this.clear();
     const elapsed=clamp(finite(dt)?dt:0,0,.05);
     // Ordinary play supplies one player and at most two clones.
     const living=Array.isArray(bodies)&&bodies.length<=3?null:new Set(bodies);
-    for(const body of this.entries.keys()){
+    for(const [body,trail] of this.entries){
       if(!(living?living.has(body):bodies.includes(body)))this.entries.delete(body);
+      // A restored map may contain generations newer than this instance.
+      // Observe every retained entry before assigning any new generation.
+      else if(Number.isSafeInteger(trail.generation)&&trail.generation>this.generation)this.generation=trail.generation;
     }
     for(const body of bodies){
       if(!body||!finite(body.x)||!finite(body.y)||!finite(body.r)||!finite(body.vx)||!finite(body.vy)||body.r<=0){this.entries.delete(body);continue;}
       const speed=Math.hypot(body.vx,body.vy),speedUnits=speed/Math.max(1e-6,unit);
       let trail=this.entries.get(body);
-      if(!trail){trail={points:[],active:false,lastX:body.x,lastY:body.y,lastSpeed:speed,sampleAge:0,liveHead:null,lastDx:0,lastDy:0,hasSample:false};this.entries.set(body,trail);}
+      if(!trail){trail={points:[],active:false,lastX:body.x,lastY:body.y,lastSpeed:speed,sampleAge:0,liveHead:null,lastDx:0,lastDy:0,hasSample:false,generation:++this.generation,mileage:0,frameDistance:0};this.entries.set(body,trail);}
+      // Older run snapshots already own a valid thin ribbon, but predate the
+      // particle sampler's metadata. Keep that ribbon and start fresh mileage.
+      if(!Number.isSafeInteger(trail.generation)||trail.generation<1)trail.generation=++this.generation;
+      if(!finite(trail.mileage)||trail.mileage<0)trail.mileage=0;
+      if(!finite(trail.frameDistance)||trail.frameDistance<0)trail.frameDistance=0;
       const moved=Math.hypot(body.x-trail.lastX,body.y-trail.lastY);
-      if(moved>Math.max(body.r*4,Math.max(speed,trail.lastSpeed)*elapsed*2.5+unit)){
+      const discontinuity=moved>Math.max(body.r*4,Math.max(speed,trail.lastSpeed)*elapsed*2.5+unit)||(elapsed===0&&moved>1e-6);
+      if(discontinuity){
         trail.points.length=0;trail.liveHead=null;trail.sampleAge=0;trail.lastDx=trail.lastDy=0;trail.hasSample=false;
+        trail.generation=++this.generation;trail.mileage=0;
       }
+      trail.frameDistance=discontinuity?0:moved;trail.mileage+=trail.frameDistance;
       let retained=0;
       for(const point of trail.points){
         point.age+=elapsed;

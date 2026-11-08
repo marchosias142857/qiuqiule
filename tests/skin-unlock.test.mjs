@@ -56,10 +56,10 @@ test('reward heading uses real selected-font text with an ink-fitted responsive 
   assert.ok(markup.includes('<text x="0" y="0">已解锁外观！</text>'));
   assert.ok(markup.includes('viewBox="113 -797 5151 893"'));
   assert.ok(!markup.includes('<path'));
-  const companion=unlockTitleMarkup('companion');
-  assert.ok(companion.includes('<text x="0" y="0">已解锁伴星</text>'));
-  assert.ok(companion.includes('viewBox="113 -797 4825 893"'));
-  assert.equal(companion.includes('！'),false);
+  const starTrail=unlockTitleMarkup('star-trail');
+  assert.ok(starTrail.includes('<text x="0" y="0">已获得星迹！</text>'));
+  assert.ok(starTrail.includes('viewBox="113 -797 5151 893"'));
+  assert.equal(starTrail.includes('！'),true);
 });
 
 test('consecutive rewards keep one resting ball and uninterrupted panel and glow',()=>{

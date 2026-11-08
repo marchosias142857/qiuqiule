@@ -6,7 +6,7 @@ import {readFile,stat} from 'node:fs/promises';
 const root=new URL('../dist/',import.meta.url);
 const source=await readFile(new URL('sw.js',root),'utf8');
 const musicFiles=['audio/endless.mp3','audio/boss.mp3'];
-const authoredModules=['run-upgrades.js','stage-hud.js','companions.js','skin-unlock.js'];
+const authoredModules=['run-upgrades.js','stage-hud.js','star-trails.js','star-particles.js','particle-appearance.js','skin-unlock.js'];
 
 function worker({failed=[],wrongType=[],partial=[],redirects={},base='/'}={}){
   const handlers={},stores=new Map(),messages=[],requests=[];
@@ -216,7 +216,7 @@ test('every relative module reachable from the shipped entrypoints is bundled an
       pending.push(resolved.href.slice(root.href.length));
     }
   }
-  assert.ok(modules.has('game.js')&&modules.has('companions.js')&&modules.has('wardrobe.js'));
+  assert.ok(modules.has('game.js')&&['star-trails.js','star-particles.js','particle-appearance.js'].every(file=>modules.has(file))&&modules.has('wardrobe.js'));
   assert.ok([...modules].every(path=>!/^campaign|^classes\/|^levels\.js$|^level-orbs\.js$/.test(path)));
   const w=worker();await w.event('install');await w.event('activate');w.setOffline();
   for(const path of modules){

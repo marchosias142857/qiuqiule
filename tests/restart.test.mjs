@@ -7,7 +7,6 @@ import {UPGRADE_DEFINITIONS,UPGRADES} from '../dist/upgrades.js';
 import {impactShards} from '../dist/feedback.js';
 import {World,BOSS_TIMING} from '../dist/physics.js';
 import {GameAudio} from '../dist/audio.js';
-import {companionGeometry,companionSvg} from '../dist/companions.js';
 import {crownOutline} from '../dist/boss-visuals.js';
 import {upgradeAppearance} from '../dist/upgrade-render.js';
 import {loadAppearance} from '../dist/wardrobe.js';
@@ -27,6 +26,10 @@ function element(selector){
       if(selector==='#feedback-demo'&&classes.has('demo-compact')){
         const {width,height}=this.testViewport||{width:window.innerWidth,height:window.innerHeight};
         return {x:width/2-52,y:height-60,left:width/2-52,right:width/2+52,top:height-60,bottom:height-20,width:104,height:40};
+      }
+      if(selector==='#wardrobe-panel .wardrobe-preview'){
+        const width=Math.min(window.innerWidth-48,416),height=150,left=(window.innerWidth-width)/2,top=120;
+        return {x:left,y:top,left,right:left+width,top,bottom:top+height,width,height};
       }
       const [x,y,width,height]=selector==='#over-ball'?[96,320,72,72]:selector==='#pause-ball'?[110,200,64,64]:selector==='#run-upgrades-ball'?[68,132,42,42]:selector==='#skin-unlock-ball'?[141,370,108,108]:[0,0,390,844];
       return {x,y,width,height,top:y,bottom:y+height,left:x,right:x+width};
@@ -78,13 +81,13 @@ export function seedRenderer(graphics,width=390,height=844,arena=false,keepSave=
   if(typeof pendingRunSnapshot!=='undefined')pendingRunSnapshot=null;
   if(typeof restoredView!=='undefined')restoredView=null;
   if(typeof resumeSlowRemaining!=='undefined')resumeSlowRemaining=0;
-  companionState=normalizeCompanionState({unlocked:9});companionTween=null;companionOverride=null;companionClock=0;resetCompanionTrails();
+  starTrailState=normalizeStarTrailState({unlocked:9});starTrailTween=null;starTrailOverride=null;starTrailClock=0;scene?.starParticles?.clear();
   clearChoicePress();aimMetrics=normalizeAimMetrics(null);runAimHoldDuration=1.2;
   $('#feedback-demo').testViewport={width,height};
-  // Generic rendering fixtures already own companions and isolate celebrations.
+  // Generic rendering fixtures already own star trails and isolate celebrations.
   // Progression tests explicitly seed empty ownership and enable record effects.
   endlessProgress=normalizeEndless(null,best);runDay=createEndlessRun('2030-01-01');runBest=Number.MAX_SAFE_INTEGER;runNewRecord=false;recordPulse=recordCue=0;recordedStatsKey='';feedbackDemo=false;
-  menuTransition=null;
+  menuTransition=null;wardrobeShowcase=null;
   viewport=displayMetrics(width,height,1);home=new HomeWorld(width,height);
   world=arena?new World(width,height,runDay.random):null;screen=arena?'play':'home';
   modal=null;paused=false;transfer=null;controlFlight=null;uiAnchor=null;result=null;drag=null;releaseOverlay=0;pauseOnArrival=false;homeReveal=1;
@@ -146,9 +149,9 @@ export function seedEndless(raw=null,{date='2030-01-01',recordEffects=true}={}){
 export function readEndless(){return {progress:endlessProgress,runDay,runBest,runNewRecord,recordPulse,recordCue};}
 export const saveEndless=saveEndlessProgress;
 export function seedCircle(){
-  playerContour=skinContour(0);skinOverride=null;skinUnlock=null;lastUiPose=null;appearance=null;appearanceUrl=null;appearanceLoading=false;
+  playerContour=skinContour(0);skinOverride=null;skinUnlock=null;wardrobeShowcase=null;lastUiPose=null;appearance=null;appearanceUrl=null;appearanceLoading=false;
   appearanceState=normalizeAppearanceState(null);appearanceTween=null;appearanceOverride=null;
-  companionState=normalizeCompanionState({unlocked:9});companionTween=null;companionOverride=null;companionClock=0;resetCompanionTrails();
+  starTrailState=normalizeStarTrailState({unlocked:9});starTrailTween=null;starTrailOverride=null;starTrailClock=0;scene?.starParticles?.clear();
 }
 export function readPlayerShape(){return {playerContour,skinOverride,skinUnlock,lastUiPose,active:activeContour()};}
 export const advanceSkin=updateSkin;
@@ -190,33 +193,28 @@ export function seedAppearanceState(raw=null,{hasImage}={}){
   appearanceLoading=false;appearanceState=normalizeAppearanceState(raw,{hasImage});appearanceTween=null;appearanceOverride=null;
   return appearanceState;
 }
-export function readAppearancePresentation(){return {state:appearanceState,tween:appearanceTween,override:appearanceOverride,layers:appearanceLayers(),wardrobeTime};}
+export function readAppearancePresentation(){return {state:appearanceState,tween:appearanceTween,override:appearanceOverride,layers:appearanceLayers(),wardrobeTime,wardrobeShowcase};}
 export const chooseAppearanceForTest=chooseAppearance;
 export const grantAppearanceForTest=grantEndlessAppearance;
 export const showResultForTest=openResult;
 export function seedWardrobePresentation(time=.75){
-  screen='home';modal='wardrobe';uiAnchor='wardrobe';transfer=null;skinUnlock=null;wardrobeTime=time;home.phase='external';
+  screen='home';modal='wardrobe';uiAnchor='wardrobe';transfer=null;skinUnlock=null;wardrobeShowcase=null;wardrobeTime=time;home.phase='external';
   return currentPlayerPose();
 }
+export const openWardrobeForTest=openWardrobe;
+export const navigateWardrobeForTest=navigateWardrobePreview;
+export const readShowcaseForTest=()=>({state:wardrobeShowcase,pose:currentPlayerPose(),lastUiPose,start:anchorPose('wardrobe-start'),end:anchorPose('wardrobe-trail')});
 export function bindWardrobeControls(controls){const previous=wardrobeUi;wardrobeUi=controls;return ()=>{wardrobeUi=previous;};}
 export const paintUiForTest=paintUiBall;
 export const drawPlayerForTest=drawBall;
-export function seedCompanions(raw=null,{highestStage=0}={}){
-  companionState=normalizeCompanionState(raw,{highestStage});companionTween=null;companionOverride=null;companionClock=0;resetCompanionTrails();return companionState;
+export function seedStarTrails(raw=null,{highestStage=0}={}){
+  starTrailState=normalizeStarTrailState(raw,{highestStage});starTrailTween=null;starTrailOverride=null;starTrailClock=0;scene?.starParticles?.clear();return starTrailState;
 }
-export function readCompanions(){return {state:companionState,tween:companionTween,clock:companionClock,layers:companionLayers()};}
-export const readCompanionHistory=()=>structuredClone([...companionTrails.entries]);
-export const chooseCompanionForTest=chooseCompanion;
-export const advanceCompanions=updateCompanionVisual;
-export const grantCompanionsForTest=grantEndlessCompanions;
-export function recordCompanionDraws(){
-  const original=drawPlayerCompanions,calls=[];
-  drawPlayerCompanions=function(g,pose,alpha,contour,body){
-    const first=g.shapes?.length||0,result=original(g,pose,alpha,contour,body);
-    calls.push({pose:{...pose},alpha,contour:contour?.map(point=>({...point})),shapes:g.shapes?.slice(first)||[]});return result;
-  };
-  return {calls,restore(){drawPlayerCompanions=original;}};
-}
+export function readStarTrails(){return {state:starTrailState,tween:starTrailTween,clock:starTrailClock,layers:starTrailLayers()};}
+export const chooseStarTrailForTest=chooseStarTrail;
+export const advanceStarTrails=updateStarTrailVisual;
+export const grantStarTrailsForTest=grantEndlessStarTrails;
+
 
 
 export const startWithFont=bootWithFont;
@@ -1574,12 +1572,12 @@ test('v7.11 restore defaults synchronizes preferences and persistence while pres
   try{
     for(const appearance of ['original','custom','big-eye'])await withReloadedEntry({player:'#8040a0',enemy:'#806040',bg:'#111111',sound:false,expressions:false,bgmVolume:.12,sfxVolume:.23,juice:.2},false,fresh=>{
       fresh.seedRenderer(graphicsRecorder());fresh.seedCircle();
-      fresh.seedEndless({best:72000,maxStage:25,maxCombo:12});fresh.seedCompanions({selected:'moon-3',unlocked:9});
+      fresh.seedEndless({best:72000,maxStage:25,maxCombo:12});fresh.seedStarTrails({selected:'star',unlocked:9});
       fresh.seedAimStats({completedCount:30,samples:Array(30).fill(1.05)});
       const photos=fresh.recordCompositePhotos(true),image=fresh.readAppearance().appearance;
       fresh.seedAppearanceState({selected:appearance==='big-eye'?'custom':appearance,bigEyeUnlocked:true},{hasImage:true});
       if(appearance==='big-eye'){assert.equal(fresh.chooseAppearanceForTest('big-eye'),true);fresh.advanceSkin(.14);}
-      const companions=structuredClone(fresh.readCompanions().state),endless=structuredClone(fresh.readEndless().progress),aim=structuredClone(fresh.readAimStats());
+      const starTrails=structuredClone(fresh.readStarTrails().state),endless=structuredClone(fresh.readEndless().progress),aim=structuredClone(fresh.readAimStats());
       saved.set('qiuqiule-appearance','data:image/png;base64,test-existing-photo');
       const preserved=new Map([...saved].filter(([key])=>!['qiuqiule-settings','qiuqiule-appearance-state'].includes(key)));
       let refreshed=0;const restoreWardrobe=fresh.bindWardrobeControls({refresh(){refreshed++;}});
@@ -1593,7 +1591,7 @@ test('v7.11 restore defaults synchronizes preferences and persistence while pres
         assert.equal(element('html').style['--ink'],'#252720');assert.equal(refreshed,1);
         assert.equal(fresh.readAppearancePresentation().tween,null,'an old color fade cannot resurrect a pre-reset preference');
         assert.equal(fresh.readAppearancePresentation().state.selected,appearance);assert.equal(fresh.readAppearance().appearance,image);
-        assert.deepEqual(fresh.readCompanions().state,companions);assert.deepEqual(fresh.readEndless().progress,endless);assert.deepEqual(fresh.readAimStats(),aim);
+        assert.deepEqual(fresh.readStarTrails().state,starTrails);assert.deepEqual(fresh.readEndless().progress,endless);assert.deepEqual(fresh.readAimStats(),aim);
         assert.deepEqual(new Map([...saved].filter(([key])=>!['qiuqiule-settings','qiuqiule-appearance-state'].includes(key))),preserved);
         if(appearance==='big-eye'){
           assert.equal(fresh.readAppearancePresentation().state.previousPlayerColor,defaults.player);
@@ -3714,15 +3712,15 @@ test('v7.9 endless appearance reward uses the animated unlock route and returns 
   assert.ok(app.readRestart().result);
 });
 
-test('a queued appearance and three stage companions require one ready acknowledgement each and restore the equipped photo and companion',t=>{
+test('a queued appearance and three stage star trails require one ready acknowledgement each and restore the equipped photo and star trail',t=>{
   const stored=new Map(saved),{world}=controlRun();app.seedEndless();app.seedCircle();
-  app.seedCompanions({unlocked:1,selected:'sun-1'});
+  app.seedStarTrails({unlocked:1,selected:'triangle'});
   const photo=app.recordCompositePhotos(true),image=app.readAppearance().appearance,originalInk=app.playerInk();
   t.after(()=>{photo.restore();app.seedCircle();document.hidden=false;saved.clear();for(const [key,value]of stored)saved.set(key,value);});
   Object.assign(world,{score:233333,stage:20,maxStage:20});app.updateScoreHud();
-  assert.equal(app.readRestart().modal,null);assert.deepEqual(app.readCompanions().state.pendingUnlocks,['moon-1','star-1','sun-2']);
+  assert.equal(app.readRestart().modal,null);assert.deepEqual(app.readStarTrails().state.pendingUnlocks,['square','diamond','snowflake']);
   world.phase='over';app.showResultForTest();
-  const reward=app.readPlayerShape().skinUnlock,queue=[{kind:'appearance',id:'big-eye'},...['moon-1','star-1','sun-2'].map(id=>({kind:'companion',id}))];
+  const reward=app.readPlayerShape().skinUnlock,queue=[{kind:'appearance',id:'big-eye'},...['square','diamond','snowflake'].map(id=>({kind:'star-trail',id}))];
   assert.deepEqual(reward.queue,queue);assert.equal(reward.index,0);assert.equal(app.readRestart().result,null);
   const escape=()=>{for(const handler of listeners.get('keydown'))handler({key:'Escape',preventDefault(){}});};
   clickAction('close');escape();assert.equal(reward.index,0);assert.equal(app.readAppearancePresentation().state.pendingUnlock,true);
@@ -3735,11 +3733,11 @@ test('a queued appearance and three stage companions require one ready acknowled
   for(let index=0;index<queue.length;index++){
     assert.equal(reward.index,index);assert.equal(reward.ready,true);assert.equal(app.readRestart().result,null);assert.equal(app.readRestart().controlFlight,null);
     assert.equal(element('#skin-unlock-title').dataset.kind,queue[index].kind);
-    assert.equal(app.readAppearancePresentation().state.selected,'custom');assert.equal(app.readCompanions().state.selected,'sun-1');
+    assert.equal(app.readAppearancePresentation().state.selected,'custom');assert.equal(app.readStarTrails().state.selected,'triangle');
     assert.equal(app.readAppearance().appearance,image);assert.equal(app.playerInk(),originalInk);
-    if(queue[index].kind==='companion')assert.deepEqual(app.readCompanions().layers,[{id:queue[index].id,weight:1}]);
+    if(queue[index].kind==='star-trail')assert.deepEqual(app.readStarTrails().layers,[{id:queue[index].id,weight:1}]);
     clickAction('close');
-    const pending=JSON.parse(saved.get('qiuqiule-companions')).pendingUnlocks;
+    const pending=JSON.parse(saved.get('qiuqiule-star-trails')).pendingUnlocks;
     assert.deepEqual(pending,queue.slice(Math.max(1,index+1)).map(item=>item.id));
     assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).pendingUnlock,false);
     if(index+1<queue.length){
@@ -3749,35 +3747,42 @@ test('a queued appearance and three stage companions require one ready acknowled
       app.advanceUi(.18);assert.equal(reward.ready,true);
     }
   }
-  assert.equal(reward.phase,'leave');assert.ok(app.readRestart().result);app.advanceUi(.62);
-  assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readRestart().modal,'over');
-  assert.deepEqual(app.readCompanions().layers,[{id:'sun-1',weight:1}]);
+  assert.equal(reward.phase,'leave');assert.ok(app.readRestart().result);
+  const preview=element('#ui-star-trails'),opacity=()=>Math.max(0,...preview.querySelectorAll('path').map(path=>Number(path.getAttribute('opacity'))));
+  const initialAlpha=opacity();assert.ok(initialAlpha>0);
+  app.advanceUi(.31);near(app.readStarTrails().layers[0].weight,.5);
+  assert.ok(Math.abs(opacity()/initialAlpha-.5)<.001,'the reward preview fades halfway during the return flight');
+  assert.equal(app.readStarTrails().state.selected,'triangle','returning cannot equip the newly awarded preview');
+  app.advanceUi(.30);assert.ok(opacity()<initialAlpha*.002,'the last visible reward frame is already almost transparent');
+  app.advanceUi(.01);
+  assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readRestart().modal,'over');assert.equal(preview.hidden,true);
+  assert.deepEqual(app.readStarTrails().layers,[{id:'triangle',weight:1}]);
   assert.ok(app.readAppearancePresentation().layers.every(layer=>layer.id==='custom'));assert.equal(app.readAppearance().appearance,image);
-  assert.deepEqual(app.readCompanions().state.pendingUnlocks,[]);assert.equal(app.readCompanions().state.selected,'sun-1');
+  assert.deepEqual(app.readStarTrails().state.pendingUnlocks,[]);assert.equal(app.readStarTrails().state.selected,'triangle');
 });
 
-test('reloading after one companion acknowledgement preserves every unseen reward and never replays the acknowledged item',async t=>{
-  const stored=new Map(saved),{world}=controlRun();app.seedEndless();app.seedCircle();app.seedCompanions();
+test('reloading after one star trail acknowledgement preserves every unseen reward and never replays the acknowledged item',async t=>{
+  const stored=new Map(saved),{world}=controlRun();app.seedEndless();app.seedCircle();app.seedStarTrails();
   t.after(()=>{app.seedCircle();saved.clear();for(const [key,value]of stored)saved.set(key,value);});
   world.stage=world.maxStage=15;app.updateScoreHud();world.phase='over';app.showResultForTest();app.advanceUi(1.65);clickAction('close');
-  const pending=['moon-1','star-1'];assert.deepEqual(app.readCompanions().state.pendingUnlocks,pending);
+  const pending=['square','diamond'];assert.deepEqual(app.readStarTrails().state.pendingUnlocks,pending);
   assert.equal(app.readRestart().result,null);assert.equal(app.readPlayerShape().skinUnlock.ready,false);
   await withReloadedEntry(null,false,fresh=>{
-    const restored=fresh.readCompanions().state;assert.equal(restored.unlocked,3);assert.deepEqual(restored.pendingUnlocks,pending);
-    const {world:next}=fresh.seedRenderer(graphicsRecorder(),390,844,true);fresh.seedCircle();fresh.seedCompanions(restored);fresh.seedEndless({maxStage:15});
+    const restored=fresh.readStarTrails().state;assert.equal(restored.unlocked,3);assert.deepEqual(restored.pendingUnlocks,pending);
+    const {world:next}=fresh.seedRenderer(graphicsRecorder(),390,844,true);fresh.seedCircle();fresh.seedStarTrails(restored);fresh.seedEndless({maxStage:15});
     next.phase='over';fresh.showResultForTest();
-    assert.deepEqual(fresh.readPlayerShape().skinUnlock.queue,pending.map(id=>({kind:'companion',id})));
+    assert.deepEqual(fresh.readPlayerShape().skinUnlock.queue,pending.map(id=>({kind:'star-trail',id})));
     assert.equal(fresh.readPlayerShape().skinUnlock.ready,false);assert.equal(fresh.readRestart().result,null);
-    assert.deepEqual(JSON.parse(saved.get('qiuqiule-companions')).pendingUnlocks,pending,'restoring or showing a reward never acknowledges it');
+    assert.deepEqual(JSON.parse(saved.get('qiuqiule-star-trails')).pendingUnlocks,pending,'restoring or showing a reward never acknowledges it');
   });
 });
 
-test('companion reward transitions keep one visible player through rotation and reduced motion without advancing or replacing the queue',async()=>{
+test('star trail reward transitions keep one visible player through rotation and reduced motion without advancing or replacing the queue',async()=>{
   for(const reduced of [false,true])await withReloadedEntry({juice:.6},reduced,fresh=>{
     const originalWindow={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
     window.innerWidth=390;window.innerHeight=844;window.devicePixelRatio=1;
     window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else originalWindow.add(type,handler);};
-    const g=graphicsRecorder(),{world,scene}=fresh.seedRenderer(g,390,844,true);fresh.seedCircle();fresh.seedEndless();fresh.seedCompanions({unlocked:1,selected:'sun-1'});
+    const g=graphicsRecorder(),{world,scene}=fresh.seedRenderer(g,390,844,true);fresh.seedCircle();fresh.seedEndless();fresh.seedStarTrails({unlocked:1,selected:'triangle'});
     const photos=fresh.recordCompositePhotos(true),image=fresh.readAppearance().appearance,pointer=inputCanvas(390,844,fresh);
     try{
       fresh.mountSceneBoundary(pointer.canvas,g);world.stage=world.maxStage=15;fresh.updateScoreHud();world.phase='over';fresh.showResultForTest();
@@ -3791,10 +3796,10 @@ test('companion reward transitions keep one visible player through rotation and 
       assert.equal(fresh.readPlayerShape().skinUnlock,reward);assert.equal(reward.elapsed,age);assert.deepEqual(reward.queue.map(item=>item.id),expected);
       assert.equal(element('#ui-ball').hidden,false);near(Number(element('#skin-unlock-panel').style.opacity),1);
       assert.ok(['x','y','r'].every(key=>Number.isFinite(fresh.sourcePose()[key])));assert.equal(fresh.readRestart().result,null);
-      assert.equal(fresh.readAppearance().appearance,image);assert.equal(fresh.readCompanions().state.selected,'sun-1');assert.equal(world.time,time);
+      assert.equal(fresh.readAppearance().appearance,image);assert.equal(fresh.readStarTrails().state.selected,'triangle');assert.equal(world.time,time);
       fresh.advanceUi(reduced?.1:.18);assert.equal(reward.ready,true);clickAction('close');fresh.advanceUi(reduced?.28:.62);
       assert.equal(fresh.readPlayerShape().skinUnlock,null);assert.equal(fresh.readRestart().modal,'over');assert.equal(fresh.readAppearance().appearance,image);
-      assert.deepEqual(fresh.readCompanions().layers,[{id:'sun-1',weight:1}]);assert.equal(world.time,time);
+      assert.deepEqual(fresh.readStarTrails().layers,[{id:'triangle',weight:1}]);assert.equal(world.time,time);
     }finally{photos.restore();window.innerWidth=originalWindow.width;window.innerHeight=originalWindow.height;window.devicePixelRatio=originalWindow.dpr;window.addEventListener=originalWindow.add;}
   });
 });
@@ -3843,6 +3848,84 @@ test('v7.10 appearance fades preserve preview motion and restore the pre-Big Eye
   assert.equal(app.playerInk(),0x405060,'leaving Big Eye restores the exact color captured before equipping it');
   app.advanceUi(.05);near(app.readAppearancePresentation().wardrobeTime,.78);
   assert.notDeepEqual(app.sourcePose(),before,'the existing bounce clock continues through the change');
+});
+
+test('v11.3.1 selecting a saved custom photo fades in over the existing original or Big Eye appearance',async t=>{
+  const stored=new Map(saved),originalImage=globalThis.Image,oldInk=app.playerInk();let decodes=0;
+  globalThis.Image=class{async decode(){decodes++;}};
+  t.after(()=>{globalThis.Image=originalImage;app.seedCircle();app.setPlayerInk('#'+oldInk.toString(16).padStart(6,'0'));saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  for(const source of ['original','big-eye']){
+    app.seedRenderer(graphicsRecorder());app.seedCircle();app.setPlayerInk('#405060');
+    const photos=app.recordCompositePhotos(true);
+    try{
+      app.seedAppearanceState({selected:'original',bigEyeUnlocked:true},{hasImage:true});
+      const url='data:image/png;base64,c2F2ZWQ=';await app.applyAppearance(url,true);
+      const image=app.readAppearance().appearance,decodeCount=decodes;
+      app.chooseAppearanceForTest(source);app.advanceSkin(.28);
+      const pose=app.seedWardrobePresentation(.73),homeBefore={...app.readHome().player};
+      assert.equal(app.chooseAppearanceForTest('custom'),true);
+      assert.ok(app.readAppearancePresentation().tween,'the saved photo takes the same fade route as the other appearances');
+      assert.deepEqual(app.readAppearancePresentation().layers.map(({id,weight})=>({id,weight})),[{id:source,weight:1}]);
+      app.paintUiForTest(pose);assert.equal(photos.main.length,0,'the first frame still shows the prior appearance without a photo flash');
+      assert.equal(uiNode(source==='original'?'.ui-eyes':'.ui-big-eye').style.display,'');
+      app.advanceSkin(.14);app.paintUiForTest(pose);
+      near(photos.main.at(-1).options.alpha,.5);assert.equal(photos.main.at(-1).options.baseColor,0x405060);
+      near(app.readAppearancePresentation().layers.find(layer=>layer.id===source).weight,.5);
+      app.advanceSkin(.14);app.paintUiForTest(pose);
+      near(photos.main.at(-1).options.alpha,1);assert.equal(app.readAppearancePresentation().tween,null);
+      assert.deepEqual(app.readAppearancePresentation().layers.map(({id,weight})=>({id,weight})),[{id:'custom',weight:1}]);
+      assert.deepEqual(app.sourcePose(),pose);assert.deepEqual(app.readHome().player,homeBefore);
+      near(app.readAppearancePresentation().wardrobeTime,.73);
+      assert.equal(app.readAppearance().appearance,image);assert.equal(decodes,decodeCount,'equipping reuses the already decoded saved image');
+      assert.equal(await loadAppearance(),url);assert.equal(app.playerInk(),0x405060);
+    }finally{photos.restore();app.seedCircle();}
+  }
+});
+
+test('v11.3.1 a rapid saved-photo fade reversal starts from the visible mixture without a flash',async t=>{
+  const stored=new Map(saved),originalImage=globalThis.Image,oldInk=app.playerInk();let decodes=0;
+  globalThis.Image=class{async decode(){decodes++;}};
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.setPlayerInk('#405060');
+  const photos=app.recordCompositePhotos(true);
+  t.after(()=>{photos.restore();globalThis.Image=originalImage;app.seedCircle();app.setPlayerInk('#'+oldInk.toString(16).padStart(6,'0'));saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  app.seedAppearanceState({selected:'original',bigEyeUnlocked:true},{hasImage:true});
+  await app.applyAppearance('data:image/png;base64,c2F2ZWQ=',true);
+  const image=app.readAppearance().appearance;
+  app.chooseAppearanceForTest('original');app.advanceSkin(.28);
+  const pose=app.seedWardrobePresentation(.4);
+  app.chooseAppearanceForTest('custom');app.advanceSkin(.1);app.paintUiForTest(pose);
+  const first=app.readAppearancePresentation().layers.map(layer=>({...layer})),alpha=photos.main.at(-1).options.alpha;
+  assert.ok(alpha>0&&alpha<1);
+  app.chooseAppearanceForTest('big-eye');app.paintUiForTest(pose);
+  assert.deepEqual(app.readAppearancePresentation().layers,first);near(photos.main.at(-1).options.alpha,alpha);
+  app.advanceSkin(.08);const second=app.readAppearancePresentation().layers.map(layer=>({...layer}));
+  app.chooseAppearanceForTest('custom');assert.deepEqual(app.readAppearancePresentation().layers,second);
+  const tween=app.readAppearancePresentation().tween;
+  assert.equal(app.chooseAppearanceForTest('custom'),false);assert.equal(app.readAppearancePresentation().tween,tween,'reselecting does not restart the active fade');
+  app.advanceSkin(.28);app.paintUiForTest(pose);near(photos.main.at(-1).options.alpha,1);
+  assert.equal(app.readAppearance().appearance,image);assert.equal(decodes,1);assert.deepEqual(app.sourcePose(),pose);
+});
+
+test('v11.3.1 a saved-photo fade waits for slow startup decoding before consuming its transition time',async t=>{
+  const stored=new Map(saved),originalImage=globalThis.Image;let finishDecode,decodes=0;
+  globalThis.Image=class{decode(){decodes++;return new Promise(resolve=>finishDecode=resolve);}};
+  app.seedRenderer(graphicsRecorder());app.seedCircle();const photos=app.recordCompositePhotos(true);
+  t.after(()=>{photos.restore();globalThis.Image=originalImage;app.seedCircle();saved.clear();for(const [key,value]of stored)saved.set(key,value);});
+  await app.applyAppearance(null);app.seedAppearanceState({selected:'original',bigEyeUnlocked:true},{hasImage:true});
+  const pose=app.seedWardrobePresentation(.4),url='data:image/png;base64,c2F2ZWQ=';
+  saved.set('qiuqiule-appearance',JSON.stringify({version:1,image:url}));
+  const pending=app.hydrateAppearanceForTest(url);
+  assert.equal(app.imageIsLoadingForTest(),true);assert.equal(app.chooseAppearanceForTest('custom'),true);
+  app.advanceSkin(.5);app.paintUiForTest(pose);
+  near(app.readAppearancePresentation().tween.elapsed,0);
+  assert.deepEqual(app.readAppearancePresentation().layers.map(({id,weight})=>({id,weight})),[{id:'original',weight:1}]);
+  assert.equal(photos.main.length,0,'waiting leaves the old appearance fully visible');
+  finishDecode();await pending;app.paintUiForTest(pose);
+  assert.equal(app.imageIsLoadingForTest(),false);assert.equal(photos.main.length,0,'decoding does not skip the first fade frame');
+  app.advanceSkin(.14);app.paintUiForTest(pose);near(photos.main.at(-1).options.alpha,.5);
+  app.advanceSkin(.14);app.paintUiForTest(pose);near(photos.main.at(-1).options.alpha,1);
+  assert.equal(app.readAppearancePresentation().tween,null);assert.equal(app.readAppearance().appearanceUrl,url);assert.equal(decodes,1);
+  assert.deepEqual(app.sourcePose(),pose);assert.equal(await loadAppearance(),url);
 });
 
 test('v7.9 wardrobe back consumes the gallery navigation before any ball transfer',t=>{
@@ -3949,148 +4032,262 @@ test('v7.10 leaving Big Eye through a new custom photo restores color without re
 });
 
 
-test('formal endless stages unlock all nine companion milestones permanently without awarding score-only or trial milestones',t=>{
-  const key='qiuqiule-companions',prior=saved.get(key);
+test('formal endless stages unlock all nine star trail milestones permanently without awarding score-only or trial milestones',t=>{
+  const key='qiuqiule-star-trails',prior=saved.get(key);
   t.after(()=>{app.seedCircle();prior===undefined?saved.delete(key):saved.set(key,prior);});
-  const {world}=controlRun();app.seedEndless();app.seedCompanions();
-  world.score=999999;world.stage=world.maxStage=4;app.updateScoreHud();assert.equal(app.readCompanions().state.unlocked,0,'score no longer earns companions');
+  const {world}=controlRun();app.seedEndless();app.seedStarTrails();
+  world.score=999999;world.stage=world.maxStage=4;app.updateScoreHud();assert.equal(app.readStarTrails().state.unlocked,0,'score no longer earns star trails');
   for(let milestone=1;milestone<=9;milestone++){
     world.stage=world.maxStage=milestone*5;app.updateScoreHud();
-    const state=app.readCompanions().state;assert.equal(state.unlocked,milestone);assert.equal(state.pendingUnlocks.length,milestone);
-    assert.equal(state.selected,null,'earning an orbit decoration must not auto-equip it');
+    const state=app.readStarTrails().state;assert.equal(state.unlocked,milestone);assert.equal(state.pendingUnlocks.length,milestone);
+    assert.equal(state.selected,null,'earning a star trail must not auto-equip it');
     assert.equal(JSON.parse(saved.get(key)).unlocked,milestone);
     assert.equal(app.readRestart().paused,false);assert.equal(app.readRestart().modal,null);
   }
-  world.stage=world.maxStage=1;world.score=1;app.updateScoreHud();assert.equal(app.readCompanions().state.unlocked,9);
-  app.seedCompanions(JSON.parse(saved.get(key)));assert.equal(app.readCompanions().state.unlocked,9,'saved ownership restores independently of the current stage');
-  app.seedRenderer(graphicsRecorder());app.seedCompanions();app.runFeedbackDemo('steer');
-  Object.assign(app.readRestart().world,{score:999999,stage:99,maxStage:99});app.updateScoreHud();app.grantCompanionsForTest();
-  assert.equal(app.readCompanions().state.unlocked,0);assert.deepEqual(app.readCompanions().state.pendingUnlocks,[]);
+  world.stage=world.maxStage=1;world.score=1;app.updateScoreHud();assert.equal(app.readStarTrails().state.unlocked,9);
+  app.seedStarTrails(JSON.parse(saved.get(key)));assert.equal(app.readStarTrails().state.unlocked,9,'saved ownership restores independently of the current stage');
+  app.seedRenderer(graphicsRecorder());app.seedStarTrails();app.runFeedbackDemo('steer');
+  Object.assign(app.readRestart().world,{score:999999,stage:99,maxStage:99});app.updateScoreHud();app.grantStarTrailsForTest();
+  assert.equal(app.readStarTrails().state.unlocked,0);assert.deepEqual(app.readStarTrails().state.pendingUnlocks,[]);
 });
-test('v7.10 companion equip, replacement and same-card removal fade from the current appearance without resetting the moving player',t=>{
-  const key='qiuqiule-companions',prior=saved.get(key);
-  t.after(()=>{app.seedCompanions();prior===undefined?saved.delete(key):saved.set(key,prior);});
-  app.seedRenderer(graphicsRecorder());app.seedCompanions({unlocked:9});
+test('star trail equip, replacement and same-card removal fade from the current appearance without resetting the moving player',t=>{
+  const key='qiuqiule-star-trails',prior=saved.get(key);
+  t.after(()=>{app.seedStarTrails();prior===undefined?saved.delete(key):saved.set(key,prior);});
+  app.seedRenderer(graphicsRecorder());app.seedStarTrails({unlocked:9});
   const player={...app.readHome().player},pose=app.seedWardrobePresentation(.73);
-  assert.equal(app.chooseCompanionForTest('star-3'),true);assert.deepEqual(app.readHome().player,player);assert.deepEqual(app.sourcePose(),pose);
-  assert.deepEqual(app.readCompanions().layers,[],'the newly selected companions begin at zero opacity');
-  app.advanceCompanions(.09);const middle=app.readCompanions();
-  assert.ok(middle.layers.some(layer=>layer.id==='star-3'&&layer.weight>0&&layer.weight<1));
-  assert.equal(app.chooseCompanionForTest('moon-2'),true);assert.equal(app.readCompanions().clock,.09);
-  assert.deepEqual(app.readCompanions().layers,middle.layers,'a fast replacement starts at the currently visible layer mix');
-  app.advanceCompanions(.18);assert.deepEqual(app.readCompanions().layers,[{id:'moon-2',weight:1}]);
-  assert.equal(app.chooseCompanionForTest('moon-2'),true);assert.equal(app.readCompanions().state.selected,null);
+  assert.equal(app.chooseStarTrailForTest('galaxy'),true);assert.deepEqual(app.readHome().player,player);assert.deepEqual(app.sourcePose(),pose);
+  assert.deepEqual(app.readStarTrails().layers,[],'the newly selected star trails begin at zero opacity');
+  app.advanceStarTrails(.09);const middle=app.readStarTrails();
+  assert.ok(middle.layers.some(layer=>layer.id==='galaxy'&&layer.weight>0&&layer.weight<1));
+  assert.equal(app.chooseStarTrailForTest('triple'),true);assert.equal(app.readStarTrails().clock,.09);
+  assert.deepEqual(app.readStarTrails().layers,middle.layers,'a fast replacement starts at the currently visible layer mix');
+  app.advanceStarTrails(.18);assert.deepEqual(app.readStarTrails().layers,[{id:'triple',weight:1}]);
+  assert.equal(app.chooseStarTrailForTest('triple'),true);assert.equal(app.readStarTrails().state.selected,null);
   assert.equal(JSON.parse(saved.get(key)).selected,null,'same-card unequip persists immediately');
-  assert.ok(app.readCompanions().layers.length>0,'unequip leaves a short fade instead of abruptly disappearing');
-  app.advanceCompanions(.18);assert.deepEqual(app.readCompanions().layers,[]);assert.equal(app.readCompanions().tween,null);
+  assert.ok(app.readStarTrails().layers.length>0,'unequip leaves a short fade instead of abruptly disappearing');
+  app.advanceStarTrails(.18);assert.deepEqual(app.readStarTrails().layers,[]);assert.equal(app.readStarTrails().tween,null);
   assert.deepEqual(app.readHome().player,player);assert.deepEqual(app.sourcePose(),pose);
   app.advanceUi(.05);near(app.readAppearancePresentation().wardrobeTime,.78);
-  app.seedCompanions({unlocked:1});assert.equal(app.chooseCompanionForTest('moon-1'),false);assert.equal(app.readCompanions().state.selected,null);
+  app.seedStarTrails({unlocked:1});assert.equal(app.chooseStarTrailForTest('square'),false);assert.equal(app.readStarTrails().state.selected,null);
 });
 
 const physicalFields=body=>Object.fromEntries(['id','x','y','r','mass','density','vx','vy','hp','maxHp'].map(key=>[key,body[key]]));
-function distanceToOutline(point,outline){
-  return Math.min(...outline.map((a,i)=>{
-    const b=outline[(i+1)%outline.length],dx=b.x-a.x,dy=b.y-a.y;
-    const t=Math.max(0,Math.min(1,((point.x-a.x)*dx+(point.y-a.y)*dy)/(dx*dx+dy*dy||1)));
-    return Math.hypot(point.x-a.x-t*dx,point.y-a.y-t*dy);
-  }));
-}
-function assertOrbitMatchesBody(draw,g,id='star-3'){
-  const body=g.shapes.find(shape=>shape.type==='path'&&shape.alpha===1&&shape.color===app.playerInk()&&shape.points.length===193);
-  assert.ok(body,'the actual projected player body is present');
-  assert.equal(draw.contour?.length,192,'the live outline is supplied to the companion renderer');
-  draw.contour.forEach((point,i)=>{near(point.x,body.points[i].x);near(point.y,body.points[i].y);});
-  const geometry=companionGeometry(id,draw.pose,app.readCompanions().clock,{contour:draw.contour});
-  for(const satellite of geometry.satellites){
-    const gap=distanceToOutline(satellite.center,draw.contour);
-    assert.ok(Math.abs(gap-draw.pose.r*.5)<draw.pose.r*.025,`orbit gap ${gap} follows the current silhouette at radius ${draw.pose.r}`);
-  }
+function primeStarTrail(world,scene,{id='galaxy',module=app}={}){
+  module.seedStarTrails({unlocked:9,selected:id});
+  const p=world.player;world.phase='battle';
+  Object.assign(p,{x:80,y:600,vx:world.unit*40,vy:0,feedbackFreeze:0});
+  scene.updateTrails(0);
+  for(let frame=0;frame<24;frame++){p.x+=p.vx/120;scene.updateTrails(1/120);}
+  assert.ok(scene.starParticles.count>0,'the real scene emits the equipped trail at high speed');
+  return p;
 }
 
+test('star trails render between thin trails and bodies without changing physics or creating clone particles',t=>{
+  const {world,scene,g}=controlRun(),p=primeStarTrail(world,scene);
+  t.after(()=>{app.seedCircle();app.setFeedbackStrength(.6);});
+  const auxiliary=world.makeBody(80,350,p.r*.7,p.density);
+  Object.assign(auxiliary,{isPlayer:true,isAuxiliary:true,born:1,solid:true,hp:1,vx:world.unit*40,vy:0});world.auxiliaries=[auxiliary];
+  for(let frame=0;frame<12;frame++){p.x+=p.vx/120;auxiliary.x+=auxiliary.vx/120;scene.updateTrails(1/120);}
+  assert.ok(scene.cometTrails.entries.has(auxiliary),'clones still keep their ordinary thin trail');
+  assert.ok(scene.starParticles.particles.every(particle=>particle.owner===p));
+  const before=[physicalFields(p),physicalFields(auxiliary)],count=world.enemies.length,draw=scene.starParticles.draw.bind(scene.starParticles);
+  let first,last;
+  scene.starParticles.draw=(...args)=>{first=g.shapes.length;draw(...args);last=g.shapes.length;};
+  g.clear();scene.drawArena();
+  assert.ok(last>first,'the scene draws the current particle string');
+  assert.ok(first>0,'thin trail polygons are drawn first');
+  const playerIndex=g.shapes.findIndex(shape=>shape.type==='path'&&shape.alpha===1&&shape.points.length===193&&shape.color===app.playerInk());
+  assert.ok(playerIndex>=last,'the player occludes any overlapping particles');
+  assert.deepEqual([physicalFields(p),physicalFields(auxiliary)],before);assert.equal(world.enemies.length,count);
+  const particles=scene.starParticles.particles.map(({owner,...particle})=>({...particle}));
+  scene.drawArena();assert.deepEqual(scene.starParticles.particles.map(({owner,...particle})=>({...particle})),particles,'redrawing never advances or mutates particles');
+});
 
-test('v7.10 the real player renderer carries companions across all scenes while leaving bodies and auxiliary balls unchanged',t=>{
-  const calls=app.recordCompanionDraws();t.after(()=>{calls.restore();app.seedCircle();app.seedCompanions();});
-  for(const mode of ['home','endless']){
-    const g=graphicsRecorder(),{scene,active,player,pointer}=pullScene(mode,g);
-    app.seedCircle();app.seedCompanions({unlocked:9,selected:'star-3'});
-    const before=physicalFields(player),count=active.enemies?.length,aux=active.auxiliaries?.length;
-    calls.calls.length=0;scene.update(0,0);
-    assert.equal(calls.calls.length,1,mode+' renders the orbit once around its primary player');
-    const draw=calls.calls[0];near(draw.pose.x,player.x);near(draw.pose.y,player.y);near(draw.pose.r,player.r);
-    assert.ok(draw.shapes.length>0,mode+' paints companion shapes and tails');
-    assertOrbitMatchesBody(draw,g);
-    const points=draw.shapes.flatMap(shape=>shape.points||[]);
-    assert.ok(points.length>0);assert.ok(points.every(point=>Math.hypot(point.x-player.x,point.y-player.y)<player.r*1.9));
-    const start={x:player.x,y:player.y};pointer('pointerdown',start.x,start.y);pointer('pointermove',start.x+active.maxPull,start.y);
-    calls.calls.length=0;scene.update(0,0);assert.equal(calls.calls.length,1);near(calls.calls[0].pose.r,player.r);
-    assertOrbitMatchesBody(calls.calls[0],g);assert.notDeepEqual(calls.calls[0].contour,draw.contour,'full pulling updates the orbit from the visible outline');
-    assert.deepEqual(physicalFields(player),before,'orbital decorations never stretch or mutate the collision body');
-    assert.equal(active.enemies?.length,count);assert.equal(active.auxiliaries?.length,aux);pointer('pointercancel');
+test('star trail particles reset at pause, background, resizing, a new world, reward selection and unequip',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
+  t.after(()=>{Object.assign(window,{innerWidth:previous.width,innerHeight:previous.height,devicePixelRatio:previous.dpr,addEventListener:previous.add});document.hidden=false;app.seedCircle();app.setFeedbackStrength(.6);});
+  for(const reason of ['pause','background','resize','restart','reward','unequip']){
+    const {world,scene,g,pointer}=controlRun();let resize;
+    if(reason==='resize'){
+      window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+      app.mountSceneBoundary(pointer.canvas,g);
+    }
+    primeStarTrail(world,scene,{id:'moon'});
+    if(reason==='pause')clickAction('pause');
+    else if(reason==='background')document.hidden=true;
+    else if(reason==='resize'){window.innerWidth=844;window.innerHeight=390;resize();}
+    else if(reason==='restart')app.prepareNormalGame();
+    else if(reason==='reward')world.phase='choose';
+    else{app.chooseStarTrailForTest('moon');app.advanceStarTrails(.18);}
+    scene.update(0,0);
+    assert.equal(scene.starParticles.count,0,reason+' removes the old string');
+    assert.equal(scene.starParticles.free.length,24,reason+' returns every particle to the bounded pool');
+    document.hidden=false;window.innerWidth=previous.width;window.innerHeight=previous.height;window.addEventListener=previous.add;
   }
-  const {world}=controlRun();app.seedCompanions({unlocked:9,selected:'sun-3'});
-  const auxiliary=world.makeBody(80,350,world.player.r*.7,world.player.density);
-  Object.assign(auxiliary,{isPlayer:true,isAuxiliary:true,born:1,solid:true});
-  const before=physicalFields(auxiliary);calls.calls.length=0;app.drawPlayerForTest(graphicsRecorder(),auxiliary,app.playerInk());
-  assert.equal(calls.calls.length,0,'clones never acquire a second set of purely decorative companions');assert.deepEqual(physicalFields(auxiliary),before);
 });
 
-test('v7.10 detached UI companion paths track the visible outline through squash, pull and rotation',t=>{
-  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedCompanions({unlocked:9,selected:'moon-2'});
-  t.after(()=>{app.seedCompanions();app.seedCircle();});
-  const pose={x:100,y:200,r:30,squash:0,roll:0},original={...pose};
-  app.paintUiForTest(pose);const node=element('#ui-companions'),markup=node.innerHTML;
-  assert.equal(node.hidden,false);assert.match(markup,/<svg/);assert.match(markup,/<path/);
-  assert.equal(node.style.width,'120px');assert.equal(node.style.transform,'translate3d(40px,140px,0)');
-  app.paintUiForTest({...pose,x:111,y:193});
-  assert.equal(node.innerHTML,markup,'translation follows the center without changing the local outline');
-  assert.equal(node.style.transform,'translate3d(51px,133px,0)');
-  for(const changes of [{squash:.4},{roll:1.7},{visualPull:{amount:1,angle:.8}}]){
-    app.paintUiForTest({...pose,...changes});
-    if('roll' in changes)assert.equal(node.innerHTML,markup,'rotating a perfect circle leaves its outline and companion orbit unchanged');
-    else assert.notEqual(node.innerHTML,markup,'the orbit geometry follows '+Object.keys(changes)[0]);
-    assert.equal(node.style.transform,'translate3d(40px,140px,0)','the independent container must not scale or rotate the already projected path again');
+function showroomFrame(){
+  const host=element('#wardrobe-showroom'),svg=host.querySelector('svg'),mask=host.querySelector('mask'),rect=mask?.querySelector('rect');
+  const group=host.querySelectorAll('g').find(node=>node.getAttribute('mask'));
+  return {host,svg,width:Number(rect?.getAttribute('width')||0),alpha:Number(group?.getAttribute('opacity')||0),visible:!host.hidden&&svg?.getAttribute('visibility')==='visible'};
+}
+function samePose(a,b){for(const key of ['x','y','r','squash','lookX','lookY'])near(a?.[key]||0,b?.[key]||0);const angle=(a?.roll||0)-(b?.roll||0);near(Math.sin(angle),0);near(Math.cos(angle),1);}
+function enterTrailGallery(module=app,{reduced=false,commit=()=>{}}={}){
+  module.navigateWardrobeForTest('main','star-trail',commit);
+  module.advanceUi(reduced?.16:.28);module.advanceUi(reduced?.16:.26);
+  assert.equal(module.readShowcaseForTest().state?.phase,'idle');
+}
+
+test('the moving trail showroom is confined to the star-trail gallery while other wardrobe pages keep their bounce',t=>{
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedStarTrails({unlocked:9,selected:'galaxy'});
+  const restore=app.bindWardrobeControls({update(){},back:()=>false,cancelInteraction(){},refresh(){}});t.after(()=>{restore();app.seedCircle();});
+  const homePose={x:100,y:200,r:30};app.paintUiForTest(homePose);
+  assert.equal(element('#ui-star-trails').hidden,true);assert.equal(element('#wardrobe-showroom').hidden,true);
+  const main=app.seedWardrobePresentation(.4);app.advanceUi(.05);
+  assert.notDeepEqual(app.sourcePose(),main,'the main page keeps its original bounce');
+  assert.equal(element('#wardrobe-showroom').hidden,true);assert.equal(element('#ui-star-trails').hidden,true);
+  let appearanceCommits=0;app.navigateWardrobeForTest('main','appearance',()=>appearanceCommits++);
+  assert.equal(appearanceCommits,1);assert.equal(app.readShowcaseForTest().state,null);app.advanceUi(.05);
+  assert.equal(element('#wardrobe-showroom').hidden,true,'the appearance page has no decorative trail');
+  app.navigateWardrobeForTest('appearance','main',()=>{});enterTrailGallery();
+  const fixed=app.sourcePose(),physical={...app.readHome().player};
+  for(let i=0;i<30;i++)app.advanceUi(1/60);
+  samePose(app.sourcePose(),fixed);assert.deepEqual(app.readHome().player,physical);assert.equal(element('#result-shadow').hidden,true);
+  assert.equal(showroomFrame().visible,true);assert.ok(showroomFrame().width>fixed.r*3);
+  assert.equal(element('#ui-star-trails').hidden,true,'the acquisition overlay does not leak into the gallery');
+  const paths=element('#wardrobe-showroom').querySelectorAll('path').filter(path=>path.getAttribute('display')!=='none');
+  assert.ok(paths.length>0,'the renderer displays the real thin trail and particle paths');
+});
+
+test('star-trail gallery entry and exit preserve the visible pose and complete drawing or retraction before the next movement',t=>{
+  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedStarTrails({unlocked:9,selected:'galaxy'});app.seedWardrobePresentation(.4);
+  const restore=app.bindWardrobeControls({update(){},back:()=>false,cancelInteraction(){},refresh(){}});t.after(()=>{restore();app.seedCircle();});
+  app.advanceUi(0);const initial=app.readShowcaseForTest().lastUiPose,commits=[];
+  app.navigateWardrobeForTest('main','star-trail',()=>commits.push('star-trail'));
+  assert.deepEqual(commits,['star-trail']);assert.equal(app.readShowcaseForTest().state.phase,'approach');
+  assert.equal(app.readRestart().transfer.target,'wardrobe-start');samePose(app.readRestart().transfer.from,initial);
+  clickAction('close');for(const fn of listeners.get('keydown'))fn({key:'Escape',preventDefault(){}});
+  assert.equal(app.readShowcaseForTest().state.phase,'approach');assert.equal(app.readRestart().transfer.target,'wardrobe-start');
+  app.advanceUi(.28);assert.equal(app.readRestart().transfer,null);assert.equal(app.readShowcaseForTest().state.phase,'draw');
+  samePose(app.readShowcaseForTest().lastUiPose,app.readShowcaseForTest().start);
+  assert.equal(showroomFrame().visible,false,'the trail has zero length when the ball first arrives at its start');
+  app.advanceUi(.13);const middle=showroomFrame(),middlePose=app.readShowcaseForTest().lastUiPose;
+  assert.ok(middle.visible&&middle.width>0);assert.ok(middlePose.x>app.readShowcaseForTest().start.x&&middlePose.x<app.readShowcaseForTest().end.x);
+  clickAction('close');assert.equal(app.readShowcaseForTest().state.phase,'draw','repeated close input cannot cut off drawing');
+  app.advanceUi(.13);assert.equal(app.readShowcaseForTest().state.phase,'idle');
+  const idle=app.readShowcaseForTest().lastUiPose,full=showroomFrame();samePose(idle,app.readShowcaseForTest().end);assert.ok(full.width>middle.width);
+  app.navigateWardrobeForTest('star-trail','main',()=>commits.push('main'));
+  assert.equal(app.readShowcaseForTest().state.phase,'retract');assert.equal(app.readRestart().transfer,null);assert.deepEqual(commits,['star-trail']);
+  app.advanceUi(.09);const shrinking=showroomFrame();samePose(app.readShowcaseForTest().lastUiPose,idle);
+  assert.ok(shrinking.width>0&&shrinking.width<full.width);assert.ok(shrinking.alpha>0&&shrinking.alpha<full.alpha);
+  assert.deepEqual(commits,['star-trail'],'content cannot switch while the old trail is still retracting');
+  app.advanceUi(.09);assert.deepEqual(commits,['star-trail','main']);assert.equal(showroomFrame().visible,false);
+  assert.equal(app.readRestart().transfer.target,'wardrobe');samePose(app.readRestart().transfer.from,idle);
+  const departure=app.readShowcaseForTest().lastUiPose;samePose(departure,idle);
+  app.advanceUi(.16);assert.equal(app.readRestart().transfer.target,'wardrobe');
+  const returning=app.readShowcaseForTest().lastUiPose;
+  assert.deepEqual(app.sourcePose(),returning,'a pose query midway through the return matches the currently visible ball');
+  assert.notDeepEqual(returning,departure,'the assertion samples a moving return frame rather than an endpoint');
+  app.advanceUi(.16);assert.equal(app.readRestart().transfer,null);assert.equal(app.readShowcaseForTest().state,null);
+  const returned=app.readShowcaseForTest().lastUiPose;samePose(returned,app.sourcePose());assert.equal(element('#wardrobe-showroom').hidden,true);
+  app.advanceUi(.05);assert.notDeepEqual(app.sourcePose(),returned,'only after returning to the center does the ordinary bounce resume');
+  assert.equal(app.readStarTrails().state.selected,'galaxy');
+});
+
+test('the whole wardrobe ball stays unclipped through every showcase phase and both bounce handoffs',t=>{
+  const anchors=['#wardrobe-panel .wardrobe-preview','#wardrobe-panel .wardrobe-body','#wardrobe-ball'].map(element);
+  const previousRects=anchors.map(node=>node.getBoundingClientRect);
+  const rect=(x,y,width,height)=>({x,y,width,height,left:x,right:x+width,top:y,bottom:y+height});
+  anchors[0].getBoundingClientRect=()=>rect(75,540,240,110);
+  anchors[1].getBoundingClientRect=()=>rect(75,200,240,450);
+  anchors[2].getBoundingClientRect=()=>rect(157,558,76,76);
+  const restore=app.bindWardrobeControls({update(){},back:()=>false,cancelInteraction(){},refresh(){}});
+  t.after(()=>{anchors.forEach((node,i)=>{node.getBoundingClientRect=previousRects[i];});restore();app.seedCircle();});
+  for(const custom of [false,true]){
+    app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedStarTrails({unlocked:9,selected:'galaxy'});
+    const photos=custom?app.recordCompositePhotos(true):null;
+    try{
+      app.seedWardrobePresentation(.27);app.advanceUi(0);
+      const bounced={...app.readShowcaseForTest().lastUiPose};
+      assert.ok(bounced.squash>0,'the handoff starts with nonzero bounce deformation');
+      const assertWholeBall=label=>{
+        assert.equal(element('#ui-ball').hidden,false,label);
+        assert.equal(element('#ui-ball').style.clipPath,'none',`${label}: the shared ball must not inherit the panel crop`);
+        if(photos)assert.equal(photos.main.at(-1)?.options.clip,null,`${label}: the custom-photo surface has the same uncropped boundary`);
+      };
+      assertWholeBall('mid-bounce');
+      app.navigateWardrobeForTest('main','star-trail',()=>{});
+      samePose(app.readShowcaseForTest().lastUiPose,bounced);
+      samePose(app.readRestart().transfer.from,bounced);
+      near(app.readRestart().transfer.from.visualSquash,bounced.squash);
+      app.advanceUi(0);samePose(app.readShowcaseForTest().lastUiPose,bounced);
+      assertWholeBall('zero-time approach handoff');
+      const advanceFlight=label=>{
+        let frame=0;
+        while(app.readRestart().transfer){
+          const move=app.readRestart().transfer;
+          app.advanceUi(Math.min(.02,move.duration-move.elapsed));assertWholeBall(`${label} ${frame++}`);
+        }
+      };
+      advanceFlight('approach');
+      // The leftmost position is intentionally close to the preview edge;
+      // clipping the shared ball to that rectangle used to remove its left side.
+      const start=app.readShowcaseForTest().lastUiPose;
+      assert.ok(start.x-start.r<anchors[0].getBoundingClientRect().left);
+      while(app.readShowcaseForTest().state.phase==='draw'){
+        app.advanceUi(Math.min(.02,.26-app.readShowcaseForTest().state.elapsed));assertWholeBall('drawing');
+      }
+      assert.equal(app.readShowcaseForTest().state.phase,'idle');
+      const fixed={...app.readShowcaseForTest().lastUiPose};
+      app.navigateWardrobeForTest('star-trail','main',()=>{});
+      while(app.readShowcaseForTest().state?.phase==='retract'){
+        app.advanceUi(Math.min(.02,.18-app.readShowcaseForTest().state.elapsed));assertWholeBall('retract');samePose(app.readShowcaseForTest().lastUiPose,fixed);
+      }
+      assert.equal(app.readRestart().transfer.target,'wardrobe');
+      advanceFlight('return');
+      assert.equal(app.readRestart().transfer,null);
+      const landed={...app.readShowcaseForTest().lastUiPose};samePose(landed,app.sourcePose());near(landed.squash,0);
+      app.advanceUi(.27);assertWholeBall('resumed bounce');
+      samePose(app.readShowcaseForTest().lastUiPose,bounced);
+      assert.equal(element('#wardrobe-showroom').hidden,true);
+    }finally{photos?.restore();}
   }
-  assert.deepEqual(pose,original);
-  app.advanceCompanions(.1);app.paintUiForTest(pose);assert.notEqual(node.innerHTML,markup,'the shared orbit clock keeps the companions moving');
-  app.chooseCompanionForTest('moon-2');app.advanceCompanions(.18);app.paintUiForTest(pose);assert.equal(node.hidden,true);
 });
 
-test('v7.10 companion drawing stays below the crown in both Canvas celebration and detached DOM presentation',async t=>{
-  const recording=app.recordCompanionDraws();t.after(()=>{recording.restore();app.seedCompanions();app.seedCircle();});
-  const {g,world,scene}=bossScene();app.seedCircle();app.seedCompanions({unlocked:9,selected:'star-3'});
-  advanceToBoss(world,scene);defeatBoss(world,scene);advanceScene(scene,1.6);recording.calls.length=0;scene.update(0,0);
-  assert.equal(world.phase,'boss-celebrate');assert.equal(recording.calls.length,1);
-  const companionPaths=recording.calls[0].shapes;assert.ok(companionPaths.length>0);
-  const crown=g.shapes.find(shape=>shape.type==='path'&&shape.color===app.playerInk()&&shape.points.length===crownOutline().length&&outlineBounds(shape).cy<world.player.y-world.player.r*.7);
-  assert.ok(crown,'the real celebration crown is visible');
-  const crownIndex=g.shapes.indexOf(crown);
-  assert.ok(companionPaths.every(shape=>g.shapes.indexOf(shape)<crownIndex),'later crown fill occludes overlapping companion shapes and tails');
-  const css=await readFile(new URL('../dist/style.css',import.meta.url),'utf8'),html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
-  const zIndex=id=>Number(/z-index\s*:\s*(\d+)/.exec(new RegExp('#'+id+'\\s*\\{([^}]+)\\}').exec(css)[1])[1]);
-  assert.equal(zIndex('ui-companions'),39);assert.equal(zIndex('ui-ball'),40);
-  assert.match(html,/<div id="ui-companions"[^>]*><\/div>\s*<div id="ui-ball"/,'companions remain a separate sibling below the ball/crown instead of inheriting its transforms');
+test('star-trail gallery transition freezes in background and resizing preserves its current phase',t=>{
+  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};let resize;
+  window.innerWidth=390;window.innerHeight=844;window.devicePixelRatio=1;
+  window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
+  const {scene,g}=controlRun(),pointer=inputCanvas();app.mountSceneBoundary(pointer.canvas,g);app.seedCircle();app.seedStarTrails({unlocked:9,selected:'moon'});app.seedWardrobePresentation();
+  const restore=app.bindWardrobeControls({update(){},cancelInteraction(){},refresh(){}});
+  t.after(()=>{restore();Object.assign(window,{innerWidth:previous.width,innerHeight:previous.height,devicePixelRatio:previous.dpr,addEventListener:previous.add});document.hidden=false;app.seedCircle();});
+  app.navigateWardrobeForTest('main','star-trail',()=>{});app.advanceUi(.28);app.advanceUi(.1);
+  const phase=app.readShowcaseForTest().state.phase,elapsed=app.readShowcaseForTest().state.elapsed,pose={...app.readShowcaseForTest().lastUiPose};
+  document.hidden=true;app.advanceUi(2);assert.equal(app.readShowcaseForTest().state.phase,phase);near(app.readShowcaseForTest().state.elapsed,elapsed);samePose(app.readShowcaseForTest().lastUiPose,pose);
+  document.hidden=false;window.innerWidth=844;window.innerHeight=390;resize();app.advanceUi(0);
+  assert.equal(app.readShowcaseForTest().state.phase,phase);near(app.readShowcaseForTest().state.elapsed,elapsed);
+  assert.ok(['x','y','r'].every(key=>Number.isFinite(app.sourcePose()[key])));
+  app.advanceUi(.16);assert.equal(app.readShowcaseForTest().state.phase,'idle');
+  const box=element('#wardrobe-panel .wardrobe-preview').getBoundingClientRect(),fixed=app.sourcePose();
+  assert.ok(fixed.x-fixed.r>=box.left&&fixed.x+fixed.r<=box.right);assert.ok(fixed.y-fixed.r>=box.top&&fixed.y+fixed.r<=box.bottom);
 });
 
-
-test('v7.10 an unskinned UI ball gives the orbit its actual post-rotation CSS-squashed outline',t=>{
-  app.seedRenderer(graphicsRecorder());app.seedCircle();app.seedCompanions({unlocked:9,selected:'moon-2'});
-  t.after(()=>{app.seedCompanions();app.seedCircle();});
-  const pose={x:100,y:200,r:30,squash:.2,roll:0,visualPull:{amount:.7,angle:.8}};
-  app.paintUiForTest(pose);
-  const transform=element('#ui-ball').style.transform,scale=/scale\(([^,]+),([^)]+)\)/.exec(transform);
-  assert.ok(scale,'this fixture exercises the ordinary SVG plus CSS squash route');
-  const [sx,sy]=scale.slice(1).map(Number),offset=pose.r*2;
-  const contour=svgPolyline(uiNode('.ui-pull-outline')).slice(0,192).map(point=>({
-    x:offset+(point.x-50)*pose.r/50*sx,y:offset+(point.y-50)*pose.r/50*sy,
-  }));
-  const expected=companionSvg('moon-2',{x:offset,y:offset,r:pose.r},app.readCompanions().clock,{color:app.playerInk(),alpha:1,contour});
-  const numbers=markup=>[...markup.matchAll(/ d="([^"]+)"/g)].flatMap(match=>match[1].match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi).map(Number));
-  const actualPoints=numbers(element('#ui-companions').innerHTML),expectedPoints=numbers(expected);
-  assert.ok(actualPoints.length>0);assert.equal(actualPoints.length,expectedPoints.length);
-  actualPoints.forEach((coordinate,index)=>assert.ok(Math.abs(coordinate-expectedPoints[index])<.03,'orbit SVG matches the actual screen-space body outline'));
+test('reduced-motion gallery uses the same ordered phases and crop return does not replay the showcase entry',async()=>{
+  await withReloadedEntry({juice:.6},true,fresh=>{
+    fresh.seedRenderer(graphicsRecorder());fresh.seedCircle();fresh.seedStarTrails({unlocked:9,selected:'galaxy'});fresh.seedWardrobePresentation();
+    let cropping=false;const restore=fresh.bindWardrobeControls({update(){},refresh(){},cancelInteraction(){},isCropping:()=>cropping});
+    try{
+      let commits=0;enterTrailGallery(fresh,{reduced:true,commit:()=>commits++});assert.equal(commits,1);
+      const fixed=fresh.sourcePose(),markup=element('#wardrobe-showroom').innerHTML;
+      fresh.advanceUi(.1);samePose(fresh.sourcePose(),fixed);assert.equal(element('#wardrobe-showroom').innerHTML,markup,'reduced-motion preview remains still');
+      cropping=true;fresh.advanceUi(.05);assert.equal(element('#wardrobe-showroom').hidden,true);
+      cropping=false;fresh.advanceUi(.05);assert.equal(fresh.readShowcaseForTest().state.phase,'idle');samePose(fresh.sourcePose(),fixed);assert.equal(showroomFrame().visible,true);
+      fresh.navigateWardrobeForTest('star-trail','main',()=>commits++);fresh.advanceUi(.06);assert.equal(commits,1);samePose(fresh.sourcePose(),fixed);
+      fresh.advanceUi(.06);assert.equal(commits,2);assert.equal(fresh.readRestart().transfer.target,'wardrobe');
+      fresh.advanceUi(.22);assert.equal(fresh.readRestart().transfer,null);assert.equal(fresh.readShowcaseForTest().state,null);assert.equal(element('#wardrobe-showroom').hidden,true);
+    }finally{restore();fresh.seedCircle();}
+  });
 });
-
 
 test('v7.11 every appearance uses score ink for aim, stage dots and Boss awards on both background themes',async()=>{
   const css=await readFile(new URL('../dist/style.css',import.meta.url),'utf8');
@@ -4144,48 +4341,6 @@ test('v7.11 custom photo skins retain contrast-safe comets and aim feedback even
 });
 
 
-test('v7.11 live companions keep their actual world displacement history rather than redrawing an orbit arc around the current player',t=>{
-  const recording=app.recordCompanionDraws();t.after(()=>{recording.restore();app.seedCircle();app.seedCompanions();});
-  const {world,scene,g}=controlRun(),p=world.player;
-  app.seedCircle();app.seedCompanions({selected:'sun-1',unlocked:9});
-  Object.assign(p,{x:180,y:600,vx:0,vy:-world.unit*35,feedbackFreeze:0});scene.update(0,0);
-  const first=app.readCompanionHistory()[0][1].points[0];
-  advanceScene(scene,.2);
-  const history=app.readCompanionHistory();assert.deepEqual(history.map(([key])=>key),['sun-1:0']);
-  const points=history[0][1].points,last=points.at(-1),draw=recording.calls.at(-1);
-  assert.ok(points.length>10);assert.deepEqual(points[0],first,'moving the player cannot translate its already recorded satellite positions');
-  assert.ok(first.y-last.y>50,'the sampled path includes the real center translation');
-  const orbit=companionGeometry('sun-1',draw.pose,app.readCompanions().clock,{contour:draw.contour}).satellites[0];
-  near(last.x,orbit.center.x);near(last.y,orbit.center.y);
-  const ribbons=draw.shapes.filter(shape=>shape.type==='path'&&shape.alpha>0&&shape.alpha<=.26);
-  assert.ok(ribbons.length>0);assert.ok(ribbons.flatMap(shape=>shape.points).every(point=>point.y>orbit.center.y),'an upward-moving player leaves the companion trail below the body, not on the old counterclockwise arc');
-  const before=physicalFields(p),bodyCount=world.auxiliaries.length;
-  g.clear();scene.drawArena();assert.deepEqual(physicalFields(p),before);assert.equal(world.auxiliaries.length,bodyCount);
-});
-
-test('v7.11 companion histories reset at pause, background, resizing, a new world and final unequip without connecting unrelated positions',t=>{
-  const previous={width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,add:window.addEventListener};
-  t.after(()=>{window.innerWidth=previous.width;window.innerHeight=previous.height;window.devicePixelRatio=previous.dpr;window.addEventListener=previous.add;document.hidden=false;app.seedCircle();app.seedCompanions();});
-  for(const reason of ['pause','background','resize','restart','unequip']){
-    const {world,scene,g,pointer}=controlRun(),p=world.player;let resize;
-    if(reason==='resize'){
-      window.addEventListener=(type,handler)=>{if(type==='resize')resize=handler;else previous.add(type,handler);};
-      app.mountSceneBoundary(pointer.canvas,g);
-    }
-    app.seedCompanions({selected:'moon-2',unlocked:9});Object.assign(p,{x:100,y:600,vx:world.unit*30,vy:0});
-    advanceScene(scene,.1);assert.equal(app.readCompanionHistory().length,2);assert.ok(app.readCompanionHistory().every(([,entry])=>entry.points.length>3));
-    if(reason==='pause')clickAction('pause');
-    else if(reason==='background')document.hidden=true;
-    else if(reason==='resize'){window.innerWidth=844;window.innerHeight=390;resize();}
-    else if(reason==='restart')app.prepareNormalGame();
-    else{app.chooseCompanionForTest('moon-2');app.advanceCompanions(.18);}
-    scene.update(0,0);
-    assert.ok(app.readCompanionHistory().every(([,entry])=>entry.points.length<=1),reason+' discards the previous path before painting again');
-    if(['pause','background','unequip'].includes(reason))assert.equal(app.readCompanionHistory().length,0);
-    document.hidden=false;window.innerWidth=previous.width;window.innerHeight=previous.height;window.addEventListener=previous.add;
-  }
-});
-
 test('v7.11 Big Eye clone opacity multiplies the body and pupil through ordinary and fading renders',t=>{
   const g=graphicsRecorder(),{world}=controlRun();app.seedCircle();app.seedAppearanceState({selected:'big-eye',bigEyeUnlocked:true});
   t.after(()=>app.seedCircle());
@@ -4196,48 +4351,6 @@ test('v7.11 Big Eye clone opacity multiplies the body and pupil through ordinary
     assert.ok(g.shapes.every(shape=>Math.abs(shape.alpha-alpha*.6)<1e-9));
   }
 });
-
-test('v7.11.2 companion tails grow with speed only while the player comet can be active in a live arena',t=>{
-  t.after(()=>{app.seedCircle();app.seedCompanions();app.setFeedbackStrength(.6);});
-  function extent(mode,speed,phase='battle'){
-    const g=graphicsRecorder(),state=mode==='home'?app.seedRenderer(g):app.seedRenderer(g,390,844,true);
-    const player=(state.world||state.home).player,unit=state.world?.unit||player.r;
-    if(state.world)state.world.phase=phase;
-    app.seedCircle();app.seedCompanions({selected:'sun-1',unlocked:9});app.setFeedbackStrength(1);
-    Object.assign(player,{x:100,y:400,vx:unit*speed,vy:0,squash:0});
-    for(let frame=0;frame<24;frame++){
-      player.x+=4;app.advanceCompanions(1/60);g.clear();app.drawPlayerForTest(g,player,app.playerInk());
-    }
-    const history=app.readCompanionHistory()[0]?.[1];
-    const head=history||companionGeometry('sun-1',player,app.readCompanions().clock).satellites[0].center;
-    if(mode==='home')assert.equal(app.readCompanionHistory().length,0,'menus use orbit arcs without movement history');
-    const tails=g.shapes.filter(shape=>shape.type==='path'&&shape.alpha>0&&shape.alpha<=.24);
-    assert.ok(tails.length>0,mode+' draws its companion tail');
-    return Math.max(...tails.flatMap(shape=>shape.points).map(p=>Math.hypot(p.x-head.x,p.y-head.y)))/player.r;
-  }
-  const slow=extent('play',19),threshold=extent('play',20),medium=extent('play',30),fast=extent('play',40);
-  const sameLength=(a,b,label)=>assert.ok(Math.abs(a-b)<.01,label||'orbit deformation does not change the requested tail length');
-  sameLength(slow,threshold);assert.ok(medium>threshold*1.5);assert.ok(fast>medium*1.3);
-  sameLength(extent('play',80),fast);
-  sameLength(extent('home',20),extent('home',40));
-  sameLength(extent('play',40,'choose'),threshold,'upgrade selection keeps the ordinary orbit-tail length');
-});
-
-test('companion trail rollback keeps the moving home player on orbit arcs without recording translation',t=>{
-  t.after(()=>{app.seedCircle();app.seedCompanions();});
-  for(const mode of ['home']){
-    const g=graphicsRecorder(),{player}=pullScene(mode,g);
-    app.seedCircle();app.seedCompanions({selected:'moon-1',unlocked:9});
-    Object.assign(player,{x:120,y:400,vx:0,vy:0,squash:0});
-    for(let i=0;i<12;i++){
-      player.y-=3;app.advanceCompanions(1/60);g.clear();app.drawPlayerForTest(g,player,app.playerInk());
-      assert.deepEqual(app.readCompanionHistory(),[],mode+' never records non-gameplay displacement');
-    }
-    app.paintUiForTest({...player,y:player.y-3});
-    assert.deepEqual(app.readCompanionHistory(),[],'the detached UI keeps an orbit preview rather than a translated trail');
-  }
-});
-
 
 test('the actual stage route prepares the upcoming Boss early and resets preparation on restart',t=>{
   const prepared=[],scenes=[];
@@ -4459,6 +4572,15 @@ test('v10.1 pause swaps settlement and rounded leave controls without retaining 
   assert.doesNotMatch(pause,/data-action="restart"/);
   assert.ok(pause.indexOf('data-action="home"')<pause.indexOf('data-action="leave"'));
   assert.match(pause,/data-icon="leave"/);assert.match(pause,/暂离/);assert.match(pause,/结算/);
+});
+
+test('star trail particles are presentation state and never enter resumable run snapshots',t=>{
+  const prior=saved.get(RUN_SAVE_KEY),{world,scene}=controlRun();primeStarTrail(world,scene);
+  t.after(()=>{app.seedCircle();app.setFeedbackStrength(.6);prior===undefined?saved.delete(RUN_SAVE_KEY):saved.set(RUN_SAVE_KEY,prior);});
+  const before=runSimulationState(world);assert.equal(app.saveRunForTest(),true);
+  const checkpoint=app.decodedRunForTest();assert.ok(checkpoint);assert.deepEqual(runSimulationState(checkpoint.world),before);
+  const serialized=JSON.stringify(app.savedRunForTest());
+  assert.doesNotMatch(serialized,/starParticles|birthMileage|birthTrailLength|lateralPhase/,'no particle pool or transient emission phase is serialized');
 });
 
 test('v10.1 a fresh home and an already settled run never produce a resumable save',()=>{
