@@ -491,6 +491,8 @@ function fitMenuHeight(){
 }
 function resetMenuTransition(){
   menuTransition=null;$('#modal-layer').classList.remove('menu-switching');
+  $('#menu-transition-panel .close-button').style.removeProperty('--return-icon-opacity');
+  $('#menu-transition-panel .close-button').style.removeProperty('--close-icon-opacity');
   $$('.menu-panel').forEach(p=>{p.inert=false;p.style.removeProperty('opacity');});
 }
 function transitionMenu(target){
@@ -499,6 +501,8 @@ function transitionMenu(target){
   if(reducedMotion){showPanel(target);uiAnchor=target;paintUiBall(anchorPose(target));return;}
   showPanel('menu-transition');
   menuTransition={from,target,elapsed:0};
+  $('#menu-transition-panel .close-button').style.setProperty('--return-icon-opacity',from==='help'?'1':'0');
+  $('#menu-transition-panel .close-button').style.setProperty('--close-icon-opacity',from==='help'?'0':'1');
   $('#modal-layer').classList.add('menu-switching');
   for(const name of [from,target]){
     const panel=$('#'+name+'-panel');panel.inert=true;panel.style.opacity=name===from?'1':'0';
@@ -509,6 +513,11 @@ function transitionMenu(target){
 function updateMenuTransition(dt){
   if(!menuTransition)return;
   const move=menuTransition;move.elapsed+=dt;
+  // Clear the old glyph faster while preserving the incoming glyph and panel timing.
+  const iconIn=smooth(clamp((move.elapsed-.04)/.16,0,1)),iconOut=1-smooth(clamp((move.elapsed-.04)/.08,0,1));
+  const iconStyle=$('#menu-transition-panel .close-button').style;
+  iconStyle.setProperty('--return-icon-opacity',String(move.target==='help'?iconIn:iconOut));
+  iconStyle.setProperty('--close-icon-opacity',String(move.target==='help'?iconOut:iconIn));
   const duration=.12,oldPanel=$('#'+move.from+'-panel'),newPanel=$('#'+move.target+'-panel');
   if(move.elapsed<duration){oldPanel.style.opacity=1-smooth(move.elapsed/duration);return;}
   oldPanel.hidden=true;newPanel.hidden=false;

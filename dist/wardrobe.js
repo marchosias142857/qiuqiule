@@ -60,7 +60,8 @@ export async function saveAppearance(dataURL){
   }
 }
 
-const returnMarkup='<svg class="return-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v8H6m5-5-5 5 5 5"/></svg>';
+const closeMarkup='<svg class="close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg>';
+const returnMarkup='<svg class="return-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5.5v8H6m5-5-5 5 5 5"/></svg>';
 const lockMarkup='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>';
 const ease=value=>{const t=clamp(value,0,1);return t*t*(3-2*t);};
 
@@ -89,10 +90,13 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onStarTrail=(
   let page='main',transition=null,crop=null,sourceURL=null,loadGeneration=0,saving=false,restoreFocus=null,previewColor=null;
   let pendingNavigation=false,navigationGeneration=0;
   const pointers=new Map(),appearanceButtons=new Map(),starTrailButtons=new Map();
+  // Keep both centered SVGs mounted; only their opacity changes with navigation.
+  backButton.innerHTML=closeMarkup+returnMarkup;
   const setPage=target=>{
     page=target;
     for(const [name,view] of Object.entries(views))view.hidden=name!==page;
-    backButton.innerHTML=page==='main'?'×':returnMarkup;
+    backButton.style.setProperty('--return-icon-opacity',page==='main'?'0':'1');
+    backButton.style.setProperty('--close-icon-opacity',page==='main'?'1':'0');
     backButton.setAttribute('aria-label',page==='main'?'关闭换装':'返回换装');
     panel.setAttribute('data-wardrobe-view',page);
   };
@@ -117,6 +121,9 @@ export function initWardrobe({getState,onImage,onAppearance=()=>{},onStarTrail=(
     if(move.elapsed>=.12&&!move.swapped){
       setPage(move.target);views[move.target].scrollTop=0;move.swapped=true;
     }
+    const iconIn=ease((move.elapsed-.04)/.16),iconOut=1-ease((move.elapsed-.04)/.08);
+    backButton.style.setProperty('--return-icon-opacity',String(move.target==='main'?iconOut:iconIn));
+    backButton.style.setProperty('--close-icon-opacity',String(move.target==='main'?iconIn:iconOut));
     content.style.opacity=String(move.elapsed<.12?1-ease(move.elapsed/.12):ease((move.elapsed-.12)/.12));
     if(move.elapsed<.24)return;
     transition=null;content.inert=false;content.style.opacity='1';panel.classList.remove('wardrobe-switching');

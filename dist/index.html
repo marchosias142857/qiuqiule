@@ -55,7 +55,7 @@
   <section id="hud" class="screen hud" hidden aria-label="游戏状态">
     <div class="hud-top">
       <strong id="score" aria-label="得分">0000</strong>
-      <button class="icon-button pause-button" data-action="pause" aria-label="暂停游戏"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg></button>
+      <button class="icon-button pause-button" data-action="pause" aria-label="暂停游戏"><svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg></button>
     </div>
     <div id="stage-progress" hidden aria-label="阶段击杀进度"></div>
     <span id="stage-caption" hidden></span>
@@ -73,11 +73,11 @@
       </div>
     </section>
     <section id="run-upgrades-panel" class="panel run-upgrades-panel" hidden role="dialog" aria-modal="true" aria-labelledby="run-upgrades-title">
-      <div class="run-upgrades-heading"><span id="run-upgrades-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="run-upgrades-title">本局强化</h2><button class="close-button" data-action="close" aria-label="返回暂停菜单"><svg class="return-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v8H6m5-5-5 5 5 5"/></svg></button></div>
+      <div class="run-upgrades-heading"><span id="run-upgrades-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="run-upgrades-title">本局强化</h2><button class="close-button" data-action="close" aria-label="关闭本局强化"><svg class="close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></div>
       <div id="run-upgrades-body" class="run-upgrades-body"><ul id="run-upgrades-list" class="run-upgrades-list"></ul><p id="run-upgrades-empty" class="run-upgrades-empty">这一局还没有获得强化。<br>撞中奖励球后，就能在这里查看。</p></div>
     </section>
     <section id="settings-panel" class="panel settings-panel menu-panel" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <div class="panel-heading settings-heading"><span id="settings-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="settings-title">你的球，你的定义</h2><button class="close-button" data-action="close" aria-label="关闭设置">×</button></div>
+      <div class="panel-heading settings-heading"><span id="settings-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="settings-title">你的球，你的定义</h2><button class="close-button" data-action="close" aria-label="关闭设置"><svg class="close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></div>
       <div class="menu-body"><div class="menu-content">
       <div class="palette-list" aria-label="配色方案">
         <button class="palette active" data-palette="classic" aria-label="奶油汽水配色"><span><i style="background:#252720"></i><i style="background:#e88c72"></i><i style="background:#f4f3eb"></i></span><b>奶油汽水</b></button>
@@ -99,7 +99,7 @@
       </div></div>
     </section>
     <section id="wardrobe-panel" class="panel wardrobe-panel" hidden role="dialog" aria-modal="true" aria-labelledby="wardrobe-title">
-      <div class="panel-heading wardrobe-heading"><h2 id="wardrobe-title">你的球，你的风格</h2><button id="wardrobe-back" class="close-button" data-action="close" aria-label="关闭换装">×</button></div>
+      <div class="panel-heading wardrobe-heading"><h2 id="wardrobe-title">你的球，你的风格</h2><button id="wardrobe-back" class="close-button navigation-icon-swap" data-action="close" aria-label="关闭换装"><svg class="close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></div>
       <div class="wardrobe-body">
         <div id="wardrobe-content" class="wardrobe-content">
           <div id="wardrobe-main" class="wardrobe-main">
@@ -114,10 +114,10 @@
       <input id="appearance-file" type="file" accept="image/*" hidden>
     </section>
     <section id="menu-transition-panel" class="panel menu-panel" hidden role="dialog" aria-modal="true" aria-label="切换菜单">
-      <div class="panel-heading settings-heading"><span id="menu-transition-ball" class="ball-anchor" aria-hidden="true"></span><span class="menu-title-space" aria-hidden="true"></span><button class="close-button" data-action="close" aria-label="返回设置">×</button></div>
+      <div class="panel-heading settings-heading"><span id="menu-transition-ball" class="ball-anchor" aria-hidden="true"></span><span class="menu-title-space" aria-hidden="true"></span><button class="close-button navigation-icon-swap" data-action="close" aria-label="返回设置"><svg class="close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg><svg class="return-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5.5v8H6m5-5-5 5 5 5"/></svg></button></div>
     </section>
     <section id="help-panel" class="panel help-panel menu-panel" hidden role="dialog" aria-modal="true" aria-labelledby="help-title">
-      <div class="panel-heading settings-heading"><span id="help-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="help-title">弹出点名堂</h2><button class="close-button" data-action="close" aria-label="返回设置"><svg class="return-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v8H6m5-5-5 5 5 5"/></svg></button></div>
+      <div class="panel-heading settings-heading"><span id="help-ball" class="ball-anchor" aria-hidden="true"></span><h2 id="help-title">弹出点名堂</h2><button class="close-button" data-action="close" aria-label="返回设置"><svg class="return-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5.5v8H6m5-5-5 5 5 5"/></svg></button></div>
       <div class="menu-body">
         <p class="help-intro">弹射小球，击碎敌球，挑战更高阶段，别让场地被填满！</p>
         <ol class="help-steps">
@@ -176,7 +176,7 @@
   <div id="control-transfers" aria-hidden="true"></div>
   <div id="appearance-cropper" class="appearance-cropper" hidden>
     <section class="crop-dialog" role="dialog" aria-modal="true" aria-labelledby="crop-title">
-      <div class="panel-heading"><h2 id="crop-title">调整图片</h2><button id="crop-cancel" class="close-button" aria-label="取消图片裁剪">×</button></div>
+      <div class="panel-heading"><h2 id="crop-title">调整图片</h2><button id="crop-cancel" class="close-button" aria-label="取消图片裁剪"><svg class="close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></div>
       <div class="crop-stage"><canvas id="crop-canvas" width="1" height="1" aria-label="拖动图片调整裁剪位置，也可双指缩放"></canvas><div class="crop-grid" aria-hidden="true"></div></div>
       <div class="crop-zoom-row"><span>缩放</span><input id="crop-zoom" type="range" min="1" max="4" step="0.01" value="1" aria-label="图片缩放"></div>
       <p class="crop-hint">拖动调整位置 · 双指缩放</p>

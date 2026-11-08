@@ -13,7 +13,8 @@ function wardrobe(t,initial,saveImage,onNavigate){
   const node=id=>{
     if(nodes.has(id))return nodes.get(id);
     const listeners=new Map(),attributes=new Map(),classes=new Set();let identity=id;
-    const result={hidden:false,disabled:false,inert:false,textContent:'',innerHTML:'',style:{},children:[],scrollTop:0,
+    const style=Object.defineProperty({},'setProperty',{value(name,value){this[name]=value;}});
+    const result={hidden:false,disabled:false,inert:false,textContent:'',innerHTML:'',style,children:[],scrollTop:0,
       classList:{add(...values){values.forEach(value=>classes.add(value));},remove(...values){values.forEach(value=>classes.delete(value));},contains:value=>classes.has(value)},
       get id(){return identity;},set id(value){identity=value;nodes.set(value,result);},
       addEventListener(type,handler){const entries=listeners.get(type)||[];entries.push(handler);listeners.set(type,entries);},
@@ -62,7 +63,7 @@ test('gallery fades only content and keeps the same header and preview nodes mou
   assert.deepEqual(preview.style,{});assert.deepEqual(header.style,{});
   assert.equal(view.ui.back(),true);view.ui.update(.24);
   assert.equal(view.node('wardrobe-panel').getAttribute('data-wardrobe-view'),'main');
-  assert.equal(view.node('wardrobe-back').innerHTML,'×');assert.equal(view.ui.back(),false);
+  assert.match(view.node('wardrobe-back').innerHTML,/<svg class="close-icon"/);assert.equal(view.ui.back(),false);
 });
 
 test('rapid navigation or selection during a fade cannot change the appearance or lose the return route',t=>{

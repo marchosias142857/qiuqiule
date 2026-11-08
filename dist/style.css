@@ -88,6 +88,11 @@
 .settings-heading h2{font-size:clamp(18px,5vw,22px);line-height:1.4;margin:0;flex:1;letter-spacing:-.8px}
 .settings-heading .ball-anchor{width:38px;height:38px}
 .settings-heading .close-button{align-self:center}
+.close-button,.pause-button{position:relative}
+.close-icon,.return-icon,.pause-icon{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none}
+.close-icon{width:16px;height:16px;stroke-width:2.4}
+.navigation-icon-swap .close-icon{opacity:var(--close-icon-opacity,1)}
+.navigation-icon-swap .return-icon{opacity:var(--return-icon-opacity,0)}
 #pause-panel{width:min(510px,calc(100vw - 40px));padding:34px;display:grid;grid-template-columns:1fr auto;align-items:center;gap:30px;box-shadow:none}
 #pause-ball{width:64px;height:64px;justify-self:center;position:relative;left:8px}
 .pause-actions{display:grid;grid-template-columns:repeat(2,68px);gap:20px}
@@ -173,7 +178,7 @@ body{position:fixed;inset:0;transition:color .3s}
 .wardrobe-card .appearance-question{fill:var(--ink);stroke:none;font:29px GameSans,sans-serif}
 .wardrobe-card-lock{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px;border-radius:15px;color:#fff;background:rgba(101,105,100,.76);font-size:clamp(10px,2.5vw,12px);line-height:1.35;text-align:center;padding:6px;pointer-events:none}
 .wardrobe-card-lock svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
-.return-icon{display:block;width:20px;height:20px;margin:auto;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.return-icon{display:block;width:20px;height:20px;margin:0;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .wardrobe-row{height:68px;min-height:68px;display:flex;justify-content:space-between;align-items:center;gap:14px;border-bottom:1px solid var(--line);font-size:13px}
 .wardrobe-row>span{flex-shrink:0}
 .wardrobe-value{display:flex;justify-content:flex-end;align-items:center;min-width:42px;gap:8px}
@@ -217,7 +222,6 @@ h3,strong,b{font-weight:400}
 .run-upgrades-heading .ball-anchor{width:42px;height:42px}
 #run-upgrades-panel h2{font-size:22px;line-height:1.4;letter-spacing:-.6px;margin:0;flex:1}
 .run-upgrades-heading .close-button{display:grid;place-items:center;width:36px;height:36px}
-.run-upgrades-heading .return-icon{width:19px;height:19px;stroke-width:1.7}
 .run-upgrades-body{overflow-y:auto;min-height:0;flex:1;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:thin}
 .run-upgrades-list{list-style:none;padding:0 0 18px;margin:0}
 .run-upgrade-entry{display:flex;gap:13px;padding:18px 0;border-bottom:1px solid var(--line)}
