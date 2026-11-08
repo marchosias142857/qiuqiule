@@ -100,9 +100,9 @@
 @media(max-width:420px){#pause-panel{padding:28px 22px;gap:19px}.pause-actions{grid-template-columns:repeat(2,58px);gap:17px}.function-ball{width:58px;height:58px}#pause-ball{width:55px;height:55px}.settings-heading .ball-anchor{width:34px;height:34px}.settings-heading{gap:8px}}
 @media(max-height:520px) and (orientation:landscape){#pause-panel{padding:24px 34px}.pause-actions{gap:15px}.settings-heading h2{font-size:21px}}
 
-/* Result controls fade with this panel on voluntary settlement; defeat keeps its transfers. */
+/* All result entries share the arena renderer's fade, including both controls. */
 .modal-layer:has(#over-panel:not([hidden])){background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
-#over-panel{width:min(610px,calc(100vw - 40px));padding:35px 38px 38px;overflow:visible;background:transparent;border:0;box-shadow:none;animation:menu-fade .3s ease-out}
+#over-panel{width:min(610px,calc(100vw - 40px));padding:35px 38px 38px;overflow:visible;background:transparent;border:0;box-shadow:none;animation:none}
 #over-panel .result-score{text-align:center;gap:11px;padding:0 0 62px}
 #final-score{font-size:clamp(58px,12vw,86px)}
 .result-balls{display:grid;grid-template-columns:1fr auto;align-items:center;gap:42px;min-height:112px}

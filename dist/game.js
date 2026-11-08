@@ -780,15 +780,12 @@ function presentResult(from,fromPause,sources,duration=.4,view=null){
   const peak=$('#result-peak'),records=$('#result-records');
   if(peak){peak.hidden=false;peak.innerHTML=`<span>最大连击 <b>${combo}</b></span><span>到达阶段 <b>${stage}</b></span>`;}
   if(records){records.hidden=feedbackDemo;records.textContent=feedbackDemo?'':`历史最佳${best}`;}
-  result={clock:0,bounceTime:0,crownAge:0,maxCombo:combo,maxStage:stage,bossKills:Math.max(0,world.bossKills||0),sceneBodies:view,sourceIds:fromPause?[]:sources.map(b=>b.id)};
-  $('#hud').hidden=true;showPanel('over');$('.result-actions').classList.toggle('arriving',!fromPause);movePlayer(from,'over',duration);
-  // Voluntary settlement reveals the real controls with the panel's own fade.
-  if(fromPause)return;
-  flyControls(['restart','home'].map((id,i)=>({
-    from:sources[i]||from,to:()=>controlPose(id),icon:id,
-    fromColor:settings.enemy,
-    toColor:i?'#91b8c7':'#e88c72',appear:true,persist:false
-  })),duration,()=>$('.result-actions').classList.remove('arriving'));
+  result={clock:0,fadeStartedAt:performance.now(),bounceTime:0,crownAge:0,maxCombo:combo,maxStage:stage,bossKills:Math.max(0,world.bossKills||0),sceneBodies:view,sourceIds:[]};
+  // Real result controls share the panel fade in every entry path. Arena
+  // enemies remain in place and fade out together; none becomes a button.
+  controlFlight=null;$('#control-transfers').replaceChildren();$('.result-actions').classList.remove('arriving');
+  $('#over-panel').style.opacity='0';
+  $('#hud').hidden=true;showPanel('over');movePlayer(from,'over',duration);
 }
 
 function unlockAnchor(){
@@ -1905,6 +1902,11 @@ function boot(){
       }else this.drawHome();
     }
     drawArena(){
+      // Sample one wall-clock progress for both sides of the crossfade. Reward
+      // exits and slow frames cannot let the DOM finish before arena bodies.
+      const resultFade=result?smooth((performance.now()-result.fadeStartedAt)/300):0;
+      if(result)$('#over-panel').style.opacity=String(resultFade);
+      const arenaAlpha=1-resultFade;
       const g=this.g;this.drawBorder(world.arenaBounds);
       const view=this.ending||result?.sceneBodies,p=view?.player||world.player,boss=view?.boss||world.boss;
       const arrival=1;
@@ -1925,14 +1927,14 @@ function boot(){
         this.starParticles.draw(g,playerFeedbackColor(),{strength:settings.juice});
       }else{this.cometTrails.clear();this.starParticles.clear();}
       if(boss&&!boss.defeated){
-        const b=boss,alpha=result?1-smooth(result.clock/.65):1;
+        const b=boss,alpha=arenaAlpha;
         drawBoss(g,this.shakenBody(b),alpha);
       }
       for(const b of view?.enemies||world.enemies){
         if(result?.sourceIds.includes(b.id))continue;
         const pose={body:b,alpha:1,hidden:false};
         if(pose.hidden)continue;
-        const alpha=(result?1-smooth(result.clock/.65):1)*pose.alpha*arrival;
+        const alpha=arenaAlpha*pose.alpha*arrival;
         const size=injuredEnemyScale(b,true);
         const body=this.shakenBody({...pose.body,r:pose.body.r*size});
         const special=isSpecialEnemy(body);
@@ -1965,7 +1967,7 @@ function boot(){
       }
       let photoSlot=0;
       for(const {body,geometry} of auxiliaryFrames){
-        drawBall(g,body,hex(settings.player),(result?1-smooth(result.clock/.65):1)*arrival,null,null,photoSlot++,geometry);
+        drawBall(g,body,hex(settings.player),arenaAlpha*arrival,null,null,photoSlot++,geometry);
       }
       if(!detached()){
         const pose={body:p,alpha:1,hidden:false};
@@ -2005,7 +2007,7 @@ function boot(){
         if(e.type==='upgrade-wave'){
           ring(g,e.x,e.y,e.r*(reducedMotion?1:.55+.45*smooth(t)),e.color,(1-t)*.18*settings.juice,1);continue;
         }
-        polygon(g,e.x,e.y,e.r*(1-t*.3),e.sides,e.angle,e.color,(1-t*t)*(result?1-smooth(result.clock/.65):1));
+        polygon(g,e.x,e.y,e.r*(1-t*.3),e.sides,e.angle,e.color,(1-t*t)*arenaAlpha);
       }
     }
     update(time,delta){

@@ -1,6 +1,6 @@
 const ROOT = new URL('./',self.location).href;
 const CACHE_PREFIX = 'qiuqiule-'+encodeURIComponent(new URL(ROOT).pathname)+'-';
-const CACHE = CACHE_PREFIX+'v11.4.1-custom-first-frame';
+const CACHE = CACHE_PREFIX+'v11.4.3-result-arena-crossfade';
 const urls = files => files.map(path => new URL(path,ROOT).href);
 // Sites redirects index.html to the directory URL. Cache the canonical shell once;
 // both home navigation paths below already resolve to this same cached response.

@@ -78,7 +78,7 @@ export function seedRestart(origin){
   world.buffs={growth:2,energy:4,density:3,breath:1};world.player.r*=1.4;
   world.enemies.forEach(b=>{b.born=1;b.solid=true;});world.phase=origin==='over'?'over':'battle';
   scene={g:{clear(){this.cleared=true;}},effects:[{type:'old-particle'}],accumulator:.004,clock:180,hitSoundAt:179};
-  screen='play';modal=origin;paused=true;result=origin==='over'?{clock:12,bounceTime:.57}:null;
+  screen='play';modal=origin;paused=true;result=origin==='over'?{clock:12,bounceTime:.57,fadeStartedAt:performance.now()-300}:null;
   uiAnchor=origin;releaseOverlay=1;pauseOnArrival=true;drag={dx:50,dy:20};transfer=null;controlFlight=null;
   $('#control-transfers').children=[{}];$('#ui-ball').hidden=false;$('#result-shadow').hidden=false;
   $('.result-actions').classList.add('arriving');$('#choice-labels').replaceChildren(document.createElement('div'));
@@ -456,6 +456,22 @@ const bodyShapes=g=>g.shapes.filter(s=>s.type==='path'&&s.color===0x252720&&s.al
 const eyeShapes=g=>g.shapes.filter(s=>s.color===0xf4f3eb&&s.alpha===.9);
 function clickAction(action,dataset={}){
   for(const fn of listeners.get('click'))fn({target:{closest:()=>({dataset:{action,...dataset}})},detail:1});
+}
+function assertResultControlsFadeWithPanel(module=app){
+  const state=module.readRestart();
+  assert.ok(state.result,'the result panel has begun');
+  assert.equal(state.controlFlight,null,'result controls never borrow moving arena bodies');
+  assert.equal(element('#control-transfers').children.length,0,'no detached control sprites cover the fading panel');
+  assert.equal(element('.result-actions').classList.contains('arriving'),false,'the real controls remain visible inside the panel fade');
+  assert.deepEqual(state.result.sourceIds,[],'all arena enemies remain eligible for the same scene fade');
+}
+async function withPerformanceClock(callback){
+  const previous=Object.getOwnPropertyDescriptor(performance,'now');
+  let milliseconds=10000;
+  const clock={get now(){return milliseconds;},set(value){milliseconds=value;},advance(value){milliseconds+=value;}};
+  Object.defineProperty(performance,'now',{configurable:true,value:()=>milliseconds});
+  try{return await callback(clock);}
+  finally{if(previous)Object.defineProperty(performance,'now',previous);else delete performance.now;}
 }
 function inputCanvas(width=390,height=844,module=app){
   const handlers=new Map(),captured=new Set(),captures=[],releases=[];
@@ -2191,7 +2207,7 @@ test('resizing during clearing maps the wave and clears stale feedback without c
   assert.equal(world.phase,'transition');assert.equal(world.score,score+10);
 });
 
-test('injured endless bodies keep their display size through death and result transfers',()=>{
+test('injured endless bodies keep their display size through death and fade in place with every result enemy',()=>withPerformanceClock(clock=>{
   for(const mode of ['endless']){
     let g=graphicsRecorder(),run=app.seedRenderer(g,390,844,true),{world,scene}=run;
     app.setFeedbackStrength(1);world.enemies=[];world.spawnTimer=Infinity;world.floorTimer=Infinity;
@@ -2202,11 +2218,23 @@ test('injured endless bodies keep their display size through death and result tr
     assert.equal(scene.impactGhosts.length,1);near(outlineBounds(body()).width,2*r*.82);near(enemy.r,r);
     g=graphicsRecorder();run=app.seedRenderer(g,390,844,true);({world,scene}=run);world.enemies=[];
     const source=rhythmEnemy(world,90,240);source.hp=source.maxHp*.5;
+    rhythmEnemy(world,190,240);rhythmEnemy(world,290,240);
     world.phase='over';world.emit('over');scene.update(0,0);if(mode==='endless')scene.advanceEnding(.6);
-    near(app.readRestart().controlFlight.items[0].from.r,source.r*.91);
+    assertResultControlsFadeWithPanel();
+    const result=app.readRestart().result;
+    for(const [elapsed,alpha] of [[0,1],[150,.5],[300,0]]){
+      clock.set(result.fadeStartedAt+elapsed);g.clear();scene.drawArena();
+      const bodies=g.shapes.filter(shape=>shape.type==='path'&&shape.color===ink&&shape.points.length===193);
+      assert.equal(bodies.length,3,'the first two arena enemies fade alongside the third');
+      near(outlineBounds(bodies[0]).width,2*source.r*.91);
+      bodies.forEach((shape,index)=>{
+        near(shape.alpha,alpha);
+        near(outlineBounds(shape).cx,90+index*100);
+      });
+    }
   }
   app.setFeedbackStrength(.6);
-});
+}));
 
 test('score HUD merges consecutive awards, reaches their exact sum within 250 ms, and resets on restart',()=>{
   const {world,scene}=feedbackRun();world.enemies=[];
@@ -2808,22 +2836,24 @@ test('first-type expressions respect their own toggle while remaining readable a
   });
 });
 
-test('hollow and fragment result transfers preserve their appearance before fading into the menu control',t=>{
+test('hollow and fragment enemies keep their appearance while fading in place behind the result controls',t=>withPerformanceClock(clock=>{
   t.after(()=>app.setFeedbackStrength(.6));
   for(const type of ['ring','magnet','fragment']){
-    const {world,scene,enemy}=typedEnemyRun(type);enemy.hp=enemy.maxHp*.5;
+    const {world,scene,enemy,g}=typedEnemyRun(type);enemy.hp=enemy.maxHp*.5;
     world.phase='over';world.emit('over');scene.update(0,0);scene.advanceEnding(.6);
-    const item=app.readRestart().controlFlight.items[0];assert.equal(item.from.enemyType,type);
-    near(item.from.r,enemy.r*.91);assert.ok(item.enemySource);
-    if(type==='fragment'){
-      assert.match(item.el.innerHTML,/fill="#a26250"/);
-      assert.equal(item.el.style.background,'rgba(162,98,80,0)','the color transition starts at the fragment tone');
-    }else{assert.match(item.el.innerHTML,/fill="none"/);assert.match(item.el.innerHTML,/stroke=/);}
-    assert.match(item.el.style.background,/,0\)$/);assert.equal(item.enemySource.style.opacity,1);
-    app.advanceUi(.2);assert.ok(item.enemySource.style.opacity>0&&item.enemySource.style.opacity<1);
-    assert.doesNotMatch(item.el.style.background,/,0\)$/);
+    assertResultControlsFadeWithPanel();
+    const result=app.readRestart().result;clock.set(result.fadeStartedAt);g.clear();scene.drawArena();
+    const initial=g.shapes.map(shape=>({...shape}));assert.ok(initial.length>0,'special enemy geometry remains in the arena');
+    if(type==='fragment')assert.ok(initial.some(shape=>shape.color===0xa26250),'the fragment retains its darker body tone');
+    else assert.ok(initial.some(shape=>shape.type==='stroke'),'hollow enemies retain their outline');
+    clock.set(result.fadeStartedAt+150);g.clear();scene.drawArena();
+    assert.equal(g.shapes.length,initial.length,'fading never replaces the enemy with menu geometry');
+    g.shapes.forEach((shape,index)=>{
+      const {alpha,...geometry}=shape,{alpha:oldAlpha,...oldGeometry}=initial[index];
+      assert.deepEqual(geometry,oldGeometry);near(alpha,oldAlpha*.5);
+    });
   }
-});
+}));
 
 test('locally delayed split children retain their family slot through pause and keep their parent profile after space opens',t=>{
   const {world,scene,enemy}=typedEnemyRun('split'),events=observeWorldEvents(world),parentHp=enemy.maxHp;
@@ -3086,6 +3116,7 @@ test('the real endless failure freezes gameplay, animates only its snapshot and 
   documentPointer('pointerdown');documentPointer('click');assert.equal(app.readRestart().world,world,'ending cannot be skipped by blank clicks');
   advanceScene(scene,.3);assert.equal(scene.ending,null);
   let state=app.readRestart();assert.equal(state.modal,'over');assert.equal(state.transfer.duration,.4);
+  assertResultControlsFadeWithPanel();
   assert.equal(state.result.maxCombo,7);assert.equal(state.result.maxStage,12);
   assert.match(element('#result-peak').innerHTML,/最大连击.*7.*到达阶段.*12/);
   assert.equal(element('#result-records').textContent,'历史最佳1000');assert.equal(element('#result-records').hidden,false);
@@ -3100,6 +3131,98 @@ test('the real endless failure freezes gameplay, animates only its snapshot and 
   const fresh=state.world;documentPointer('click');assert.equal(app.readRestart().world,fresh,'one accepted click starts exactly one new run');
   app.advanceUi(.4);assert.equal(app.readRestart().transfer,null);assert.equal(fresh.score,0);assert.equal(fresh.startingUpgrades,true);assert.equal(fresh.rewardSelectionsRemaining,1,'quick restart always offers one starting choice');
 });
+
+test('result panel and arena enemies share one real-time fade through failure, voluntary settlement and every reward route',()=>withPerformanceClock(async clock=>{
+  const stored=new Map(saved),wasHidden=document.hidden;
+  try{
+    for(const reduced of [false,true])await withReloadedEntry({juice:.6},reduced,fresh=>{
+      for(const route of ['failure','pause'])for(const rewardKind of ['none','star','stars','appearance']){
+        const label=`${route}/${rewardKind}/reduced:${reduced}`;
+        clock.advance(10000);document.hidden=false;
+        const {world,scene,g}=controlRun(fresh,.6);fresh.seedCircle();fresh.seedEndless({best:300000});
+        fresh.seedAppearanceState({bigEyeUnlocked:rewardKind!=='appearance'});
+        fresh.seedStarTrails({unlocked:rewardKind.startsWith('star')?0:9});
+        world.stage=world.maxStage=rewardKind==='stars'?15:rewardKind==='star'?5:1;
+        world.score=rewardKind==='appearance'?233333:1234;
+        for(const x of [90,190,290])rhythmEnemy(world,x,240);
+        fresh.updateScoreHud();
+        const ink=parseInt(fresh.readFeedbackSettings().enemy.slice(1),16);
+        const enemies=()=>g.shapes.filter(shape=>shape.type==='path'&&shape.color===ink&&shape.points.length===193);
+        const assertComplement=expected=>{
+          const opacity=Number(element('#over-panel').style.opacity),bodies=enemies();
+          near(opacity,expected,label);assert.equal(bodies.length,3,label);
+          for(const body of bodies){near(opacity+body.alpha,1,label);if(opacity===1)near(body.alpha,0,label);}
+        };
+        if(route==='failure'){
+          world.endRun('capacity');scene.update(0,0);assert.ok(scene.ending,label);
+          scene.advanceEnding(.6);assert.equal(scene.ending,null,label);
+        }else{
+          latestAction('pause');fresh.advanceUi(.42);latestAction('home');
+        }
+        if(rewardKind!=='none'){
+          const reward=fresh.readPlayerShape().skinUnlock;
+          assert.ok(reward,label);assert.equal(reward.queue.length,rewardKind==='stars'?3:1,label);
+          fresh.advanceUi(2);
+          while(reward.index<reward.queue.length-1){latestAction('close');fresh.advanceUi(.18);}
+          latestAction('close');assert.equal(reward.phase,'leave',label);
+          if(rewardKind.startsWith('star')){
+            assert.equal(fresh.readRestart().result,null,label);
+            // updateSkinUnlock creates the result after drawArena in this frame.
+            // The just-painted arena is still opaque, so the newly shown DOM
+            // must start at zero rather than beginning an independent CSS fade.
+            for(let frame=0;!fresh.readRestart().result&&frame<5;frame++){
+              clock.advance(50);scene.update(clock.now,50);
+            }
+            assert.ok(fresh.readRestart().result,label);assertComplement(0);
+          }
+        }
+        assertResultControlsFadeWithPanel(fresh);
+        const result=fresh.readRestart().result,start=result.fadeStartedAt;
+        assert.equal(start,clock.now,label);near(Number(element('#over-panel').style.opacity),0,label);
+        g.clear();scene.drawArena();assertComplement(0);
+        // Low-frame-rate rendering and a long returning frame use elapsed wall time;
+        // the gameplay/UI dt cap cannot leave enemies under an opaque result.
+        clock.set(start+150);scene.update(clock.now,150);assertComplement(.5);
+        document.hidden=true;
+        for(const handler of listeners.get('visibilitychange')||[])handler();
+        clock.advance(5000);
+        document.hidden=false;
+        for(const handler of listeners.get('visibilitychange')||[])handler();
+        near(Number(element('#over-panel').style.opacity),.5,'without another arena paint the DOM cannot finish alone');
+        scene.update(clock.now,5000);assertComplement(1);
+        clock.advance(3000);scene.update(clock.now,3000);assertComplement(1);
+        assert.ok(result.clock<.3,'the fade finishes independently of the capped result bounce clock');
+        assertResultControlsFadeWithPanel(fresh);
+      }
+    });
+  }finally{document.hidden=wasHidden;saved.clear();for(const [key,value]of stored)saved.set(key,value);app.seedCircle();}
+}));
+
+test('Boss, ordinary enemies, auxiliary bodies and remaining shards all fade on the result panel clock',()=>withPerformanceClock(clock=>{
+  const {world,scene,g}=controlRun(app,.6);app.seedCircle();app.seedEndless({best:1000});
+  app.seedAppearanceState({bigEyeUnlocked:true});world.stage=5;world.beginBoss();world.phase='boss';world.events=[];
+  Object.assign(world.boss,{born:1,vx:0,vy:0,squash:0});
+  rhythmEnemy(world,90,240);
+  world.auxiliaries=[{...world.makeBody(90,620,18,.8),isAuxiliary:true,hp:1,active:true,born:1,vx:0,vy:0,squash:0}];
+  scene.effects=[{type:'shard',x:300,y:620,r:8,sides:4,angle:0,color:0x123456,life:.2,total:1,vx:0,vy:0,spin:0}];
+  clickAction('pause');app.advanceUi(.42);clickAction('home');assertResultControlsFadeWithPanel();
+  const result=app.readRestart().result,start=result.fadeStartedAt;
+  clock.set(start);g.clear();scene.drawArena();
+  const initial=g.shapes.map(shape=>({...shape}));
+  assert.ok(initial.some(shape=>shape.color===0x123456),'remaining shards are part of the scene fade');
+  assert.ok(initial.some(shape=>shape.color===app.playerInk()&&shape.alpha===.6),'the auxiliary keeps its own base transparency');
+  const enemyInk=parseInt(app.readFeedbackSettings().enemy.slice(1),16);
+  assert.ok(initial.filter(shape=>shape.type==='path'&&shape.color===enemyInk).length>=4,'Boss horns, Boss body and ordinary enemy all render');
+  clock.set(start+150);g.clear();scene.drawArena();near(Number(element('#over-panel').style.opacity),.5);
+  assert.equal(g.shapes.length,initial.length);
+  g.shapes.forEach((shape,index)=>{
+    const {alpha,...geometry}=shape,{alpha:base,...original}=initial[index];
+    assert.deepEqual(geometry,original);near(alpha/base+Number(element('#over-panel').style.opacity),1);
+  });
+  clock.set(start+300);g.clear();scene.drawArena();near(Number(element('#over-panel').style.opacity),1);
+  assert.ok(g.shapes.every(shape=>shape.alpha===0),'a fully visible result has no visible Boss, enemy, auxiliary or shard');
+  app.seedCircle();
+}));
 
 test('result crowns begin transparent at arrival and fade in during settled time, including reduced motion',async()=>{
   for(const reduced of [false,true])await withReloadedEntry({juice:.6},reduced,fresh=>{
@@ -3393,7 +3516,7 @@ test('a real Boss victory gives a low-combo result its crown and the next run cl
 });
 
 
-test('successful photo rendering paints each main or fading auxiliary body once, while unavailable photo rendering keeps the graphics fallback',()=>{
+test('successful photo rendering paints each main or fading auxiliary body once, while unavailable photo rendering keeps the graphics fallback',()=>withPerformanceClock(clock=>{
   for(const success of [true,false,undefined]){
     const g=graphicsRecorder();app.seedRenderer(g);app.seedCircle();app.runFeedbackDemo('upgrade-split');
     const {world,scene}=app.readRestart();for(let frame=0;!world.auxiliaries.length&&frame<180;frame++)scene.update(0,1000/120);
@@ -3404,13 +3527,13 @@ test('successful photo rendering paints each main or fading auxiliary body once,
       assert.equal(bodyFills().length,success===true?0:3,'only an explicit renderer success replaces the main and auxiliary graphics fills');
       assert.equal(photos.main[0].options.alpha,1);assert.ok(photos.aux.every(call=>call.options.alpha===.6));
       world.endRun('capacity');scene.update(0,0);scene.advanceEnding(.6);
-      const result=app.readRestart().result;assert.equal(result.sceneBodies.auxiliaries.length,2);result.clock=.65*.5;
+      const result=app.readRestart().result;assert.equal(result.sceneBodies.auxiliaries.length,2);clock.set(result.fadeStartedAt+150);
       photos.aux.length=0;g.clear();scene.drawArena();assert.equal(photos.aux.length,2);assert.ok(photos.aux.every(call=>Math.abs(call.options.alpha-.3)<1e-9));
       const fills=bodyFills();assert.equal(fills.length,success===true?0:2,'half-transparent photo auxiliaries must not receive a second colored fill below the photo');
       if(success!==true)assert.ok(fills.every(shape=>Math.abs(shape.alpha-.3)<1e-9));
     }finally{photos.restore();app.seedCircle();}
   }
-});
+}));
 
 const cometShapes=(g,module=app)=>g.shapes.filter(shape=>shape.type==='path'&&shape.color===module.playerInk()&&shape.points.length>=4&&shape.alpha>0&&shape.alpha<1);
 
@@ -3794,6 +3917,7 @@ test('v7.9 endless appearance reward uses the animated unlock route and returns 
   assert.equal(app.playerInk(),ink,'reward preview never overwrites the saved player color');
   clickAction('close');
   assert.equal(app.readPlayerShape().skinUnlock.phase,'leave');assert.ok(app.readRestart().result);
+  assertResultControlsFadeWithPanel();
   assert.equal(app.readAppearancePresentation().state.pendingUnlock,false);
   assert.equal(JSON.parse(saved.get('qiuqiule-appearance-state')).pendingUnlock,false);
   app.advanceUi(.62);
@@ -3803,7 +3927,7 @@ test('v7.9 endless appearance reward uses the animated unlock route and returns 
   const earned={...app.readAppearancePresentation().state};
   const next=controlRun().world;app.seedAppearanceState(earned);next.score=300000;next.phase='over';app.showResultForTest();
   assert.equal(app.readPlayerShape().skinUnlock,null,'later qualifying runs never replay an acknowledged unlock');
-  assert.ok(app.readRestart().result);
+  assertResultControlsFadeWithPanel();
 });
 
 const visibleUnlockPaths=group=>group.paths.filter(path=>path.getAttribute('display')!=='none');
@@ -3862,6 +3986,7 @@ test('first star reward stays inset and centered with fixed gold light that fade
   near(reward.starFrame.glowAlpha,.5);assertUnlockGlow(glow,reward);assert.deepEqual(glow.canvas.style,glowPosition);
   assert.equal(app.readRestart().result,null);assert.equal(app.readRestart().controlFlight,null);
   app.advanceUi(.09);samePose(app.sourcePose(),held);assert.equal(element('#ui-star-trails').hidden,true);assert.ok(app.readRestart().result);
+  assertResultControlsFadeWithPanel();
   assert.equal(glow.canvas.hidden,true);assert.equal(glow.canvas.width,1);assert.equal(glow.canvas.height,1);
   app.advanceUi(.16);assert.notEqual(app.sourcePose().x,held.x);assert.equal(glow.canvas.hidden,true);
   app.advanceUi(.16);assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readRestart().uiAnchor,'over');
@@ -3931,6 +4056,7 @@ test('a queued appearance and three stage star trails require one ready acknowle
   app.advanceUi(.09);samePose(app.sourcePose(),lastPose);near(reward.starFrame.trailProgress,.5);assert.equal(app.readRestart().result,null);
   near(reward.starFrame.glowAlpha,.5);assertUnlockGlow(glow,reward);
   app.advanceUi(.09);assert.ok(app.readRestart().result);assert.equal(element('#ui-star-trails').hidden,true);
+  assertResultControlsFadeWithPanel();
   assert.equal(glow.canvas.hidden,true);assert.equal(glow.canvas.width,1);
   app.advanceUi(.32);
   assert.equal(app.readPlayerShape().skinUnlock,null);assert.equal(app.readRestart().modal,'over');assert.equal(element('#ui-star-trails').hidden,true);
@@ -4616,7 +4742,8 @@ test('a rapid Boss entry, defeat and failure batch finishes on the failure mix a
 test('voluntary endless exit selects its result mix and returning home restores the menu mix',t=>{
   const calls=[];t.mock.method(GameAudio.prototype,'setMusicScene',name=>calls.push(name));
   app.seedRenderer(graphicsRecorder(),390,844,true);clickAction('pause');app.advanceUi(1);clickAction('home');
-  assert.equal(calls.at(-1),'resultEndless');app.advanceUi(1);clickAction('home');assert.equal(calls.at(-1),'home');
+  assert.equal(calls.at(-1),'resultEndless');assertResultControlsFadeWithPanel();
+  app.advanceUi(1);clickAction('home');assert.equal(calls.at(-1),'home');
 });
 test('leaving the web page fades early and cancelling the navigation restores the visible game',t=>{
   const calls=[];

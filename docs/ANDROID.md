@@ -1,6 +1,6 @@
 # Android APK 构建与签名
 
-v11.4.1 沿用 v11.3.1 与 v8.1.1 的发布证书，可覆盖升级这两个版本。当前 `dist/` 内置 `audio/endless.mp3` 与 `audio/boss.mp3` 两首 BGM，游戏使用无尽模式，已移除关卡模式。
+v11.4.3 沿用 v11.4.1、v11.3.1 与 v8.1.1 的发布证书，可覆盖升级这些版本。当前 `dist/` 内置 `audio/endless.mp3` 与 `audio/boss.mp3` 两首 BGM，游戏使用无尽模式，已移除关卡模式。
 
 安卓应用使用 Capacitor 7.4.3 封装仓库中的 `dist/`，应用 ID 为 `com.qiuqiule.game`。游戏、字体、音乐、图标和引擎都随 APK 内置，不依赖 Site 或远程网页地址。保留横屏与竖屏，不锁定屏幕方向。
 
@@ -14,17 +14,17 @@ v11.4.1 沿用 v11.3.1 与 v8.1.1 的发布证书，可覆盖升级这两个版�
 
 `scripts/prepare-android.mjs` 从 `package.json` 读取版本，写入原生工程：
 
-- `versionName`：例如 `11.4.1`。
-- `versionCode`：`major × 10000 + minor × 100 + patch`，因此 `11.4.1` 为 `110401`；minor 与 patch 必须小于 100。
+- `versionName`：例如 `11.4.3`。
+- `versionCode`：`major × 10000 + minor × 100 + patch`，因此 `11.4.3` 为 `110403`；minor 与 patch 必须小于 100。
 - 启动图标复用 `dist/icons/icon-512.png`，替换 Capacitor 默认图案。
 
 原生 `android/` 工程由脚本生成，并继续作为忽略的构建目录。重复执行准备脚本会同步最新游戏资源与版本信息。
 
 从 v7.11.3 源码构建时，准备脚本会从旧原生工程清理 `android.permission.VIBRATE`，构建流程还会检查最终 APK 的权限清单。v7.11.2 开始使用独立发布证书。使用更早签名的玩家需先卸载旧版，卸载会删除应用内的本地进度。
 
-工作流上传名为 **`qiuqiule-v11.4.1-android-unsigned`** 的 artifact，名称随版本变化，包含：
+工作流上传名为 **`qiuqiule-v11.4.3-android-unsigned`** 的 artifact，名称随版本变化，包含：
 
-- `qiuqiule-v11.4.1-unsigned.apk`：已做 16 KB 页面兼容对齐的未签名 release APK。
+- `qiuqiule-v11.4.3-unsigned.apk`：已做 16 KB 页面兼容对齐的未签名 release APK。
 - `apksigner.jar`：来自 Android Build Tools 35.0.0，供本机使用 JDK 签名和验证。
 - `APK-INFO.txt`：由 SDK `aapt dump badging` 导出的应用 ID、版本、最低 SDK 等包信息。
 - `SHA256SUMS.txt`：构建产物校验值。
@@ -58,10 +58,10 @@ java -jar apksigner.jar sign \
   --ks-key-alias "$QIUQIULE_KEY_ALIAS" \
   --ks-pass "file:$QIUQIULE_STORE_PASSWORD_FILE" \
   --key-pass "file:$QIUQIULE_KEY_PASSWORD_FILE" \
-  --out qiuqiule-v11.4.1.apk qiuqiule-v11.4.1-unsigned.apk
+  --out qiuqiule-v11.4.3.apk qiuqiule-v11.4.3-unsigned.apk
 
-java -jar apksigner.jar verify --verbose --print-certs qiuqiule-v11.4.1.apk
-shasum -a 256 qiuqiule-v11.4.1.apk
+java -jar apksigner.jar verify --verbose --print-certs qiuqiule-v11.4.3.apk
+shasum -a 256 qiuqiule-v11.4.3.apk
 ```
 
 验证签名与包内版本后，把最终签名 APK 及其 SHA-256 校验值保存到对应版本的 GitHub Release 或持久文件下载地址，使用可下载链接交付。不要把未签名构建产物当作可安装 APK 发布。首次使用新签名时，不能承诺覆盖安装由其他证书签署的旧 APK。
