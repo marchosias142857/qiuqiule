@@ -67,7 +67,8 @@ globalThis.document={createElementNS:createSvgNode,readyState:'loading',hidden:f
 if(!globalThis.navigator)globalThis.navigator={};
 
 const entry=new URL('../dist/game.js',import.meta.url);
-const source=(await readFile(entry,'utf8')).replace(/from '(\.\/[^']+)'/g,(_,path)=>`from '${new URL(path,entry).href}'`);
+const source=(await readFile(entry,'utf8')).replace(/from '(\.\/[^']+)'/g,(_,path)=>`from '${new URL(path,entry).href}'`)
+  + '\n' + await readFile(new URL('./fixtures/feedback-scenarios.mjs',import.meta.url),'utf8');
 // This adapter only exposes state to the test; it is not part of the shipped game.
 const adapter=`
 export function seedRestart(origin){
@@ -4824,6 +4825,97 @@ test('a blocked drag leaves global audio retries available on ordinary taps and 
   });
 });
 
+function menuPanelBoundary(t){
+  const panels=Object.fromEntries(['settings','help','menu-transition','pause'].map(name=>[name,element('#'+name+'-panel')]));
+  const previous=Object.values(panels).map(node=>({node,id:node.id,hidden:node.hidden,inert:node.inert}));
+  for(const [name,node]of Object.entries(panels)){node.id=name+'-panel';node.hidden=true;node.inert=false;}
+  // Only these tests need the real showPanel visibility boundary. Other entry
+  // fixtures intentionally leave unrelated page inventories unmounted.
+  const queryAll=document.querySelectorAll;
+  t.mock.method(document,'querySelectorAll',selector=>selector==='.panel'?Object.values(panels):queryAll(selector));
+  const contentReads=t.mock.method(element('#settings-panel .menu-content'),'getBoundingClientRect');
+  const headingReads=t.mock.method(element('#settings-panel .settings-heading'),'getBoundingClientRect');
+  const styleReads=t.mock.method(globalThis,'getComputedStyle');
+  t.after(()=>{
+    app.setOnboardingPanelForTest(null);app.seedRenderer(graphicsRecorder());app.seedCircle();
+    for(const {node,id,hidden,inert}of previous){if(id===undefined)delete node.id;else node.id=id;node.hidden=hidden;node.inert=inert;}
+  });
+  return {panels,measurements:()=>[contentReads.mock.callCount(),headingReads.mock.callCount(),styleReads.mock.callCount()]};
+}
+
+for(const origin of ['home','pause'])test(`help menu reuses its measured frame through both 240ms transitions from ${origin}`,t=>{
+  const {panels,measurements}=menuPanelBoundary(t);
+  app.seedRenderer(graphicsRecorder(),390,844,origin==='pause');app.seedCircle();
+  if(origin==='pause'){clickAction('pause');app.advanceUi(.42);}
+  clickAction('settings');app.advanceUi(.5);
+  assert.deepEqual(measurements(),[1,1,3],'opening settings still measures its content, heading and styles');
+  const height=element('#modal-layer').style['--menu-height'],pose=app.sourcePose();
+  for(const [from,target,action]of [['settings','help','help'],['help','settings','close']]){
+    clickAction(action);
+    assert.equal(app.readRestart().modal,'menu-transition');
+    assert.equal(panels[from].hidden,false);assert.equal(panels[target].hidden,false,'the incoming page is laid out before its fade begins');
+    assert.equal(Number(panels[from].style.opacity),1);assert.equal(Number(panels[target].style.opacity),0);
+    assert.equal(panels[from].inert,true);assert.equal(panels[target].inert,true);
+    const icon=element('#menu-transition-panel .close-button').style;
+    assert.equal(Number(icon['--return-icon-opacity']),from==='help'?1:0);
+    assert.equal(Number(icon['--close-icon-opacity']),from==='help'?0:1);
+    if(origin==='pause'){
+      assert.equal(panels.pause.hidden,false);assert.equal(panels.pause.inert,true);
+      assert.equal(panels.pause.classList.contains('pause-covered'),true);
+    }
+    for(const key of ['x','y','r'])near(app.readPlayerShape().lastUiPose[key],pose[key]);
+    app.advanceUi(.06);
+    near(Number(panels[from].style.opacity),.5);near(Number(panels[target].style.opacity),0);
+    app.advanceUi(.06);
+    assert.equal(panels[from].hidden,true);near(Number(panels[target].style.opacity),0);
+    assert.equal(app.readRestart().modal,'menu-transition');assert.equal(panels[target].inert,true);
+    near(Number(icon[target==='help'?'--close-icon-opacity':'--return-icon-opacity']),0);
+    near(Number(icon[target==='help'?'--return-icon-opacity':'--close-icon-opacity']),.5);
+    app.advanceUi(.06);
+    near(Number(panels[target].style.opacity),.5);assert.equal(app.readRestart().modal,'menu-transition');
+    app.advanceUi(.06);
+    assert.equal(app.readRestart().modal,target);assert.equal(app.readRestart().uiAnchor,target);
+    assert.equal(panels[target].hidden,false);assert.equal(panels[target].inert,false);assert.equal(panels[from].hidden,true);
+    assert.equal(panels['menu-transition'].hidden,true);assert.equal(element('#modal-layer').classList.contains('menu-switching'),false);
+    assert.equal(element('#modal-layer').style['--menu-height'],height);assert.deepEqual(measurements(),[1,1,3]);
+    for(const key of ['x','y','r'])near(app.readPlayerShape().lastUiPose[key],pose[key]);
+  }
+});
+
+test('interrupting either half of a help transition returns to an interactive settings page without remeasurement',t=>{
+  const {panels,measurements}=menuPanelBoundary(t);
+  app.seedRenderer(graphicsRecorder());app.seedCircle();clickAction('settings');app.advanceUi(.5);
+  for(const from of ['settings','help'])for(const elapsed of [.06,.18]){
+    if(from==='help'){clickAction('help');app.advanceUi(.24);}
+    clickAction(from==='settings'?'help':'close');app.advanceUi(elapsed);clickAction('close');
+    assert.equal(app.readRestart().modal,'settings');assert.equal(app.readRestart().uiAnchor,'settings');
+    assert.equal(panels.settings.hidden,false);assert.equal(panels.settings.inert,false);
+    assert.equal(panels.help.hidden,true);assert.equal(panels.help.inert,false);
+    assert.equal(panels['menu-transition'].hidden,true);assert.equal(element('#modal-layer').classList.contains('menu-switching'),false);
+    assert.deepEqual(measurements(),[1,1,3]);
+    app.advanceUi(.3);assert.equal(app.readRestart().modal,'settings','the cancelled fade cannot reopen help');
+  }
+});
+
+test('reduced-motion help navigation retains the measured frame and skips transitional inert pages',async t=>{
+  const {panels,measurements}=menuPanelBoundary(t);
+  const previousClicks=new Set(listeners.get('click'));
+  await withReloadedEntry(null,true,fresh=>{
+    const click=action=>{
+      for(const fn of listeners.get('click'))if(!previousClicks.has(fn))fn({target:{closest:()=>({dataset:{action}})},detail:1});
+    };
+    fresh.seedRenderer(graphicsRecorder());fresh.seedCircle();click('settings');fresh.advanceUi(.5);
+    assert.deepEqual(measurements(),[1,1,3]);
+    for(const [target,action]of [['help','help'],['settings','close']]){
+      click(action);
+      assert.equal(fresh.readRestart().modal,target);assert.equal(fresh.readRestart().uiAnchor,target);
+      assert.equal(panels[target].hidden,false);assert.equal(panels[target].inert,false);
+      assert.equal(panels[target==='help'?'settings':'help'].hidden,true);assert.equal(panels['menu-transition'].hidden,true);
+      assert.equal(element('#modal-layer').classList.contains('menu-switching'),false);assert.deepEqual(measurements(),[1,1,3]);
+    }
+  });
+});
+
 function inventoryText(node){return [node.textContent||'',...(node.children||[]).map(inventoryText)].join(' ');}
 function inventoryWorldSnapshot(world){return JSON.stringify({stage:world.stage,time:world.time,phase:world.phase,buffs:world.buffs,player:world.player,enemies:world.enemies,stageKills:world.stageKills,score:world.score});}
 
@@ -4861,7 +4953,7 @@ test('run inventory refreshes its acquired entries and empty state without dupli
   clickAction('close');app.advanceUi(.42);world.buffs={density:9,gambler:2};world.nextGambler=false;world.gamblerRewardPending=false;world.gamblerTargetMultiplier=1;
   clickAction('run-upgrades');app.advanceUi(.42);
   const rows=element('#run-upgrades-list').children;assert.equal(rows.length,2);assert.equal(element('#run-upgrades-empty').hidden,true);
-  assert.match(inventoryText(rows[0]),/重量级.*9 层.*初始/);assert.match(inventoryText(rows[1]),/赌徒.*2 次.*已兑现/);
+  assert.match(inventoryText(rows[0]),/重量级.*9 层.*质量 \+617%/);assert.match(inventoryText(rows[1]),/赌徒.*2 次.*已兑现/);
   element('#run-upgrades-body').scrollTop=200;clickAction('close');app.advanceUi(.42);clickAction('run-upgrades');app.advanceUi(.42);
   assert.equal(element('#run-upgrades-list').children.length,2);assert.equal(element('#run-upgrades-body').scrollTop,0);
   assert.equal(app.readRestart().world,world);assert.equal(app.readRestart().paused,true);

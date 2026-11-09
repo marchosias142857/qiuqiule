@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readdir, readFile, stat} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import path from 'node:path';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -32,7 +32,7 @@ for (const relative of inputs) {
     assert.equal(result.status, 0, `${relative}: ${result.stderr}`);
     scripts++;
     for (const [, specifier] of bytes.toString().matchAll(/\bfrom\s*["'](\.[^"']+)["']/g)) {
-      assert.ok((await stat(path.resolve(path.dirname(output), specifier))).isFile(), `${relative}: ${specifier}`);
+      assert.ok((await stat(fileURLToPath(new URL(specifier, pathToFileURL(output))))).isFile(), `${relative}: ${specifier}`);
     }
   }
   if (!relative.endsWith('.js') || relative.startsWith('vendor/')) {

@@ -5,6 +5,10 @@
 #help-panel .help-steps li>b{font-size:11px;line-height:1.8;font-weight:400;flex-shrink:0}
 #help-panel .help-steps h3{font-size:13px;line-height:1.8;margin:0;font-weight:600}
 #help-panel .help-steps p{font-size:12px;line-height:1.85;margin:5px 0 0}
+.help-action-ball{display:inline-flex;align-items:center;justify-content:center;width:1.4em;height:1.4em;margin:0 .25em;border:1px solid currentColor;border-radius:50%;vertical-align:-.3em;color:inherit;pointer-events:none}
+.help-action-ball>span{display:block;width:100%;height:100%}
+.help-action-ball svg{width:100%;height:100%}
+.help-action-ball path{stroke:currentColor;stroke-width:.11}
 .help-reference{border-top:1px solid var(--line)}
 .help-reference:last-child{border-bottom:1px solid var(--line)}
 .help-reference>summary{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:52px;padding:13px 2px;cursor:pointer;list-style:none;font-size:13px;font-weight:600;touch-action:manipulation}

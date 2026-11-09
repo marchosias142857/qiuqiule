@@ -22,11 +22,20 @@ test('the run snapshot contains only owned current definitions, in their definit
 
 test('base upgrade summaries show acquired cumulative effects rather than a future layer', () => {
   const entries = byId({buffs: {energy: 5, density: 6, overspeed: 3, growth: 2, magnet: 2}});
-  assert.equal(entries.energy.summary, '弹射能量约为初始的 3.2 倍。');
-  assert.equal(entries.density.summary, '质量约为初始的 5.16 倍，同样拉伸不降低弹射速度。');
-  assert.equal(entries.overspeed.summary, '弹射速度上限 80 u/s（基础 60 + 强化 20）。');
-  assert.equal(entries.growth.summary, '直径为初始的 1.4 倍，伤害 +20%；质量不变。');
-  assert.equal(entries.magnet.summary, '击杀后 0.25 秒内牵引敌球，优先前方路线；每颗最多移动 6u，同时最多 2 颗。');
+  assert.equal(entries.energy.summary, '弹射能量 +220%。');
+  assert.equal(entries.density.summary, '质量 +416%。');
+  for (const [stacks, energy, density] of [[1, 30, 35], [2, 69, 82]]) {
+    const current = byId({buffs: {energy: stacks, density: stacks}});
+    assert.equal(current.energy.summary, `弹射能量 +${energy}%。`);
+    assert.equal(current.density.summary, `质量 +${density}%。`);
+  }
+  assert.equal(entries.overspeed.summary, '弹射速度上限 +33%。');
+  for (const [overspeed, increase] of [[1, '13'], [2, '27'], [3, '33']]) {
+    assert.equal(byId({buffs: {overspeed}}).overspeed.summary, `弹射速度上限 +${increase}%。`);
+  }
+  assert.equal(entries.growth.summary, '直径为初始的 1.4 倍，伤害 +20%。');
+  assert.equal(byId({buffs: {magnet: 1}}).magnet.summary, '击杀后 0.25 秒内牵引附近敌球，同时最多牵引 2 颗。');
+  assert.equal(entries.magnet.summary, '击杀后 0.25 秒内牵引附近敌球，同时最多牵引 2 颗；牵引速度提升。');
   assert.doesNotMatch(entries.energy.summary, /12%|下一/);
   assert.doesNotMatch(entries.density.summary, /15%|下一/);
   assert.doesNotMatch(entries.overspeed.summary, /\+4 u/);
@@ -45,34 +54,37 @@ test('retention is the real minimum including its base value and never exceeds o
   assert.match(malformed.growth.summary, /1.4 倍，伤害 \+20%/);
 });
 
-test('single-acquisition special upgrades show their current effect details including the widened shockwave', () => {
+test('single-acquisition special upgrades retain effect details without internal spatial units', () => {
   const definitions = UPGRADE_DEFINITIONS.filter(entry => entry.kind === 'special');
   const buffs = Object.fromEntries(definitions.map(entry => [entry.id, 1]));
   const entries = byId({buffs});
-  for (const definition of definitions) assert.equal(entries[definition.id].summary, definition.detail);
-  assert.match(entries.shockwave.summary, /半径 4u/);
+  for (const definition of definitions) {
+    if (!['pierce','pulse','gravity','split','shockwave'].includes(definition.id)) assert.equal(entries[definition.id].summary, definition.detail);
+    assert.doesNotMatch(entries[definition.id].summary, /\d\s*u\b/);
+  }
+  assert.equal(entries.pierce.summary, '撞击敌球后保持原方向，至少保留碰撞前 92% 的速度。');
+  assert.match(entries.shockwave.summary, /一定范围/);
   assert.match(entries.shockwave.summary, /75% 满拉伤害/);
 });
 
 test('frenzy snapshots include stacked damage, additive wave size and multiplicative rest', () => {
-  for (const [frenzy, step, cap, wave, rest] of [[1, 15, 60, 2, '0.7'], [2, 30, 120, 3, '0.63'], [3, 45, 180, 4, '0.567'], [5, 75, 300, 6, '0.459']]) {
+  for (const [frenzy, step, cap, wave, rest] of [[1, 15, 60, 2, '0.7'], [2, 30, 120, 3, '0.6'], [3, 45, 180, 4, '0.6'], [5, 75, 300, 6, '0.5']]) {
     const summary = byId({buffs: {frenzy}}).frenzy.summary;
-    assert.match(summary, new RegExp(`超过 6 连击后，每击杀使后续伤害 \\+${step}%，最多 \\+${cap}%`));
-    assert.ok(summary.includes(`每波 +${wave} 颗；波间休止 ×${rest}；连击倍率上限 12`));
+    assert.equal(summary, `连击倍率上限 +4；超过 6 连击后，每击杀使后续伤害 +${step}%，最多 +${cap}%，连击中断重置。每波 +${wave} 颗敌球，波间休止 ×${rest}。`);
     assert.doesNotMatch(summary, /不随层数增加/);
     assert.match(summary, /连击中断重置/);
   }
 });
 
 test('gambler distinguishes pending, active, reward redemption and completed wagers', () => {
-  assert.equal(gambler({phase: 'reward', nextGambler: true}), '下阶段目标 +50%，完成后额外 1 轮三选一。');
+  assert.equal(gambler({phase: 'reward', nextGambler: true}), '下阶段目标 +50%，完成后额外选择 1 次强化。');
   for (const phase of ['battle', 'clearing', 'boss-entry', 'boss', 'boss-celebrate']) {
     assert.equal(gambler({phase, gamblerTargetMultiplier: 1.5, gamblerRewardPending: true}),
-      '本阶段目标 +50%，完成后额外 1 轮三选一。');
+      '本阶段目标 +50%，完成后额外选择 1 次强化。');
   }
   for (const phase of ['transition', 'choose', 'reward']) {
     assert.equal(gambler({phase, gamblerTargetMultiplier: 1.5, gamblerRewardPending: false}),
-      '本轮奖励兑现中，额外 1 轮三选一已计入。');
+      '本轮奖励兑现中，额外 1 次强化选择已计入。');
   }
   assert.equal(gambler({phase: 'battle', gamblerTargetMultiplier: 1}), '已兑现，当前无待生效赌注。');
   assert.equal(gambler({phase: 'over', gamblerTargetMultiplier: 1.5, gamblerRewardPending: true}),

@@ -19,17 +19,6 @@
 .hud button{pointer-events:auto}
 .hud-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 #score{font-size:37px;display:inline-block;transform-origin:left center;will-change:transform}
-.feedback-demo{position:fixed;z-index:15;left:50%;bottom:max(20px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(560px,calc(100% - 48px));padding:14px 18px;border:1px solid var(--line);border-radius:18px;background:var(--panel);box-shadow:0 8px 30px #00000008}
-.demo-title{font-size:13px}.demo-title span{display:block;margin-top:5px;color:var(--muted);font-size:10px}
-.feedback-demo.demo-flow>.volume-row,.feedback-demo.demo-flow>.demo-enemy:not(.demo-endless),.feedback-demo.demo-flow .demo-actions button:not([data-demo=home]){display:none}
-.demo-actions{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 8px}.demo-actions button{border:1px solid var(--line);border-radius:20px;padding:8px 12px;font-size:11px;background:var(--bg)}
-.demo-enemy{display:flex;align-items:center;gap:8px;margin:10px 0 2px;font-size:11px}.demo-enemy label{color:var(--muted);white-space:nowrap}.demo-enemy select{min-width:0;flex:1;border:1px solid var(--line);border-radius:12px;padding:8px;color:var(--ink);background:var(--bg);font-size:11px}.demo-enemy button{flex-shrink:0;border:1px solid var(--line);border-radius:20px;padding:8px 12px;background:var(--bg);font-size:11px}:root[data-input-mode=keyboard] .demo-enemy select:focus-visible{outline:3px solid var(--enemy);outline-offset:3px}
-@media(max-height:520px){.feedback-demo{width:min(560px,calc(100% - 56px));left:auto;right:28px;bottom:28px;transform:none;padding:10px 12px}.demo-title span{display:none}.demo-actions{margin:8px 0 4px}.demo-actions button{padding:5px 8px}}
-.demo-actions button[data-demo=all-demos]{display:none}
-.feedback-demo.demo-compact{width:auto;max-width:calc(100% - 48px);left:50%;right:auto;bottom:max(20px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:0;border:0;background:transparent;box-shadow:none}
-.feedback-demo.demo-compact>:not(.demo-actions),.feedback-demo.demo-compact .demo-actions button{display:none}
-.feedback-demo.demo-compact .demo-actions{margin:0}
-.feedback-demo.demo-compact .demo-actions button[data-demo=all-demos]{display:block;height:40px;padding:8px 16px}
 .pause-button{width:40px;height:40px;margin-left:auto}
 .pause-button,.pause-button:hover,.pause-button:active,.pause-button:focus{background:transparent}
 .pause-button svg{width:18px;height:18px;stroke-width:2.5}
@@ -101,6 +90,12 @@
 .function-ball:hover{transform:scale(1.06)}.function-ball:active{transform:scale(.93)}
 .resume-ball{background:var(--play-ball,#9b89c5)}.settings-ball{background:#a9c575}.restart-ball{background:#e88c72}.home-ball{background:#91b8c7}.leave-ball{background:#e5c684}
 #pause-panel{animation:menu-fade .3s ease-out both}
+.modal-layer.pause-stack>.panel{position:relative;z-index:1}
+#pause-panel.pause-retained{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:0;animation:none;opacity:1}
+#pause-panel button{transition:transform .2s cubic-bezier(.2,1.7,.4,1),background .2s,opacity .3s ease-out}
+#pause-panel.pause-covered{pointer-events:none}
+#pause-panel.pause-covered button{opacity:0;pointer-events:none}
+.modal-layer.pause-stack.menu-switching .menu-panel:not(#menu-transition-panel){z-index:2}
 @keyframes menu-fade{from{opacity:0}to{opacity:1}}
 @media(max-width:420px){#pause-panel{padding:28px 22px;gap:19px}.pause-actions{grid-template-columns:repeat(2,58px);gap:17px}.function-ball{width:58px;height:58px}#pause-ball{width:55px;height:55px}.settings-heading .ball-anchor{width:34px;height:34px}.settings-heading{gap:8px}}
 @media(max-height:520px) and (orientation:landscape){#pause-panel{padding:24px 34px}.pause-actions{gap:15px}.settings-heading h2{font-size:21px}}
@@ -140,7 +135,7 @@
 #settings-panel.menu-measure{display:flex!important;position:fixed;top:0;left:20px;visibility:hidden;pointer-events:none}
 /* The opaque blank panel stays underneath both fading content layers. */
 .modal-layer.menu-switching .menu-panel{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
-.modal-layer.menu-switching .menu-panel:not(#menu-transition-panel){background:transparent;border-color:transparent;box-shadow:none;pointer-events:none;z-index:1}
+.modal-layer.menu-switching .menu-panel:not(#menu-transition-panel){background:transparent;border-color:transparent;box-shadow:none;pointer-events:none;z-index:1;will-change:opacity}
 .menu-switching .menu-panel:not(#menu-transition-panel) .settings-heading{border-color:transparent}
 .menu-switching .menu-panel:not(#menu-transition-panel) .close-button{visibility:hidden}
 
